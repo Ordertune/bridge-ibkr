@@ -1,0 +1,61 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          pytest -q || echo "no tests yet"
+
+      - name: Build EXE
+        run: python build.py
+
+      - name: Sign EXE (if cert available)
+        if: env.CERT_PFX_BASE64 != ''
+        env:
+          CERT_PFX_BASE64: ${{ secrets.CERT_PFX_BASE64 }}
+          CERT_PW: ${{ secrets.CERT_PW }}
+        shell: pwsh
+        run: |
+          [System.Convert]::FromBase64String($env:CERT_PFX_BASE64) | Set-Content cert.pfx -Encoding Byte
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" `
+                     | Sort-Object FullName -Descending | Select-Object -First 1
+          & $signtool.FullName sign /f cert.pfx /p $env:CERT_PW `
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+            dist/ordertune-bridge-ibkr.exe
+
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist/README.txt
+          Compress-Archive -Path dist/ordertune-bridge-ibkr.exe,dist/README.txt `
+            -DestinationPath dist/ordertune-bridge-ibkr-${{ github.ref_name }}.zip
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: |
+            dist/ordertune-bridge-ibkr.exe
+            dist/ordertune-bridge-ibkr-${{ github.ref_name }}.zip
+          generate_release_notes: true
