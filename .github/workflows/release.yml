@@ -74,6 +74,14 @@ jobs:
           }
           Write-Host "EXE starts, reaches its configuration check, and exits cleanly."
 
+          # `exit 0` is required, not decoration. GitHub appends
+          # `exit $LASTEXITCODE` to every pwsh step, and $LASTEXITCODE is still
+          # 1 here — from the Bridge, which is SUPPOSED to exit 1 on a missing
+          # bridge.env. Without this line the step inherits that 1 and fails
+          # after all three checks passed, which is how the first green run of
+          # this guard was reported as a failure.
+          exit 0
+
       - name: Sign EXE (if cert available)
         if: env.CERT_PFX_BASE64 != ''
         env:
