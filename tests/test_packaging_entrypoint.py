@@ -22,6 +22,7 @@ file as a script, in a subprocess, and look at what comes out.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,13 +32,29 @@ SRC = ROOT / "src"
 
 
 def _run(script: Path) -> subprocess.CompletedProcess[str]:
-    """Run a file as `__main__`, with `src` importable — as PyInstaller does."""
+    """Run a file as `__main__`, with `src` importable — as PyInstaller does.
+
+    The environment is INHERITED and only `PYTHONPATH` is overridden. Handing
+    `subprocess` a hand-built environment instead broke the release build on
+    Windows: without `SYSTEMROOT` the interpreter cannot reach the OS random
+    source and dies before running anything —
+
+        Fatal Python error: _Py_HashRandomization_Init: failed to get random
+        numbers to initialize Python
+
+    Both tests then saw that message instead of the import behaviour they
+    assert on, and reported a packaging fault that did not exist. A test
+    harness that strips the environment does not test a stricter case; it
+    tests a different program.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(SRC)
     return subprocess.run(
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        env=env,
     )
 
 
