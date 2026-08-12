@@ -25,13 +25,13 @@
   ],
 
   "contractVersion": "t1-78",
-  "bridgeVersion": "0.2.1",
+  "bridgeVersion": "0.2.2",
 
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.2.1",
+      "bridgeVersion": "0.2.2",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -45,7 +45,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.2.1",
+      "bridgeVersion": "0.2.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cashUsd": 24150.5,
