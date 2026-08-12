@@ -43,7 +43,18 @@ class IbkrClient:
         return self._ib.isConnected()
 
     def account_snapshot(self) -> AccountSnapshot:
-        """Read cash, equity, positions from IBKR."""
+        """Read cash, equity, positions from IBKR.
+
+        Ordertune's fields are named `cashUsd` and `equityUsd`, so only USD
+        values are accepted. Writing a EUR balance into a field with `Usd` in
+        its name would be a silent unit error, and position sizing downstream
+        would compute share counts from the wrong number.
+
+        A missing USD value is therefore reported as zero AND logged loudly.
+        Zero equity blocks order sizing on the platform, so the failure is
+        never silent — but until this warning existed, the only symptom was a
+        connection that looked perfectly healthy and never placed a trade.
+        """
         acct_values: list[AccountValue] = self._ib.accountValues()
         cash = 0.0
         equity = 0.0
@@ -52,6 +63,9 @@ class IbkrClient:
                 cash = float(v.value)
             elif v.tag == "NetLiquidation" and v.currency == "USD":
                 equity = float(v.value)
+
+        if equity == 0.0:
+            self._warn_missing_usd_equity(acct_values)
 
         portfolio: list[PortfolioItem] = self._ib.portfolio()
         positions = [
@@ -72,6 +86,46 @@ class IbkrClient:
             positions=positions,
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
         )
+
+
+    def _warn_missing_usd_equity(self, acct_values: list[AccountValue]) -> None:
+        """Say what WAS there when the USD account value is missing.
+
+        Three different situations produce a zero here and they need
+        different answers:
+
+          - no account values at all  → the subscription has not delivered yet
+          - values present, no USD    → the account runs in another currency
+          - USD present and zero      → the account really is empty
+
+        A bare "equity is 0" cannot tell them apart, and the user sees a
+        healthy connection either way. Naming the currencies that DID arrive
+        turns a silent dead end into something answerable.
+        """
+        if not acct_values:
+            log.warning(
+                "No account values received from TWS yet. The account "
+                "subscription may not have delivered; equity is reported as 0 "
+                "and Ordertune cannot size any order from it."
+            )
+            return
+
+        seen = sorted(
+            {v.currency for v in acct_values if v.tag == "NetLiquidation" and v.currency}
+        )
+        if seen and "USD" not in seen:
+            log.warning(
+                "NetLiquidation is reported in %s but not in USD. Ordertune "
+                "reads USD account values only, so equity is sent as 0 and no "
+                "order can be sized. Report this — the account currency needs "
+                "handling on the platform side.",
+                ", ".join(seen),
+            )
+        else:
+            log.warning(
+                "NetLiquidation in USD is 0. If the account is funded, check "
+                "that TWS is logged in to the intended account."
+            )
 
     def get_live_equity(self) -> float:
         """Shortcut für Sizing-Recompute."""
