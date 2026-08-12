@@ -62,6 +62,19 @@ _DISPATCH_MAP_LOCK = threading.Lock()
 # Set von bereits-final-reporteten dispatch_ids — verhindert Duplicate
 # result_order-Requests bei mehrfachem orderStatusEvent (partial → filled etc.).
 _REPORTED_TERMINAL: set[str] = set()
+
+# Was diese Bridge gegenüber IBKR kann. Die Feldnamen sind der Vertrag mit der
+# Plattform (capabilitiesSchema) — v0.1.0 schickte hier vier andere Schlüssel,
+# zwei davon existierten serverseitig überhaupt nicht.
+#
+# fractionalQtyPrecision=0: es werden ganze Stücke gehandelt. Steht die Zahl
+# falsch, rundet die Plattform Ordermengen auf Bruchteile, die IBKR ablehnt.
+IBKR_CAPABILITIES: dict[str, Any] = {
+    "supportsFractionalShares": False,
+    "fractionalQtyPrecision": 0,
+    "minNotionalUsd": None,
+    "supportsBulkSend": True,
+}
 _REPORTED_LOCK = threading.Lock()
 
 
@@ -111,7 +124,11 @@ def _handle_pending(
                     api.result_order(
                         order.dispatch_id,
                         status="rejected",
-                        reason="sizing_drift_exceeds_5pct",
+                        reason_code="sizing_drift",
+                        error_message=(
+                            f"Server-Menge {server_qty}, hier neu berechnet "
+                            f"{recomputed} bei Depotwert {live_equity:.2f}."
+                        ),
                     )
                 except Exception as exc:
                     log.error("result_order failed for %s: %s", order.dispatch_id, exc)
@@ -131,7 +148,7 @@ def _handle_pending(
                 dispatch_id_map[ib_order_id] = order.dispatch_id
             api.ack_order(
                 order.dispatch_id,
-                ib_order_id=ib_order_id,
+                broker_order_id=ib_order_id,
                 submitted_at=datetime.now(timezone.utc).isoformat(),
             )
             log.info(
@@ -148,7 +165,8 @@ def _handle_pending(
                 api.result_order(
                     order.dispatch_id,
                     status="rejected",
-                    reason=f"submit_error: {exc}",
+                    reason_code="rejected_by_broker",
+                    error_message=f"submit_error: {exc}",
                 )
             except Exception:
                 pass
@@ -165,19 +183,63 @@ def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
     try:
         snap = ibkr.account_snapshot()
         api.heartbeat(
-            {
-                "cash": snap.cash_usd,
-                "equity": snap.equity_usd,
-                "positions": snap.positions,
-                "gateway_status": snap.gateway_status,
-                "bridge_version": __version__,
-            }
+            cash_usd=snap.cash_usd,
+            equity_usd=snap.equity_usd,
+            positions=snap.positions,
+            gateway_status=snap.gateway_status,
+            capabilities=IBKR_CAPABILITIES,
         )
     except Exception as exc:
         log.warning("heartbeat push failed: %s", exc)
 
 
-TERMINAL_STATES = {"filled", "cancelled", "rejected"}
+TERMINAL_STATES = {"filled", "cancelled", "rejected", "expired"}
+
+# Order-Typen, bei denen ein Nicht-Zustandekommen normales Marktverhalten ist
+# und kein Fehler: der Limitpreis wurde schlicht nicht erreicht.
+_LIMIT_ORDER_TYPES = {"LMT", "LOC", "MOC"}
+
+
+def _derive_reason_code(mapped: str, filled: float, order_type: str) -> str | None:
+    """Warum kam die Order NICHT zustande?
+
+    `status` allein wirft Dinge zusammen, die für den Nutzer sehr
+    Verschiedenes bedeuten: eine nicht erreichte Limit-Order ist Marktalltag,
+    eine Ablehnung ist ein Problem. Ohne diese Unterscheidung steht am Ende
+    des Tages nur "cancelled" in der Oberfläche und niemand weiss, ob etwas
+    kaputt ist.
+    """
+    if mapped == "rejected":
+        return "rejected_by_broker"
+    if mapped in ("cancelled", "expired") and filled == 0:
+        if order_type in _LIMIT_ORDER_TYPES:
+            return "limit_not_reached"
+        return "expired" if mapped == "expired" else "cancelled_by_user"
+    return None
+
+
+def _sum_commission(trade: Any) -> float | None:
+    """Summe der Broker-Gebühren dieser Order, falls IBKR sie schon gemeldet hat.
+
+    Menge mal Preis ist der Brutto-Betrag, nicht das, was das Konto verlassen
+    hat. Die Gebühr kommt über den commissionReport der einzelnen Fills und
+    trifft gelegentlich später ein als der Status — dann bleibt es None und
+    die Plattform trägt nichts Falsches ein.
+    """
+    try:
+        fills = getattr(trade, "fills", None) or []
+        total = 0.0
+        seen = False
+        for f in fills:
+            report = getattr(f, "commissionReport", None)
+            value = getattr(report, "commission", None) if report else None
+            if value is None:
+                continue
+            total += float(value)
+            seen = True
+        return total if seen else None
+    except Exception:  # pragma: no cover - defensiv, nie handelskritisch
+        return None
 
 
 def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, str]):
@@ -217,19 +279,31 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
                     return
                 _REPORTED_TERMINAL.add(dispatch_id)
 
+        filled = float(getattr(trade.orderStatus, "filled", 0) or 0)
+        avg_price = float(getattr(trade.orderStatus, "avgFillPrice", 0) or 0)
+        order_type = str(getattr(trade.order, "orderType", "") or "")
+
         try:
             api.result_order(
                 dispatch_id,
                 status=mapped,
-                filled_qty=float(trade.orderStatus.filled or 0),
-                avg_fill_price=float(trade.orderStatus.avgFillPrice or 0),
+                # Diese Zahl trägt die Bestandsführung je Strategie. Ohne sie
+                # weiss die Plattform nicht, wie viele Stücke einer Strategie
+                # gehören, und ein späterer Exit verkauft die falsche Menge.
+                fill_qty=filled,
+                # 0.0 wäre eine Preisbehauptung für einen Handel, den es nicht
+                # gab. Nichts gefüllt heisst: kein Preis.
+                fill_price=avg_price if filled > 0 else None,
+                commission_usd=_sum_commission(trade),
                 filled_at=datetime.now(timezone.utc).isoformat(),
+                reason_code=_derive_reason_code(mapped, filled, order_type),
+                broker_order_id=order_id or None,
             )
             log.info(
                 "Result reported for dispatch %s: %s (filled=%s)",
                 dispatch_id,
                 mapped,
-                trade.orderStatus.filled,
+                filled,
             )
         except Exception as exc:
             log.error("result_order failed for %s: %s", dispatch_id, exc)
@@ -281,14 +355,7 @@ def main() -> int:
     )
 
     try:
-        api.handshake(
-            capabilities={
-                "supports_fractional_shares": False,
-                "supports_bulk_send": True,
-                "supports_bracket": True,
-                "supports_oca": True,
-            }
-        )
+        api.handshake(capabilities=IBKR_CAPABILITIES)
         log.info("Handshake successful — Bridge is active.")
     except Exception as exc:
         log.error("Handshake failed: %s", exc)
