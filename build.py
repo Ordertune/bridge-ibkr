@@ -25,6 +25,17 @@ def main() -> int:
     if build.exists():
         shutil.rmtree(build)
 
+    # Build `launcher.py`, NOT `src/ordertune_bridge_ibkr/main.py`.
+    #
+    # Pointing PyInstaller at a module inside the package makes that module the
+    # `__main__` script, and a `__main__` script has no parent package. The
+    # first relative import then fails with
+    #
+    #     ImportError: attempted relative import with no known parent package
+    #
+    # which is exactly how every build since 0.1.0 died on startup. `--paths`
+    # puts `src` on the analysis path so the launcher can import the package
+    # by name and PyInstaller bundles it as a package.
     cmd = [
         "pyinstaller",
         "--onefile",
@@ -33,7 +44,9 @@ def main() -> int:
         "--console",
         "--clean",
         "--noconfirm",
-        str(root / "src" / "ordertune_bridge_ibkr" / "main.py"),
+        "--paths",
+        str(root / "src"),
+        str(root / "launcher.py"),
     ]
     icon = root / "assets" / "icon.ico"
     if icon.exists():

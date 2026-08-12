@@ -23,13 +23,56 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      # `|| echo "no tests yet"` stood here and swallowed every failure — a
+      # red suite still cut a release. The contract tests are the only thing
+      # standing between a format change and a Bridge that cannot talk to the
+      # API, so they have to be able to stop the build.
       - name: Run tests
         run: |
           pip install pytest
-          pytest -q || echo "no tests yet"
+          pytest -q
 
       - name: Build EXE
         run: python build.py
+
+      # Start the artifact we are about to publish.
+      #
+      # v0.1.0 and v0.2.0 both shipped an executable that died on its first
+      # import, because PyInstaller was pointed at a module inside the package.
+      # Every test passed: they import the package the normal way, where
+      # relative imports work. Nothing ever launched the built EXE.
+      #
+      # With no bridge.env present the Bridge is expected to reject its
+      # configuration and exit 1. That is the success condition here — it
+      # proves the program got past its imports and into its own error
+      # handling. An ImportError or a bare traceback means we would be
+      # publishing a binary that cannot start.
+      - name: Smoke-test the built EXE
+        shell: pwsh
+        run: |
+          $probe = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "bridge-smoke") -Force
+          $exe = Join-Path $PWD "dist\ordertune-bridge-ibkr.exe"
+          Push-Location $probe
+          $out = & $exe 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Pop-Location
+
+          Write-Host "--- exit code: $code ---"
+          Write-Host $out
+
+          if ($out -match "ImportError" -or $out -match "Traceback \(most recent call last\)") {
+            Write-Error "The built EXE fails to start. Publishing this would ship a binary that dies on launch."
+            exit 1
+          }
+          if ($out -notmatch "bridge.env invalid") {
+            Write-Error "Expected the configuration check to run and reject the missing bridge.env. It did not — the startup path changed."
+            exit 1
+          }
+          if ($code -ne 1) {
+            Write-Error "Expected exit code 1 from a missing configuration, got $code."
+            exit 1
+          }
+          Write-Host "EXE starts, reaches its configuration check, and exits cleanly."
 
       - name: Sign EXE (if cert available)
         if: env.CERT_PFX_BASE64 != ''
