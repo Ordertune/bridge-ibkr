@@ -1,0 +1,116 @@
+{
+  "_comment": [
+    "T1-78 — KANONISCHES DRAHTFORMAT zwischen Ordertune Bridge und t1.ordertune.com.",
+    "",
+    "Diese Datei ist der Vertrag. Sie existiert zweimal, byte-gleich:",
+    "  - hier, im oeffentlichen Bridge-Repo   -> tests/contract/wire_fixtures.json",
+    "  - in der Plattform                     -> scripts/fixtures/bridge-wire-fixtures.json",
+    "",
+    "Beide Seiten pruefen gegen ihre eigene Kopie:",
+    "  - Python  tests/test_wire_contract.py       : der Client erzeugt genau diese Koerper",
+    "  - t1      scripts/verify-t1-78-wire-contract.ts : diese Koerper erfuellen die Zod-Schemata",
+    "",
+    "Aendert eine Seite das Format, schlaegt ihr eigener Test fehl. Aendert jemand",
+    "die Fixture, muessen beide Repos angefasst werden — genau der Moment, in dem",
+    "so eine Aenderung auffallen soll.",
+    "",
+    "WARUM ES DIESE DATEI GIBT: v0.1.0 schickte {connection_id, capabilities} an",
+    "den Handshake, der Server verlangte {bridgeVersion} und antwortete 422; der",
+    "Client hielt 422 fuer endgueltig und beendete sich. Es ist nie eine Bridge in",
+    "Produktion durchgekommen. Beim Ergebnis-Endpunkt war es schlimmer: dort war",
+    "serverseitig jedes Feld optional, der snake_case-Koerper validierte, der",
+    "Server antwortete 200 und schrieb Menge und Preis als NULL. Monatelang, ohne",
+    "eine einzige Fehlermeldung. Kein Test hat je beide Seiten gegeneinander",
+    "gehalten. Das ist dieser Test."
+  ],
+
+  "contractVersion": "t1-78",
+  "bridgeVersion": "0.2.0",
+
+  "handshake": {
+    "method": "POST",
+    "path": "/api/bridge/v1/handshake",
+    "body": {
+      "bridgeVersion": "0.2.0",
+      "capabilities": {
+        "supportsFractionalShares": false,
+        "fractionalQtyPrecision": 0,
+        "minNotionalUsd": null,
+        "supportsBulkSend": true
+      }
+    }
+  },
+
+  "heartbeat": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.2.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cashUsd": 24150.5,
+        "equityUsd": 98230.75,
+        "positions": [
+          {
+            "symbol": "AAPL",
+            "qty": 15.0,
+            "avgEntryPriceUsd": 187.42,
+            "marketValueUsd": 2900.25,
+            "unrealizedPlUsd": 88.95
+          }
+        ],
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        }
+      }
+    }
+  },
+
+  "orderAck": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/ack",
+    "body": {
+      "brokerOrderId": "1147",
+      "submittedAtClient": "2026-08-12T13:31:04.512Z"
+    }
+  },
+
+  "orderResultFilled": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/result",
+    "body": {
+      "status": "filled",
+      "brokerOrderId": "1147",
+      "fillQty": 5.0,
+      "fillPrice": 187.42,
+      "commissionUsd": 1.0,
+      "filledAtClient": "2026-08-12T13:31:07.884Z"
+    }
+  },
+
+  "orderResultLimitNotReached": {
+    "_comment": "Der von T1-78 geforderte Fall: Order kam NICHT zustande, weil der Limitpreis nicht erreicht wurde. fillPrice bleibt weg — ein Preis fuer einen Handel, den es nicht gab, waere eine Erfindung.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/result",
+    "body": {
+      "status": "cancelled",
+      "brokerOrderId": "1148",
+      "fillQty": 0.0,
+      "filledAtClient": "2026-08-12T20:00:01.010Z",
+      "reasonCode": "limit_not_reached"
+    }
+  },
+
+  "orderResultRejected": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/result",
+    "body": {
+      "status": "rejected",
+      "reasonCode": "sizing_drift",
+      "errorMessage": "Server-Menge 12, hier neu berechnet 17 bei Depotwert 98230.75."
+    }
+  }
+}
