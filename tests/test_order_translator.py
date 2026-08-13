@@ -61,3 +61,37 @@ def test_oca_group_applied_to_all():
     assert orders[1].ocaGroup == "oca-1"
     assert orders[0].ocaType == 1
     assert orders[1].ocaType == 1
+
+
+# ── T1-88b F1: die Gueltigkeitsdauer ────────────────────────────────────────
+#
+# Bleibt `tif` leer, ergaenzt TWS sie aus den Order-Voreinstellungen und
+# quittiert das mit Meldung 10349. ib_insync 0.9.86 fuehrt 10349 nicht in
+# seiner Warnliste und erklaert die Order daraufhin im eigenen Arbeitsspeicher
+# fuer storniert — am 2026-08-13 der Ausloeser fuer zwei Echtauftraege, die die
+# Plattform beide fuer storniert hielt.
+
+import pytest as _pytest
+
+from ordertune_bridge_ibkr.order_translator import DEFAULT_TIF
+
+
+@_pytest.mark.parametrize(
+    "intent",
+    [
+        {"side": "buy", "qty": 2, "orderType": "market"},
+        {"side": "buy", "qty": 2, "orderType": "day_limit", "lmtPrice": 166.38},
+        {"side": "sell", "qty": 2, "orderType": "loc", "lmtPrice": 166.38},
+        {"side": "sell", "qty": 2, "orderType": "moc"},
+    ],
+)
+def test_every_order_type_carries_a_time_in_force(intent) -> None:
+    """Jeder Ordertyp, nicht nur die beiden, die es schon hatten.
+
+    Vorher setzten ausschliesslich `loc` und `moc` eine Gueltigkeitsdauer.
+    Diese Zusicherung faellt auch dann, wenn jemand einen fuenften Ordertyp
+    ergaenzt und ihn wieder vergisst.
+    """
+    order = translate_intent(intent)
+    assert order.tif, f"{intent['orderType']} geht ohne Gueltigkeitsdauer raus"
+    assert order.tif == DEFAULT_TIF
