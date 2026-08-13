@@ -98,8 +98,9 @@ def test_heartbeat_body_matches_contract() -> None:
     # market_price) — die Uebersetzung ins Drahtformat ist genau das,
     # was hier geprueft wird.
     api.heartbeat(
-        cash_usd=snap["cashUsd"],
-        equity_usd=snap["equityUsd"],
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
         positions=[
             {
                 "symbol": pos["symbol"],
@@ -125,13 +126,67 @@ def test_heartbeat_body_matches_contract() -> None:
     assert "cpuLoad" not in rec.body
 
 
+@pytest.mark.parametrize(
+    "key", ["heartbeatForeignCurrency", "heartbeatUnknownCurrency"]
+)
+def test_heartbeat_carries_the_account_currency(key: str) -> None:
+    """T1-85 — Betrag und Einheit reisen zusammen.
+
+    Der EUR-Fall ist der Grund fuer diesen Vertragsbruch: bis 0.2.x hiess das
+    Feld `equityUsd`, der Client konnte darin keinen EUR-Betrag unterbringen
+    und meldete 0. Die Verbindung sah gesund aus und trug nie eine Order.
+
+    `null` ist der zweite Fall und keine Abkuerzung fuer USD: er heisst, dass
+    der Client die Waehrung nicht eindeutig bestimmen konnte.
+    """
+    expected = FIXTURES[key]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+    )
+    assert rec.body == expected
+    assert "currency" in rec.body["accountSnapshot"], (
+        "Die Waehrung ist Pflicht auf der Leitung. Fehlt sie, muesste die "
+        "Plattform sie erraten — genau das soll T1-85 beenden."
+    )
+
+
+def test_heartbeat_no_longer_speaks_the_0_2_x_dialect() -> None:
+    """Die alten Feldnamen duerfen nirgends mehr auftauchen.
+
+    Gegen das strikte Serverschema waere `equityUsd` ein 422. Das ist gewollt:
+    ein 0.2.x-Client soll laut scheitern statt einen EUR-Betrag als USD
+    einzuliefern.
+    """
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
+        positions=[],
+        gateway_status="connected",
+    )
+    keys = set(rec.body["accountSnapshot"].keys())
+    assert keys == {"cash", "equity", "currency", "positions"}
+    assert "equityUsd" not in keys and "cashUsd" not in keys
+
+
 def test_heartbeat_omits_unknown_broker_fields() -> None:
     """Serverschema ist strict — ein durchgereichtes Broker-Feld waere ein 422."""
     rec = _Recorder()
     api = _client(rec)
     api.heartbeat(
-        cash_usd=1.0,
-        equity_usd=2.0,
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
         positions=[
             {
                 "symbol": "MSFT",
@@ -223,7 +278,15 @@ def test_result_rejected_matches_contract() -> None:
 
 
 @pytest.mark.parametrize(
-    "key", ["handshake", "heartbeat", "orderAck", "orderResultFilled"]
+    "key",
+    [
+        "handshake",
+        "heartbeat",
+        "heartbeatForeignCurrency",
+        "heartbeatUnknownCurrency",
+        "orderAck",
+        "orderResultFilled",
+    ],
 )
 def test_no_snake_case_keys_on_the_wire(key: str) -> None:
     """Kein Feldname im Drahtformat darf einen Unterstrich tragen.

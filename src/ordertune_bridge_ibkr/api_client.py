@@ -227,8 +227,9 @@ class OrdertuneApiClient:
 
     def heartbeat(
         self,
-        cash_usd: float,
-        equity_usd: float,
+        cash: float,
+        equity: float,
+        currency: str | None,
         positions: list[dict[str, Any]],
         gateway_status: str,
         capabilities: dict[str, Any] | None = None,
@@ -239,10 +240,17 @@ class OrdertuneApiClient:
         `cpuLoad` ist optional und wird standardmässig NICHT gesendet. Es ist
         Telemetrie von Hardware, die uns nicht gehört, und niemand auf der
         Plattform liest sie.
+
+        T1-85: `cash` und `equity` hiessen bis 0.2.x `cashUsd` und `equityUsd`.
+        Die Einheit stand im Feldnamen und wurde nirgends geprüft — bei einem
+        EUR-Konto war sie schlicht falsch. `currency` ist Pflicht auf der
+        Leitung und darf `null` sein: das heisst „der Client konnte sie nicht
+        eindeutig bestimmen", nicht „ist schon USD".
         """
         snapshot: dict[str, Any] = {
-            "cashUsd": float(cash_usd),
-            "equityUsd": float(equity_usd),
+            "cash": float(cash),
+            "equity": float(equity),
+            "currency": currency,
             "positions": [_wire_position(p) for p in positions],
         }
         if capabilities is not None:

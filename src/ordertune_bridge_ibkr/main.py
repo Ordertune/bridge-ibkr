@@ -183,8 +183,9 @@ def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
     try:
         snap = ibkr.account_snapshot()
         api.heartbeat(
-            cash_usd=snap.cash_usd,
-            equity_usd=snap.equity_usd,
+            cash=snap.cash,
+            equity=snap.equity,
+            currency=snap.currency,
             positions=snap.positions,
             gateway_status=snap.gateway_status,
             capabilities=IBKR_CAPABILITIES,

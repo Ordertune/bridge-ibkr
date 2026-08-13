@@ -16,10 +16,52 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class AccountSnapshot:
-    cash_usd: float
-    equity_usd: float
+    """T1-85 — Betrag und Einheit gehoeren zusammen.
+
+    Bis 0.2.x hiessen diese Felder `cash_usd` und `equity_usd`. Der Name trug
+    eine Behauptung ueber die Einheit, die der Client gar nicht pruefen konnte,
+    und die bei einem deutschen IBKR-Konto — EUR-basiert, der Normalfall —
+    schlicht falsch war. Der einzige Ausweg war, 0 zu melden und zu warnen.
+
+    Jetzt reist die Einheit mit. `currency` ist `None`, wenn der Client sie
+    nicht eindeutig bestimmen konnte; das ist eine Aussage und keine Vermutung.
+    """
+
+    cash: float
+    equity: float
+    currency: str | None
     positions: list[dict[str, Any]]
     gateway_status: str
+
+
+# Sammelzeilen des Kontos, die keine echte Waehrung benennen.
+_AGGREGATE_CURRENCY_MARKERS = {"BASE", ""}
+
+
+def resolve_account_currency(acct_values: list[AccountValue]) -> str | None:
+    """Die Waehrung, in der das Konto seinen Depotwert meldet.
+
+    IBKR fuehrt zu `NetLiquidation` eine Zeile je Waehrungssegment plus eine
+    Sammelzeile mit der Kennung `BASE`. Die Sammelzeile benennt keine Waehrung
+    und faellt deshalb raus.
+
+    Bleibt genau eine Waehrung uebrig, ist sie die Antwort. Bleiben mehrere,
+    gibt es hier bewusst **keine** Antwort: welche davon der Depotwert des
+    Kontos ist und welche ein Segment darin, laesst sich aus diesen Zeilen
+    nicht entscheiden. Ein Fehlgriff waere ein stiller Faktor auf jede
+    Stueckzahl — genau die Fehlerklasse, gegen die T1-78 angetreten ist.
+    Lieber `None`, das die Plattform laut blockiert.
+    """
+    currencies = {
+        v.currency.upper()
+        for v in acct_values
+        if v.tag == "NetLiquidation"
+        and v.currency
+        and v.currency.upper() not in _AGGREGATE_CURRENCY_MARKERS
+    }
+    if len(currencies) == 1:
+        return next(iter(currencies))
+    return None
 
 
 class IbkrClient:
@@ -43,29 +85,33 @@ class IbkrClient:
         return self._ib.isConnected()
 
     def account_snapshot(self) -> AccountSnapshot:
-        """Read cash, equity, positions from IBKR.
+        """Read cash, equity, currency and positions from IBKR.
 
-        Ordertune's fields are named `cashUsd` and `equityUsd`, so only USD
-        values are accepted. Writing a EUR balance into a field with `Usd` in
-        its name would be a silent unit error, and position sizing downstream
-        would compute share counts from the wrong number.
+        T1-85: bis 0.2.x hat diese Methode ausschliesslich nach USD-Zeilen
+        gesucht und bei einem EUR-Konto 0 gemeldet — laut, aber unbrauchbar.
+        Sie meldet jetzt den tatsaechlichen Depotwert **samt** Waehrung und
+        ueberlaesst der Plattform die Entscheidung, ob daraus eine Stueckzahl
+        werden darf.
 
-        A missing USD value is therefore reported as zero AND logged loudly.
-        Zero equity blocks order sizing on the platform, so the failure is
-        never silent — but until this warning existed, the only symptom was a
-        connection that looked perfectly healthy and never placed a trade.
+        Beide Betraege stammen aus **derselben** Waehrung. Cash aus einem
+        Segment und Depotwert aus einem anderen zu mischen ergaebe ein Paar,
+        das zueinander nicht passt, und niemand saehe es an den Zahlen.
         """
         acct_values: list[AccountValue] = self._ib.accountValues()
+        currency = resolve_account_currency(acct_values)
+
         cash = 0.0
         equity = 0.0
-        for v in acct_values:
-            if v.tag == "TotalCashValue" and v.currency == "USD":
-                cash = float(v.value)
-            elif v.tag == "NetLiquidation" and v.currency == "USD":
-                equity = float(v.value)
+        if currency is not None:
+            for v in acct_values:
+                if v.currency.upper() != currency:
+                    continue
+                if v.tag == "TotalCashValue":
+                    cash = float(v.value)
+                elif v.tag == "NetLiquidation":
+                    equity = float(v.value)
 
-        if equity == 0.0:
-            self._warn_missing_usd_equity(acct_values)
+        self._log_account_currency(acct_values, currency, equity)
 
         portfolio: list[PortfolioItem] = self._ib.portfolio()
         positions = [
@@ -81,56 +127,93 @@ class IbkrClient:
         ]
 
         return AccountSnapshot(
-            cash_usd=cash,
-            equity_usd=equity,
+            cash=cash,
+            equity=equity,
+            currency=currency,
             positions=positions,
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
         )
 
 
-    def _warn_missing_usd_equity(self, acct_values: list[AccountValue]) -> None:
-        """Say what WAS there when the USD account value is missing.
+    def _log_account_currency(
+        self,
+        acct_values: list[AccountValue],
+        currency: str | None,
+        equity: float,
+    ) -> None:
+        """Sag, was da war — vier Lagen, die sehr Verschiedenes bedeuten.
 
-        Three different situations produce a zero here and they need
-        different answers:
+          - keine Kontowerte           → die Subskription hat noch nicht geliefert
+          - Waehrung nicht eindeutig   → mehrere Segmente, keine Entscheidung
+          - Waehrung nicht USD         → das Konto laeuft in fremder Waehrung
+          - USD und Depotwert 0        → das Konto ist wirklich leer
 
-          - no account values at all  → the subscription has not delivered yet
-          - values present, no USD    → the account runs in another currency
-          - USD present and zero      → the account really is empty
-
-        A bare "equity is 0" cannot tell them apart, and the user sees a
-        healthy connection either way. Naming the currencies that DID arrive
-        turns a silent dead end into something answerable.
+        Ein blosses "equity is 0" kann sie nicht auseinanderhalten, und der
+        Nutzer sieht in allen vier Faellen eine gesunde Verbindung.
         """
         if not acct_values:
             log.warning(
                 "No account values received from TWS yet. The account "
-                "subscription may not have delivered; equity is reported as 0 "
-                "and Ordertune cannot size any order from it."
+                "subscription may not have delivered; Ordertune cannot size "
+                "any order until it does."
             )
             return
 
-        seen = sorted(
-            {v.currency for v in acct_values if v.tag == "NetLiquidation" and v.currency}
-        )
-        if seen and "USD" not in seen:
-            log.warning(
-                "NetLiquidation is reported in %s but not in USD. Ordertune "
-                "reads USD account values only, so equity is sent as 0 and no "
-                "order can be sized. Report this — the account currency needs "
-                "handling on the platform side.",
-                ", ".join(seen),
+        if currency is None:
+            seen = sorted(
+                {
+                    v.currency.upper()
+                    for v in acct_values
+                    if v.tag == "NetLiquidation" and v.currency
+                }
             )
-        else:
+            log.warning(
+                "Could not determine the account currency unambiguously. "
+                "NetLiquidation is reported for: %s. Ordertune will block "
+                "order sizing rather than guess. Please report this.",
+                ", ".join(seen) if seen else "nothing",
+            )
+            return
+
+        if currency != "USD":
+            log.warning(
+                "This account is denominated in %s, not USD. The value is "
+                "reported to Ordertune as %s %.2f. Ordertune sizes positions "
+                "against USD entry prices and does not convert yet, so order "
+                "sizing stays blocked in full-equity mode. A fixed base "
+                "amount in USD works in the meantime.",
+                currency,
+                currency,
+                equity,
+            )
+            return
+
+        if equity == 0.0:
             log.warning(
                 "NetLiquidation in USD is 0. If the account is funded, check "
                 "that TWS is logged in to the intended account."
             )
 
     def get_live_equity(self) -> float:
-        """Shortcut für Sizing-Recompute."""
-        for v in self._ib.accountValues():
-            if v.tag == "NetLiquidation" and v.currency == "USD":
+        """Depotwert in USD fuer den Sizing-Abgleich — sonst 0.
+
+        T1-85: der Abgleich haelt die serverseitig gerechnete Menge gegen eine
+        hier neu gerechnete. Beide Rechnungen teilen durch einen Einstiegspreis
+        in USD. Ein Depotwert in EUR wuerde die Gegenrechnung um den Wechselkurs
+        verschieben und die Order als `sizing_drift` ablehnen — mit einer
+        Begruendung, die nach einem Mengenfehler klingt und in Wahrheit ein
+        Einheitenfehler waere.
+
+        Deshalb 0 bei fremder Waehrung: der Aufrufer ueberspringt den Abgleich
+        (`live_equity > 0`) statt falsch zu urteilen. Stillschweigend ist das
+        nicht — der Heartbeat warnt im Minutentakt, und in `full_equity` laesst
+        die Plattform es gar nicht erst bis hierher kommen.
+        """
+        acct_values: list[AccountValue] = self._ib.accountValues()
+        if resolve_account_currency(acct_values) != "USD":
+            return 0.0
+        for v in acct_values:
+            if v.tag == "NetLiquidation" and v.currency.upper() == "USD":
                 return float(v.value)
         return 0.0
 
