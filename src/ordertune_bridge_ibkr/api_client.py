@@ -61,13 +61,13 @@ def _log_error_body(method: str, url: str, r: httpx.Response) -> None:
     try:
         body = r.text[:_ERROR_BODY_MAX_CHARS]
     except Exception:  # pragma: no cover - defensiv
-        body = "<nicht lesbar>"
+        body = "<unreadable>"
     log.error("http %s %s -> %d: %s", method, url, r.status_code, body)
     if r.status_code == 422:
         log.error(
-            "422 bedeutet: dieser Bridge-Build und die Plattform sind sich "
-            "über das Nachrichtenformat nicht einig. Das behebt kein Neustart. "
-            "Aktualisiere die Bridge auf die neueste Version: "
+            "A 422 means this Bridge build and the platform disagree on the "
+            "message format. Restarting will not fix it. Update the Bridge to "
+            "the current release: "
             "https://github.com/Ordertune/bridge-ibkr/releases/latest"
         )
 
