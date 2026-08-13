@@ -94,6 +94,94 @@ def is_us_market_hours(now_utc: datetime | None = None) -> bool:
 # event-thread) reads. Lock schützt gegen Race während parallel-submits.
 _DISPATCH_MAP_LOCK = threading.Lock()
 
+# T1-88c — die Rueckrichtung: dispatch_id → Trade.
+#
+# Fuer eine Zustandsmeldung genuegt `orderId → dispatch_id`. Ein Storno
+# braucht das Gegenteil: zu einer dispatch_id den Auftrag, den man IBKR
+# hinhalten kann. Beide Ablagen stehen unter demselben Schloss, damit sie
+# nicht auseinanderlaufen.
+_TRADES_BY_DISPATCH: dict[str, Any] = {}
+
+# Praefix, mit dem jeder Auftrag seine dispatch_id bei IBKR hinterlegt
+# (`orderRef = "ot-<dispatchId>"`). Bis T1-88c wurde er gesetzt und nie
+# gelesen — dabei ist er die einzige Angabe, die einen Neustart der Bridge
+# ueberlebt: `orderId` ist sitzungsgebunden, die Ablagen oben sind fluechtig.
+ORDER_REF_PREFIX = "ot-"
+
+
+def dispatch_id_from_order_ref(order_ref: str | None) -> str | None:
+    """Liest die dispatch_id aus dem Auftragsvermerk, oder `None`.
+
+    Fremde Auftraege im selben Konto — von Hand gestellt oder von einem
+    anderen Werkzeug — tragen den Vermerk nicht und werden hier
+    stillschweigend uebergangen. Sie gehoeren uns nicht.
+    """
+    if not order_ref or not order_ref.startswith(ORDER_REF_PREFIX):
+        return None
+    dispatch_id = order_ref[len(ORDER_REF_PREFIX) :].strip()
+    return dispatch_id or None
+
+
+def register_trade(
+    dispatch_id_map: dict[int, str], dispatch_id: str, trade: Any
+) -> None:
+    """Haelt einen Auftrag in beiden Richtungen fest."""
+    order_id = int(getattr(trade.order, "orderId", 0) or 0)
+    with _DISPATCH_MAP_LOCK:
+        if order_id:
+            dispatch_id_map[order_id] = dispatch_id
+        _TRADES_BY_DISPATCH[dispatch_id] = trade
+
+
+def trade_for_dispatch(dispatch_id: str) -> Any | None:
+    with _DISPATCH_MAP_LOCK:
+        return _TRADES_BY_DISPATCH.get(dispatch_id)
+
+
+def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
+    """T1-88c — die Zuordnung nach einem Neustart wiederherstellen.
+
+    ## Warum das vor dem Stornoweg kommt und nicht danach
+
+    Beide Ablagen leben im Arbeitsspeicher. Startet die Bridge neu — und sie
+    startet neu, weil IBKR TWS taeglich gegen 05:00 MEZ abmeldet —, ist jeder
+    vorher abgesendete Auftrag unauffindbar. Ohne diesen Wiederaufbau koennte
+    ein Storno den Auftrag nicht finden und muesste antworten: „nicht
+    gefunden". Genau die Sorte Antwort, aus der der Phantom-Storno entstanden
+    ist.
+
+    Der Vermerk `ot-<dispatchId>` steht seit T1-56 an jedem Auftrag und wurde
+    nie zurueckgelesen. Er ist die einzige Angabe, die IBKR fuer uns aufbewahrt.
+    """
+    try:
+        trades = ibkr.open_trades()
+    except Exception as exc:
+        log.error(
+            "Offene Auftraege liessen sich nicht abfragen: %s. Ein Storno "
+            "koennte einen vor dem Neustart abgesendeten Auftrag nicht finden.",
+            exc,
+        )
+        return 0
+
+    wiederhergestellt = 0
+    for trade in trades:
+        dispatch_id = dispatch_id_from_order_ref(
+            getattr(getattr(trade, "order", None), "orderRef", None)
+        )
+        if not dispatch_id:
+            continue
+        register_trade(dispatch_id_map, dispatch_id, trade)
+        wiederhergestellt += 1
+
+    if wiederhergestellt:
+        log.info(
+            "%d offene Auftraege ueber ihren Vermerk wieder zugeordnet.",
+            wiederhergestellt,
+        )
+    else:
+        log.info("Keine offenen Auftraege von uns bei IBKR.")
+    return wiederhergestellt
+
 # T1-88b F3 — was zu einem Dispatch bereits als Endzustand gemeldet wurde.
 #
 # Frueher eine Menge von dispatch_ids: einmal drin, nie wieder gemeldet. Das
@@ -238,8 +326,10 @@ def _handle_pending(
             # HB-1: Register mapping BEFORE ack so the status-callback can
             # find the dispatch_id if IBKR fires a fill-event faster than
             # our ack-round-trip.
-            with _DISPATCH_MAP_LOCK:
-                dispatch_id_map[ib_order_id] = order.dispatch_id
+            #
+            # T1-88c: haelt jetzt beide Richtungen fest — die Rueckrichtung
+            # braucht der Storno, um den Auftrag ueberhaupt zu finden.
+            register_trade(dispatch_id_map, order.dispatch_id, trade)
             api.ack_order(
                 order.dispatch_id,
                 broker_order_id=ib_order_id,
@@ -266,8 +356,57 @@ def _handle_pending(
                 pass
 
     for dispatch_id in resp.cancelling:
-        # TODO(T1-56-Phase2): implement cancel via ib_insync
-        log.info("Cancel requested for dispatch %s (not yet implemented)", dispatch_id)
+        _handle_cancel(ibkr, dispatch_id)
+
+
+# Dispatches, fuer die schon ein Storno an IBKR ging. Die Plattform liefert
+# sie bei jedem Abruf erneut aus, bis der Broker bestaetigt hat — ohne diese
+# Merkung ginge alle fuenf Sekunden ein weiterer Storno raus.
+_CANCEL_SENT: set[str] = set()
+# Dispatches, zu denen kein Auftrag auffindbar war. Nur damit die Warnung
+# einmal erscheint statt im Fuenf-Sekunden-Takt.
+_CANCEL_UNRESOLVED: set[str] = set()
+
+
+def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
+    """T1-88c — einen Storno an IBKR schicken. Und sonst nichts.
+
+    Es wird bewusst NICHTS an die Plattform gemeldet. Ob aus der Anfrage eine
+    Stornierung wird, entscheidet IBKR; die Antwort kommt als
+    Zustandsereignis mit Fehlercode 202 und laeuft durch dieselbe Pruefung,
+    die seit T1-88b den Phantom-Storno abfaengt. Hier einen Erfolg zu melden
+    waere derselbe Fehler mit umgekehrtem Vorzeichen.
+    """
+    if dispatch_id in _CANCEL_SENT:
+        return
+
+    trade = trade_for_dispatch(dispatch_id)
+    if trade is None:
+        if dispatch_id not in _CANCEL_UNRESOLVED:
+            _CANCEL_UNRESOLVED.add(dispatch_id)
+            log.warning(
+                "Storno fuer Dispatch %s angefordert, aber kein zugehoeriger "
+                "Auftrag auffindbar. Er ist bei IBKR vermutlich nicht mehr "
+                "offen. Falls doch: bitte in TWS stornieren.",
+                dispatch_id,
+            )
+        return
+
+    try:
+        ibkr.cancel_order(trade.order)
+        _CANCEL_SENT.add(dispatch_id)
+        log.info(
+            "Storno fuer Dispatch %s an IBKR geschickt. Gemeldet wird er erst, "
+            "wenn der Broker ihn bestaetigt.",
+            dispatch_id,
+        )
+    except Exception as exc:
+        log.error(
+            "Storno fuer Dispatch %s ist gescheitert: %s. Wird beim naechsten "
+            "Abruf erneut versucht.",
+            dispatch_id,
+            exc,
+        )
 
 
 def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
@@ -710,6 +849,11 @@ def main() -> int:
 
     dispatch_id_map: dict[int, str] = {}
     ibkr.subscribe_execution_callback(_make_on_order_status(api, dispatch_id_map))
+
+    # T1-88c: VOR der Schleife. Ohne diesen Schritt ist nach jedem Neustart
+    # jeder vorher abgesendete Auftrag unauffindbar — und IBKR meldet TWS
+    # taeglich gegen 05:00 MEZ zwangsweise ab.
+    rebuild_dispatch_map(ibkr, dispatch_id_map)
 
     stop = threading.Event()
 

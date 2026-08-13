@@ -222,6 +222,26 @@ class IbkrClient:
         trade = self._ib.placeOrder(contract, order)
         return trade
 
+    def cancel_order(self, order: Order) -> None:
+        """T1-88c — Storno an IBKR schicken.
+
+        Meldet NICHTS zurueck. Ob aus der Anfrage eine Stornierung wird,
+        entscheidet IBKR, und die Antwort kommt als Zustandsereignis mit
+        Fehlercode 202 — dort, wo `cancel_is_genuine` sie prueft. Diese
+        Methode hier einen Erfolg behaupten zu lassen waere derselbe Fehler
+        wie der Phantom-Storno aus T1-88b, nur mit umgekehrtem Vorzeichen.
+        """
+        self._ib.cancelOrder(order)
+
+    def open_trades(self) -> list[Any]:
+        """Alle bei IBKR offenen Auftraege, frisch erfragt.
+
+        `reqAllOpenOrders` fragt TWS, statt einen lokalen Zwischenspeicher zu
+        lesen — nach einem Neustart der Bridge ist der leer, und genau dann
+        wird diese Methode gebraucht.
+        """
+        return list(self._ib.reqAllOpenOrders())
+
     def subscribe_execution_callback(self, cb: Any) -> None:
         """Register callback for order status updates."""
         self._ib.execDetailsEvent += cb  # type: ignore[operator]
