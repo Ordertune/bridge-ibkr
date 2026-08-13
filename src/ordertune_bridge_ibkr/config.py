@@ -30,7 +30,7 @@ class BridgeConfig(BaseSettings):
     )
     ordertune_bridge_token: str = Field(
         min_length=32,
-        description="Bearer-Token für /api/bridge/v1/* (from Wizard).",
+        description="Bearer token for /api/bridge/v1/* (from the setup wizard).",
     )
     ordertune_bridge_connection_id: str = Field(
         min_length=1,
@@ -40,19 +40,19 @@ class BridgeConfig(BaseSettings):
     # ── IBKR TWS/Gateway (lokaler Socket) ──────────────────────────────
     ibkr_gateway_host: str = Field(
         default="127.0.0.1",
-        description="Host von TWS oder IB Gateway (typischerweise 127.0.0.1).",
+        description="Host running TWS or IB Gateway (normally 127.0.0.1).",
     )
     ibkr_gateway_port: int = Field(
         default=7497,
-        description="Socket-Port. Paper=7497, Live=7496 (Gateway) / 7497,7496 (TWS).",
+        description="Socket port. Read it out of the API settings in TWS or IB Gateway — it is a setting there and does not follow from the account type. IBKR defaults: TWS 7497 paper / 7496 live, Gateway 4002 paper / 4001 live.",
     )
     ibkr_trading_mode: Literal["paper", "live"] = Field(
         default="paper",
-        description="Nur informational — der tatsächliche Mode wird vom TWS/Gateway-Login vorgegeben.",
+        description="Label only. The actual trading mode comes from the account you log in to in TWS or IB Gateway; this value changes nothing.",
     )
     ibkr_client_id: int = Field(
         default=17,
-        description="IBKR API Client-ID. Muss unique pro TWS-Connection sein.",
+        description="IBKR API client id. Must be unique per connection to one TWS or Gateway instance.",
     )
 
     # ── Optional overrides ──────────────────────────────────────────────
@@ -60,7 +60,7 @@ class BridgeConfig(BaseSettings):
         default=100,
         ge=0,
         le=5000,
-        description="Delay zwischen unabhängigen Order-Submits (Rate-Limit-Schutz).",
+        description="Delay between independent order submits, in milliseconds. Protects against IBKR rate limits.",
     )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(default="INFO")
     update_check_enabled: bool = Field(default=True)
