@@ -26,17 +26,45 @@ Empfehlung: mindestens 2 vCPU, 4 GB RAM, 40 GB SSD. Standort Frankfurt oder Amst
 4. Doppelklick auf `ordertune-bridge-ibkr.exe` — die Bridge startet in einem Konsolenfenster
 5. Bei erfolgreichem Handshake steht in der Konsole: `Handshake successful — Bridge is active.`
 
-## Auto-Start bei Login (empfohlen)
+## Dauerbetrieb: nicht an Ihre Anmeldung binden
 
-Windows Task Scheduler:
+Das Wichtigste zuerst, weil es die häufigste Fehlbedienung ist: **ein Konsolenfenster und eine TWS-Instanz gehören zu Ihrer Windows-Sitzung.** Melden Sie sich ab, sind beide weg — und die Bridge verpasst die US-Eröffnung, ohne dass irgendwo eine Fehlermeldung steht.
 
-1. Task Scheduler öffnen → **Create Basic Task**
-2. Trigger: **When I log on**
-3. Action: **Start a program** → `C:\ordertune-bridge\ordertune-bridge-ibkr.exe`
-4. Start in: `C:\ordertune-bridge\`
-5. Speichern
+### RDP: trennen, nicht abmelden
 
-Alternativ als geplanter Task, der beim VPS-Boot startet — dann muss der VPS aber automatisches Login haben (Autologon), was Sicherheitsrisiko birgt.
+- Das **X** am RDP-Fenster *trennt* die Sitzung. Programme laufen weiter.
+- **Abmelden / Sign out** beendet alles.
+
+Viele Windows-Server-Images melden getrennte Sitzungen zusätzlich nach einigen Minuten automatisch ab. Das abschalten:
+
+`gpedit.msc` → Computerkonfiguration → Administrative Vorlagen → Windows-Komponenten → Remotedesktopdienste → Remotedesktopsitzungs-Host → **Sitzungszeitlimits** → „Zeitlimit für getrennte Sitzungen festlegen" → **Deaktiviert**.
+
+### TWS: Auto-Restart statt Auto-Logoff
+
+In TWS unter Configuration → **Lock and Exit** gibt es beide Varianten. Auf **Auto restart** stellen: TWS kommt nach IBKRs täglicher Zwangsabmeldung (~05:00 MEZ) von selbst zurück, ohne erneute Eingabe der Zugangsdaten. Für vollautomatischen Login siehe [SETUP_IBC.md](SETUP_IBC.md).
+
+### Bridge als Windows-Dienst (empfohlen)
+
+Der robusteste Weg, weil er von keiner Anmeldung abhängt. Mit [NSSM](https://nssm.cc/):
+
+```powershell
+nssm install OrdertuneBridge C:\ordertune-bridge\ordertune-bridge-ibkr.exe
+nssm set OrdertuneBridge AppDirectory C:\ordertune-bridge
+nssm set OrdertuneBridge Start SERVICE_AUTO_START
+nssm start OrdertuneBridge
+```
+
+Das Protokoll finden Sie dann nicht mehr im Konsolenfenster, sondern im `logs/`-Ordner neben der EXE.
+
+### Alternative: geplanter Task beim Systemstart
+
+Wenn Sie keinen Dienst wollen — Task Scheduler, aber mit den richtigen Optionen:
+
+- Trigger: **Beim Systemstart** (nicht „Bei Anmeldung")
+- **Unabhängig von der Benutzeranmeldung ausführen** ankreuzen
+- **Mit höchsten Privilegien ausführen**
+
+Ein Task mit Trigger „Bei Anmeldung" stirbt mit der Sitzung und ist für Dauerbetrieb ungeeignet. Frühere Fassungen dieser Anleitung haben genau das empfohlen; das war falsch.
 
 ## Update-Prozedur
 
