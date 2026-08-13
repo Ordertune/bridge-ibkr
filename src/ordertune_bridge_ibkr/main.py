@@ -7,8 +7,33 @@ Startup:
   4. Compute hardware-fingerprint
   5. Connect to IBKR TWS/Gateway
   6. Handshake against Ordertune server
-  7. Schedule heartbeat (60s) + pending-poll (5s market / 60s off)
-  8. Run event loop forever until SIGINT/SIGTERM
+  7. Run one loop on THIS thread: heartbeat (60s) + pending-poll (5s market
+     / 60s off), until SIGINT/SIGTERM
+
+## Warum eine Schleife und kein Zeitgeber (T1-88)
+
+Bis 0.3.0 liefen Heartbeat und Auftragsabruf in einem `BackgroundScheduler`,
+also in Arbeiter-Threads. `ib_insync` haengt aber an einer asyncio-Schleife,
+und die gehoert dem Thread, der sie startet — hier dem Hauptthread. Ein
+Auftrag aus einem Arbeiter-Thread findet sie nicht:
+
+    [ERROR] submit failed for dispatch 11b415a3-...:
+    There is no current event loop in thread 'ThreadPoolExecutor-0_0'.
+
+Aufgefallen ist es erst am 2026-08-13, beim allerersten echten Absenden. Der
+Heartbeat war die ganze Zeit gruen, weil `accountValues()` und `portfolio()`
+nur zwischengespeicherten Zustand lesen und die Schleife gar nicht anfassen;
+das Abholen offener Auftraege ist reines HTTP. **Nur das Absenden** fasst
+IBKR wirklich an — und genau dieser eine Weg war nie gegangen worden.
+
+Es ist deshalb kein Fehler, den man an der Absendestelle repariert. Solange
+IBKR-Arbeit ueberhaupt in fremden Threads stattfinden kann, entsteht er beim
+naechsten Aufruf wieder. Die Schleife hier ist die Bauweise, die `ib_insync`
+vorsieht: ein Thread, eine Schleife, alle Broker-Aufrufe darin.
+
+Der Preis ist bekannt und klein: die HTTP-Aufrufe halten die Schleife kurz an,
+in dieser Zeit werden Rueckmeldungen von IBKR nicht verarbeitet. Sie gehen
+nicht verloren — sie warten im Socket und kommen beim naechsten `sleep()`.
 """
 from __future__ import annotations
 
@@ -16,11 +41,10 @@ import logging
 import signal
 import sys
 import threading
+import time
 from datetime import datetime, time as dt_time, timezone
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
-
-from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import __version__
 from .api_client import OrdertuneApiClient
@@ -43,6 +67,17 @@ log = logging.getLogger(__name__)
 NYSE_TZ = ZoneInfo("America/New_York")
 NYSE_POLL_START = dt_time(9, 0)   # 30 Min vor Open
 NYSE_POLL_END = dt_time(16, 30)   # 30 Min nach Close
+
+
+HEARTBEAT_INTERVAL_S = 60.0
+PENDING_INTERVAL_MARKET_S = 5.0
+PENDING_INTERVAL_OFF_S = 60.0
+
+# Wie fein die Schleife tickt. Klein genug, dass ein 5-Sekunden-Abruf nicht
+# merklich spaeter kommt; gross genug, dass Leerlauf nichts kostet. Waehrend
+# dieses Aufrufs laeuft die ib_insync-Schleife — das ist der Moment, in dem
+# Rueckmeldungen von IBKR verarbeitet werden.
+LOOP_TICK_S = 0.25
 
 
 def is_us_market_hours(now_utc: datetime | None = None) -> bool:
@@ -316,6 +351,49 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
     return on_status
 
 
+def run_loop(
+    ibkr: Any,
+    heartbeat: Callable[[], None],
+    pending: Callable[[], None],
+    stop: threading.Event,
+    *,
+    market_hours: Callable[[], bool] = is_us_market_hours,
+    tick_s: float = LOOP_TICK_S,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """Der einzige Thread, der IBKR anfassen darf.
+
+    Beide Aufgaben laufen hier, nicht in einem Zeitgeber — die Begruendung
+    steht im Kopf dieses Moduls. Als eigene Funktion, damit die Zusicherungen
+    sie ohne TWS gegen Attrappen fahren koennen; das ist die einzige Art, den
+    Fehler von 0.3.0 dauerhaft festzunageln.
+
+    Die naechste Faelligkeit wird NACH dem Aufruf gestellt, nicht davor. Sonst
+    laesst ein HTTP-Aufruf, der laenger dauert als das Intervall, die Aufgabe
+    sofort erneut feuern — und ein haengender Server wuerde die Schleife in
+    eine Dauerschleife ziehen, statt sie nur zu verzoegern.
+    """
+    next_heartbeat = 0.0
+    next_pending = 0.0
+
+    while ibkr.is_connected() and not stop.is_set():
+        if monotonic() >= next_heartbeat:
+            heartbeat()
+            next_heartbeat = monotonic() + HEARTBEAT_INTERVAL_S
+
+        if monotonic() >= next_pending:
+            pending()
+            next_pending = monotonic() + (
+                PENDING_INTERVAL_MARKET_S
+                if market_hours()
+                else PENDING_INTERVAL_OFF_S
+            )
+
+        # Pumpt die ib_insync-Schleife. Ein blosses time.sleep() wuerde hier
+        # die Rueckmeldungen von IBKR aussperren.
+        ibkr.sleep(tick_s)
+
+
 def main() -> int:
     try:
         config = load_config()
@@ -366,49 +444,34 @@ def main() -> int:
     dispatch_id_map: dict[int, str] = {}
     ibkr.subscribe_execution_callback(_make_on_order_status(api, dispatch_id_map))
 
-    scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(
-        lambda: _handle_heartbeat(api, ibkr),
-        "interval",
-        seconds=60,
-        id="heartbeat",
-        replace_existing=True,
-    )
+    stop = threading.Event()
 
-    def _pending_tick() -> None:
-        interval_s = 5 if is_us_market_hours() else 60
-        _handle_pending(api, ibkr, dispatch_id_map)
-        # Re-schedule dynamically: adjust job-interval according to market hours
-        job = scheduler.get_job("pending")
-        if job:
-            current = job.trigger.interval.total_seconds()  # type: ignore[attr-defined]
-            if int(current) != interval_s:
-                scheduler.reschedule_job(
-                    "pending", trigger="interval", seconds=interval_s
-                )
-
-    scheduler.add_job(_pending_tick, "interval", seconds=5, id="pending")
-    scheduler.start()
-    log.info("Scheduler started (heartbeat 60s, pending 5s/60s).")
-
-    # SIGINT/SIGTERM Handler
+    # Der Handler setzt nur eine Fahne. Frueher rief er `sys.exit(0)` und raeumte
+    # gleich selbst auf — mitten in einem Signal, also potenziell mitten in einem
+    # laufenden Absendevorgang. Jetzt laeuft das Aufraeumen dort, wo es hingehoert:
+    # im `finally` der Schleife, nachdem der aktuelle Durchgang zu Ende ist.
     def _shutdown(signum: int, frame: Any) -> None:
-        log.info("Shutdown signal received (%d)", signum)
-        scheduler.shutdown(wait=False)
-        ibkr.disconnect()
-        api.close()
-        log.info("Shutdown complete.")
-        sys.exit(0)
+        log.info("Shutdown signal received (%d) — finishing current tick", signum)
+        stop.set()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # ib_insync's loop — keeps callbacks alive
+    log.info(
+        "Loop started on the main thread (heartbeat %.0fs, pending %.0fs/%.0fs).",
+        HEARTBEAT_INTERVAL_S,
+        PENDING_INTERVAL_MARKET_S,
+        PENDING_INTERVAL_OFF_S,
+    )
+
     try:
-        while ibkr.is_connected():
-            ibkr.sleep(1.0)
+        run_loop(
+            ibkr,
+            heartbeat=lambda: _handle_heartbeat(api, ibkr),
+            pending=lambda: _handle_pending(api, ibkr, dispatch_id_map),
+            stop=stop,
+        )
     finally:
-        scheduler.shutdown(wait=False)
         ibkr.disconnect()
         api.close()
 
