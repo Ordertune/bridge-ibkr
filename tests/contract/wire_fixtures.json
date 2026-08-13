@@ -14,6 +14,14 @@
     "die Fixture, muessen beide Repos angefasst werden — genau der Moment, in dem",
     "so eine Aenderung auffallen soll.",
     "",
+    "T1-85 / Bridge 0.3.0 — BRECHENDE AENDERUNG am Heartbeat: aus cashUsd und",
+    "equityUsd werden cash, equity und currency. Die Einheit stand bis dahin im",
+    "Feldnamen und wurde nirgends geprueft; bei einem EUR-gefuehrten IBKR-Konto",
+    "war sie schlicht falsch, und der Client konnte sich nur damit behelfen, 0",
+    "zu melden. currency ist Pflicht und darf null sein — das heisst 'nicht",
+    "eindeutig bestimmbar', nicht 'ist schon USD'. Ein 0.2.x-Koerper ist gegen",
+    "das neue strikte Schema ein lautes 422, und genau so ist es gemeint.",
+    "",
     "WARUM ES DIESE DATEI GIBT: v0.1.0 und die API sprachen nicht dieselbe",
     "Sprache. Der Handshake schickte {connection_id, capabilities}, verlangt ist",
     "{bridgeVersion} — das ergibt ein 422, das der Client fuer endgueltig hielt.",
@@ -24,14 +32,14 @@
     "schlimmer als ein lautes 422."
   ],
 
-  "contractVersion": "t1-78",
-  "bridgeVersion": "0.2.3",
+  "contractVersion": "t1-85",
+  "bridgeVersion": "0.3.0",
 
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.2.3",
+      "bridgeVersion": "0.3.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -45,11 +53,12 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.2.3",
+      "bridgeVersion": "0.3.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
-        "cashUsd": 24150.5,
-        "equityUsd": 98230.75,
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
         "positions": [
           {
             "symbol": "AAPL",
@@ -65,6 +74,38 @@
           "minNotionalUsd": null,
           "supportsBulkSend": true
         }
+      }
+    }
+  },
+
+  "heartbeatForeignCurrency": {
+    "_comment": "T1-85 — der Fall, der den Spec ausgeloest hat: ein EUR-gefuehrtes Konto. Der Depotwert ist echt und wird auch so gemeldet; die Plattform blockiert daraus die Mengenrechnung, statt die Zahl als USD zu verbuchen. Bis 0.2.x kam hier equityUsd 0 an und alles sah gesund aus.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.3.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 22300.0,
+        "equity": 90372.29,
+        "currency": "EUR",
+        "positions": []
+      }
+    }
+  },
+
+  "heartbeatUnknownCurrency": {
+    "_comment": "T1-85 — der Client konnte die Kontowaehrung nicht eindeutig bestimmen (mehrere Waehrungssegmente). null heisst 'weiss ich nicht' und ist eine Aussage; ein geratenes USD waere ein stiller Faktor auf jede Stueckzahl.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.3.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 0.0,
+        "equity": 0.0,
+        "currency": null,
+        "positions": []
       }
     }
   },
