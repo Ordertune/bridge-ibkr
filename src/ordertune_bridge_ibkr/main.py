@@ -94,9 +94,54 @@ def is_us_market_hours(now_utc: datetime | None = None) -> bool:
 # event-thread) reads. Lock schützt gegen Race während parallel-submits.
 _DISPATCH_MAP_LOCK = threading.Lock()
 
-# Set von bereits-final-reporteten dispatch_ids — verhindert Duplicate
-# result_order-Requests bei mehrfachem orderStatusEvent (partial → filled etc.).
-_REPORTED_TERMINAL: set[str] = set()
+# T1-88b F3 — was zu einem Dispatch bereits als Endzustand gemeldet wurde.
+#
+# Frueher eine Menge von dispatch_ids: einmal drin, nie wieder gemeldet. Das
+# war als Schutz gegen doppelte Meldungen gedacht und wurde am 2026-08-13 zur
+# Falle. Die Kette: ib_insync erklaert einen lebenden Auftrag faelschlich fuer
+# storniert, die Bridge meldet `cancelled` und traegt den Dispatch ein — und
+# eine SPAETERE echte Ausfuehrung waere danach unmeldbar gewesen. Die Position
+# entstuende im Depot, kaeme nie in die Buecher, und der Modell-Ausstieg wuerde
+# sie nie anfassen.
+#
+# Jetzt merkt sich die Ablage, WAS gemeldet wurde, und eine Ausfuehrung darf
+# eine Stornierung ueberschreiben. Andersherum nicht: was gefuellt ist, bleibt
+# gefuellt.
+_LAST_REPORTED: dict[str, str] = {}
+
+# Rangfolge der Endzustaende. Ein Endzustand darf einen bereits gemeldeten nur
+# ersetzen, wenn er hoeher steht. Eine Ausfuehrung ist die staerkste Aussage,
+# die es gibt: sie ist am Konto passiert und laesst sich nicht widerrufen.
+_TERMINAL_RANK = {"expired": 1, "cancelled": 1, "rejected": 1, "partial": 2, "filled": 3}
+
+
+def should_report(dispatch_id: str, mapped: str) -> bool:
+    """Ist dieser Zustand eine neue Aussage, die gemeldet werden muss?
+
+    Vier Regeln, jede aus einem konkreten Schaden hergeleitet:
+
+    1. Derselbe Zustand zweimal ist keine neue Aussage — spart den Rueckweg.
+    2. Nach einer Ausfuehrung ist Schluss. Sie ist am Konto passiert.
+    3. Ein Endzustand ersetzt einen anderen nur nach Rang. Damit darf eine
+       Ausfuehrung eine gemeldete Stornierung ueberschreiben — der Fall, der am
+       2026-08-13 eine Position unsichtbar gemacht haette — aber nicht umgekehrt.
+    4. Alles andere ist ein Fortschritt und wird gemeldet. Insbesondere darf
+       ein lebender Zustand eine faelschlich gemeldete Stornierung widerrufen.
+
+    Oeffentlich und ohne Broker-Bezug, damit die Zusicherungen die Rangfolge
+    ohne TWS pruefen koennen.
+    """
+    with _REPORTED_LOCK:
+        vorher = _LAST_REPORTED.get(dispatch_id)
+        if vorher == mapped:
+            return False
+        if vorher == "filled":
+            return False
+        if vorher in _TERMINAL_RANK and mapped in _TERMINAL_RANK:
+            if _TERMINAL_RANK[mapped] <= _TERMINAL_RANK[vorher]:
+                return False
+        _LAST_REPORTED[dispatch_id] = mapped
+        return True
 
 # Was diese Bridge gegenüber IBKR kann. Die Feldnamen sind der Vertrag mit der
 # Plattform (capabilitiesSchema) — v0.1.0 schickte hier vier andere Schlüssel,
@@ -131,6 +176,20 @@ def _handle_pending(
     live_equity = ibkr.get_live_equity()
 
     for order in resp.pending:
+        # T1-88b F7 — der zweite von zwei Riegeln.
+        #
+        # Der erste sitzt serverseitig in der WHERE-Klausel des Abholpfads.
+        # Dieser hier greift, falls die Plattform einmal doch eine Zeile mit
+        # Storno-Wunsch ausliefert: dann wird sie NICHT abgeschickt. Ohne ihn
+        # ginge der Auftrag raus und die Bridge protokollierte im selben
+        # Durchlauf, dass er storniert werden solle.
+        if getattr(order, "cancel_requested", False):
+            log.info(
+                "Dispatch %s traegt einen Storno-Wunsch — wird nicht abgesendet.",
+                order.dispatch_id,
+            )
+            continue
+
         intent = order.order_intent
         # ── Sizing-Recompute-Check ────────────────────────────────────
         sizing_conf = intent.get("bridgeSizingConfig")
@@ -235,8 +294,80 @@ TERMINAL_STATES = {"filled", "cancelled", "rejected", "expired"}
 # und kein Fehler: der Limitpreis wurde schlicht nicht erreicht.
 _LIMIT_ORDER_TYPES = {"LMT", "LOC", "MOC"}
 
+# ── T1-88b F4: die Abbildung der IBKR-Zustaende ──────────────────────────────
+#
+# Vorher kannte diese Tabelle fuenf von neun Werten. Die vier fehlenden waren
+# ausgerechnet die, die einen LEBENDEN Auftrag beschreiben — der Widerruf des
+# Phantom-Stornos vom 2026-08-13 (`PreSubmitted`, dann `Submitted`) lag also
+# im Prozess vor und wurde stillschweigend weggeworfen.
+#
+# Ein lebender Auftrag muss die Plattform als `working` erreichen. Dann haelt
+# ihr Riegel gegen Doppelauftraege von allein, ohne dass irgendwo eine zweite
+# Sonderregel noetig waere.
+_STATUS_MAP: dict[str, str] = {
+    # Unterwegs, noch nicht am Markt.
+    "PendingSubmit": "submitting",
+    "ApiPending": "submitting",
+    # Am Markt, lebendig.
+    "PreSubmitted": "working",
+    "Submitted": "working",
+    "PendingCancel": "working",
+    # T1-88b F4: `Inactive` steht NICHT in `OrderStatus.DoneStates` und ist
+    # mehrdeutig — IBKR benutzt es sowohl fuer abgelehnt als auch fuer
+    # "angenommen, aber nicht ausfuehrbar". Es als `rejected` zu melden hiesse,
+    # im Zweifel den Riegel zu oeffnen, und ein faelschlich geoeffneter Riegel
+    # kostet einen zweiten Echtauftrag. Ein faelschlich geschlossener kostet
+    # einen Klick. Deshalb nicht-terminal, und laut protokolliert.
+    "Inactive": "working",
+    # Endzustaende.
+    "Filled": "filled",
+    "PartiallyFilled": "partial",
+    "Cancelled": "cancelled",
+    "ApiCancelled": "cancelled",
+}
 
-def _derive_reason_code(mapped: str, filled: float, order_type: str) -> str | None:
+# Zustaende, die einen lebenden Auftrag beschreiben. Nur informativ fuer die
+# Plattform — aber genau diese Information hat am 2026-08-13 gefehlt.
+_LIVE_STATES = {"submitting", "working"}
+
+# ── T1-88b F2: welche Stornierung von IBKR kommt und welche erfunden ist ─────
+#
+# ib_insync setzt bei JEDEM Fehlercode ausserhalb seiner Warnliste
+# `trade.orderStatus.status = Cancelled` — eine Zuweisung an ein
+# Python-Objekt, ohne dass je ein `cancelOrder` ueber die Leitung geht
+# (wrapper.py:1122-1134, `grep cancelOrder wrapper.py` ist leer).
+#
+# Am 2026-08-13 traf das den Hinweis 10349 ("Gueltigkeitsdauer auf DAY
+# gesetzt"). Eine Sekunde spaeter meldete IBKR `PreSubmitted` und `Submitted`
+# — der Auftrag hatte nie aufgehoert zu leben.
+#
+# Bewusst KEINE Ausnahmeliste fuer 10349. Die Fehlerklasse ist allgemein:
+# jeder Code ausserhalb von ib_insyncs Warnliste loest dieselbe Kette aus, und
+# welche Codes IBKR morgen ergaenzt, weiss hier niemand. Umgekehrt gedacht:
+# eine Stornierung gilt nur dann sofort, wenn ihr Protokolleintrag sie als
+# echte Stornierung ausweist.
+#
+#   202   Order cancelled — die regulaere Stornobestaetigung
+#   10148 Auftrag konnte nicht storniert werden, weil bereits storniert
+#   0     kein Fehler, also eine Zustandsmeldung von IBKR selbst
+_GENUINE_CANCEL_CODES = {0, 202, 10148}
+
+# Wie lange eine verdaechtige Stornierung nachbeobachtet wird, bevor sie als
+# echt gilt. Im Vorfall lag zwischen erfundenem `Cancelled` und echtem
+# `Submitted` eine Sekunde; drei sind Reserve, ohne eine echte Stornierung
+# spuerbar zu verzoegern.
+CANCEL_CONFIRM_DELAY_S = 3.0
+
+# dispatch_id → (trade, faellig_ab). Wird ausschliesslich aus der Hauptschleife
+# und dem Rueckruf angefasst, beide auf demselben Thread (siehe Modulkopf) —
+# das Schloss schuetzt gegen den Ausfuehrungs-Thread von ib_insync.
+_PENDING_CANCEL_CHECKS: dict[str, tuple[Any, float]] = {}
+_PENDING_CANCEL_LOCK = threading.Lock()
+
+
+def _derive_reason_code(
+    mapped: str, filled: float, order_type: str, trade: Any = None
+) -> str | None:
     """Warum kam die Order NICHT zustande?
 
     `status` allein wirft Dinge zusammen, die für den Nutzer sehr
@@ -244,14 +375,35 @@ def _derive_reason_code(mapped: str, filled: float, order_type: str) -> str | No
     eine Ablehnung ist ein Problem. Ohne diese Unterscheidung steht am Ende
     des Tages nur "cancelled" in der Oberfläche und niemand weiss, ob etwas
     kaputt ist.
+
+    T1-88b: `limit_not_reached` wurde bisher allein aus dem Ordertyp geraten.
+    Am 2026-08-13 stand es an einem Auftrag, der sieben Stunden vor
+    Boersenoeffnung storniert wurde — ein Limit, das nie eine Chance hatte,
+    erreicht zu werden. Der Grund gilt jetzt nur noch, wenn der Auftrag
+    ueberhaupt einmal am Markt war.
     """
     if mapped == "rejected":
         return "rejected_by_broker"
     if mapped in ("cancelled", "expired") and filled == 0:
-        if order_type in _LIMIT_ORDER_TYPES:
+        if order_type in _LIMIT_ORDER_TYPES and _was_ever_live(trade):
             return "limit_not_reached"
         return "expired" if mapped == "expired" else "cancelled_by_user"
     return None
+
+
+def _was_ever_live(trade: Any) -> bool:
+    """Stand dieser Auftrag jemals am Markt?
+
+    Ohne Auftrag keine Aussage — dann gilt die alte Annahme weiter, damit sich
+    fuer die bestehenden Aufrufstellen nichts aendert.
+    """
+    if trade is None:
+        return True
+    entries = getattr(trade, "log", None) or []
+    return any(
+        _STATUS_MAP.get(str(getattr(e, "status", ""))) in _LIVE_STATES
+        for e in entries
+    )
 
 
 def _sum_commission(trade: Any) -> float | None:
@@ -289,66 +441,174 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
     """
 
     def on_status(trade: Any) -> None:
-        status_map = {
-            "Filled": "filled",
-            "PartiallyFilled": "partial",
-            "Cancelled": "cancelled",
-            "ApiCancelled": "cancelled",
-            "Inactive": "rejected",
-        }
         raw = getattr(trade.orderStatus, "status", "")
-        mapped = status_map.get(raw)
+        mapped = _STATUS_MAP.get(raw)
         if mapped is None:
+            # T1-88b F4: nichts faellt mehr stillschweigend heraus. Ein
+            # unbekannter Zustand ist entweder eine Ergaenzung der Bibliothek
+            # oder ein Tippfehler in der Tabelle — beides will man sehen.
+            log.warning(
+                "Unbekannter IBKR-Auftragszustand %r — nicht gemeldet. "
+                "Bitte melden, die Statustabelle ist unvollstaendig.",
+                raw,
+            )
             return
+
         order_id = int(getattr(trade.order, "orderId", 0))
         with _DISPATCH_MAP_LOCK:
             dispatch_id = dispatch_id_map.get(order_id)
         if not dispatch_id:
             return
 
-        # Idempotency: terminal events are reported only once. Server-side
-        # /result is idempotent too (applyResult), but we skip anyway to
-        # save the round-trip.
-        if mapped in TERMINAL_STATES:
-            with _REPORTED_LOCK:
-                if dispatch_id in _REPORTED_TERMINAL:
-                    return
-                _REPORTED_TERMINAL.add(dispatch_id)
+        # Lebt oder hat gefuellt: eine schwebende Storno-Nachbeobachtung ist
+        # damit beantwortet und faellt weg.
+        if mapped in _LIVE_STATES or mapped in ("filled", "partial"):
+            _forget_pending_cancel(dispatch_id)
 
-        filled = float(getattr(trade.orderStatus, "filled", 0) or 0)
-        avg_price = float(getattr(trade.orderStatus, "avgFillPrice", 0) or 0)
-        order_type = str(getattr(trade.order, "orderType", "") or "")
+        # T1-88b F2: eine Stornierung ohne Stornobegruendung wird nicht sofort
+        # geglaubt. Sie kann von ib_insync stammen statt von IBKR.
+        if mapped == "cancelled" and not cancel_is_genuine(trade):
+            _defer_cancel_check(dispatch_id, trade)
+            return
 
-        try:
-            api.result_order(
-                dispatch_id,
-                status=mapped,
-                # Diese Zahl trägt die Bestandsführung je Strategie. Ohne sie
-                # weiss die Plattform nicht, wie viele Stücke einer Strategie
-                # gehören, und ein späterer Exit verkauft die falsche Menge.
-                fill_qty=filled,
-                # 0.0 wäre eine Preisbehauptung für einen Handel, den es nicht
-                # gab. Nichts gefüllt heisst: kein Preis.
-                fill_price=avg_price if filled > 0 else None,
-                commission_usd=_sum_commission(trade),
-                filled_at=datetime.now(timezone.utc).isoformat(),
-                reason_code=_derive_reason_code(mapped, filled, order_type),
-                broker_order_id=order_id or None,
-            )
-            log.info(
-                "Result reported for dispatch %s: %s (filled=%s)",
-                dispatch_id,
-                mapped,
-                filled,
-            )
-        except Exception as exc:
-            log.error("result_order failed for %s: %s", dispatch_id, exc)
-            # Roll back the "reported" marker so a retry can happen next tick.
-            if mapped in TERMINAL_STATES:
-                with _REPORTED_LOCK:
-                    _REPORTED_TERMINAL.discard(dispatch_id)
+        _report_status(api, dispatch_id, trade, mapped)
 
     return on_status
+
+
+def cancel_is_genuine(trade: Any) -> bool:
+    """Stammt diese Stornierung von IBKR oder von ib_insync?
+
+    Der letzte Protokolleintrag des Auftrags traegt den Code, der den Zustand
+    ausgeloest hat. Steht dort eine echte Stornobestaetigung, ist die Sache
+    klar. Steht dort irgendein anderer Fehlercode, hat ib_insync den Zustand
+    selbst gesetzt (wrapper.py:1122-1134) und IBKR weiss nichts davon.
+
+    Kein Protokolleintrag heisst: keine Begruendung, also nachbeobachten.
+    Im Zweifel nicht glauben — ein zu frueh gemeldeter Storno oeffnet den
+    Riegel der Plattform und kostet einen zweiten Echtauftrag.
+    """
+    entries = getattr(trade, "log", None) or []
+    if not entries:
+        return False
+    code = getattr(entries[-1], "errorCode", None)
+    return code in _GENUINE_CANCEL_CODES
+
+
+def _defer_cancel_check(dispatch_id: str, trade: Any) -> None:
+    """Merkt eine verdaechtige Stornierung zur Nachbeobachtung vor."""
+    with _PENDING_CANCEL_LOCK:
+        if dispatch_id in _PENDING_CANCEL_CHECKS:
+            return
+        _PENDING_CANCEL_CHECKS[dispatch_id] = (
+            trade,
+            time.monotonic() + CANCEL_CONFIRM_DELAY_S,
+        )
+    entries = getattr(trade, "log", None) or []
+    code = getattr(entries[-1], "errorCode", None) if entries else None
+    log.warning(
+        "Stornierung fuer Dispatch %s kam mit Fehlercode %s statt einer "
+        "Stornobestaetigung. Das ist das Muster eines Phantom-Stornos aus "
+        "ib_insync — Meldung wird %.0fs zurueckgehalten und der Zustand danach "
+        "erneut gelesen.",
+        dispatch_id,
+        code,
+        CANCEL_CONFIRM_DELAY_S,
+    )
+
+
+def _forget_pending_cancel(dispatch_id: str) -> None:
+    with _PENDING_CANCEL_LOCK:
+        _PENDING_CANCEL_CHECKS.pop(dispatch_id, None)
+
+
+def handle_deferred_cancels(
+    api: OrdertuneApiClient,
+    *,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """Loest die zurueckgehaltenen Stornierungen auf. Laeuft in der Hauptschleife.
+
+    Der Auftrag ist derselbe Python-Gegenstand, den ib_insync fortschreibt —
+    ein erneutes Lesen von `orderStatus.status` liefert also den inzwischen
+    eingetroffenen echten Zustand. Genau der stand am 2026-08-13 eine Sekunde
+    spaeter da und wurde nie angesehen.
+    """
+    faellig: list[tuple[str, Any]] = []
+    with _PENDING_CANCEL_LOCK:
+        for dispatch_id, (trade, deadline) in list(_PENDING_CANCEL_CHECKS.items()):
+            if monotonic() >= deadline:
+                faellig.append((dispatch_id, trade))
+                del _PENDING_CANCEL_CHECKS[dispatch_id]
+
+    for dispatch_id, trade in faellig:
+        raw = getattr(trade.orderStatus, "status", "")
+        mapped = _STATUS_MAP.get(raw)
+        if mapped is None:
+            log.warning(
+                "Nachbeobachtung fuer Dispatch %s: unbekannter Zustand %r, "
+                "nichts gemeldet.",
+                dispatch_id,
+                raw,
+            )
+            continue
+
+        if mapped == "cancelled":
+            log.info(
+                "Nachbeobachtung fuer Dispatch %s: der Auftrag ist weiterhin "
+                "storniert. Meldung geht jetzt raus.",
+                dispatch_id,
+            )
+        else:
+            log.warning(
+                "Phantom-Storno fuer Dispatch %s aufgeloest: IBKR meldet %r. "
+                "Der Auftrag lebt — es wird %s gemeldet, nicht cancelled.",
+                dispatch_id,
+                raw,
+                mapped,
+            )
+        _report_status(api, dispatch_id, trade, mapped)
+
+
+def _report_status(
+    api: OrdertuneApiClient, dispatch_id: str, trade: Any, mapped: str
+) -> None:
+    """Meldet einen Zustand an die Plattform, wenn er eine neue Aussage ist."""
+    if not should_report(dispatch_id, mapped):
+        return
+
+    filled = float(getattr(trade.orderStatus, "filled", 0) or 0)
+    avg_price = float(getattr(trade.orderStatus, "avgFillPrice", 0) or 0)
+    order_type = str(getattr(trade.order, "orderType", "") or "")
+    order_id = int(getattr(trade.order, "orderId", 0))
+
+    try:
+        api.result_order(
+            dispatch_id,
+            status=mapped,
+            # Diese Zahl trägt die Bestandsführung je Strategie. Ohne sie
+            # weiss die Plattform nicht, wie viele Stücke einer Strategie
+            # gehören, und ein späterer Exit verkauft die falsche Menge.
+            fill_qty=filled,
+            # 0.0 wäre eine Preisbehauptung für einen Handel, den es nicht
+            # gab. Nichts gefüllt heisst: kein Preis.
+            fill_price=avg_price if filled > 0 else None,
+            commission_usd=_sum_commission(trade),
+            filled_at=datetime.now(timezone.utc).isoformat(),
+            reason_code=_derive_reason_code(mapped, filled, order_type, trade),
+            broker_order_id=order_id or None,
+        )
+        log.info(
+            "Result reported for dispatch %s: %s (filled=%s)",
+            dispatch_id,
+            mapped,
+            filled,
+        )
+    except Exception as exc:
+        log.error("result_order failed for %s: %s", dispatch_id, exc)
+        # Die Merkung zuruecknehmen, damit der naechste Versuch durchkommt.
+        with _REPORTED_LOCK:
+            _LAST_REPORTED.pop(dispatch_id, None)
 
 
 def run_loop(
@@ -357,6 +617,7 @@ def run_loop(
     pending: Callable[[], None],
     stop: threading.Event,
     *,
+    on_tick: Callable[[], None] | None = None,
     market_hours: Callable[[], bool] = is_us_market_hours,
     tick_s: float = LOOP_TICK_S,
     monotonic: Callable[[], float] = time.monotonic,
@@ -377,6 +638,12 @@ def run_loop(
     next_pending = 0.0
 
     while ibkr.is_connected() and not stop.is_set():
+        # T1-88b F2: laeuft in JEDEM Durchgang, nicht nach Intervall. Eine
+        # zurueckgehaltene Stornierung soll nach drei Sekunden aufgeloest sein
+        # und nicht bis zum naechsten Abruf warten.
+        if on_tick is not None:
+            on_tick()
+
         if monotonic() >= next_heartbeat:
             heartbeat()
             next_heartbeat = monotonic() + HEARTBEAT_INTERVAL_S
@@ -470,6 +737,7 @@ def main() -> int:
             heartbeat=lambda: _handle_heartbeat(api, ibkr),
             pending=lambda: _handle_pending(api, ibkr, dispatch_id_map),
             stop=stop,
+            on_tick=lambda: handle_deferred_cancels(api),
         )
     finally:
         ibkr.disconnect()
