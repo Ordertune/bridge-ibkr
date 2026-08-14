@@ -226,10 +226,19 @@ class IbkrClient:
         """T1-88c — Storno an IBKR schicken.
 
         Meldet NICHTS zurueck. Ob aus der Anfrage eine Stornierung wird,
-        entscheidet IBKR, und die Antwort kommt als Zustandsereignis mit
-        Fehlercode 202 — dort, wo `cancel_is_genuine` sie prueft. Diese
-        Methode hier einen Erfolg behaupten zu lassen waere derselbe Fehler
-        wie der Phantom-Storno aus T1-88b, nur mit umgekehrtem Vorzeichen.
+        entscheidet IBKR, und die Antwort kommt als Zustandsereignis — dort,
+        wo `cancel_is_genuine` sie prueft. Diese Methode hier einen Erfolg
+        behaupten zu lassen waere derselbe Fehler wie der Phantom-Storno aus
+        T1-88b, nur mit umgekehrtem Vorzeichen.
+
+        T1-96 — Berichtigung: bis hierher stand hier "als Zustandsereignis mit
+        Fehlercode 202". Das stimmt nicht. ib_insync fuehrt 202 unter den
+        Warnungen (wrapper.py:1097) und haengt Warnungen keinen
+        Protokolleintrag an den Auftrag. In `trade.log` steht die Bestaetigung
+        als gewoehnlicher Zustandswechsel mit `errorCode = 0`; die 202 kommt
+        ausschliesslich ueber `errorEvent` (siehe `subscribe_error_callback`).
+        `cancel_is_genuine` traegt trotzdem, weil die 0 genau das bedeutet,
+        worauf es ankommt: IBKR hat den Zustand gesetzt, nicht ib_insync.
         """
         self._ib.cancelOrder(order)
 
@@ -246,6 +255,24 @@ class IbkrClient:
         """Register callback for order status updates."""
         self._ib.execDetailsEvent += cb  # type: ignore[operator]
         self._ib.orderStatusEvent += cb  # type: ignore[operator]
+
+    def subscribe_error_callback(self, cb: Any) -> None:
+        """T1-96 — Mitschnitt der Meldungen, die `trade.log` nie erreichen.
+
+        ib_insync fuehrt 202 in `warningCodes` (wrapper.py:1097). Warnungen
+        werden dort ausschliesslich geloggt: kein Protokolleintrag am Auftrag,
+        keine Zustandsaenderung. In `trade.log` steht bei einer Stornierung
+        durch IBKR deshalb ein Eintrag mit `errorCode = 0` — dem Feld-Default
+        aus `orderStatus` (wrapper.py:438) — und nie die 202.
+
+        Ueber `errorEvent` kommt sie an (wrapper.py:1173, fuer jeden Code,
+        auch fuer Warnungen), mitsamt Meldungstext. Das ist der einzige Kanal,
+        auf dem sich ein Storno in TWS von einem Verfall zum Boersenschluss
+        unterscheiden koennte — beide erzeugen sonst dasselbe Datum.
+
+        Registriert wird nur, was IBKR selbst sagt. Bewertet wird hier nichts.
+        """
+        self._ib.errorEvent += cb  # type: ignore[operator]
 
     def sleep(self, seconds: float) -> None:
         """ib_insync-native sleep that keeps event-loop running."""
