@@ -327,6 +327,7 @@ class OrdertuneApiClient:
         reason_code: str | None = None,
         error_message: str | None = None,
         broker_order_id: int | str | None = None,
+        broker_confirmed_end: bool | None = None,
     ) -> None:
         """PUT /orders/{id}/result → Ausführungsergebnis.
 
@@ -338,6 +339,13 @@ class OrdertuneApiClient:
         `fill_qty` ist das Feld, aus dem die Plattform den Bestand je Strategie
         führt. Ohne diese Zahl weiss niemand, wie viele Stücke einer Strategie
         gehören, und ein späterer Exit verkauft die falsche Menge.
+
+        `broker_confirmed_end` (T1-96, ab 0.4.0): hat IBKR das Ende dieses
+        Auftrags bestätigt? Nur bei `cancelled` eine Aussage, sonst None und
+        dann nicht im Körper. Die Plattform hängt daran ihren Riegel gegen
+        Doppelaufträge: ohne Aussage bleibt gesperrt. Weggelassen heisst
+        deshalb „weiss ich nicht", nicht „nein" — genau so verhält sich auch
+        eine ältere Bridge, die das Feld gar nicht kennt.
         """
         body: dict[str, Any] = {"status": status}
         if broker_order_id is not None:
@@ -354,6 +362,8 @@ class OrdertuneApiClient:
             body["reasonCode"] = reason_code
         if error_message is not None:
             body["errorMessage"] = error_message[:500]
+        if broker_confirmed_end is not None:
+            body["brokerConfirmedEnd"] = bool(broker_confirmed_end)
         _request_with_retry(
             "PUT", self._client,
             f"{self._base}/api/bridge/v1/orders/{dispatch_id}/result",

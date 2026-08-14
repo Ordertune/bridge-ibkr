@@ -29,17 +29,26 @@
     "Abweichung zu KEINEM Fehler, weil unbekannte Schluessel still entfernt",
     "wurden. Deshalb sind alle Koerper-Schemata jetzt strikt, und deshalb gibt",
     "es diesen Test: an einer Aussengrenze ist stillschweigendes Entfernen",
-    "schlimmer als ein lautes 422."
+    "schlimmer als ein lautes 422.",
+    "",
+    "T1-96 / Bridge 0.4.0 — NICHT brechend: brokerConfirmedEnd kommt hinzu, ein",
+    "optionales Feld am Ergebnis. Es beantwortet die Frage, an der der Riegel",
+    "gegen Doppelauftraege haengt: hat der Broker das Ende dieses Auftrags",
+    "bestaetigt? Gesendet wird es nur bei status cancelled — fuer die anderen",
+    "Endzustaende ist die Pruefung nicht gemacht, und ein Feld, das mehr",
+    "behauptet als es geprueft hat, waere derselbe Fehler in Gruen. Fehlt es,",
+    "heisst das 'keine Aussage', nicht 'nein': so verhaelt sich jede Bridge vor",
+    "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
 
-  "contractVersion": "t1-85",
-  "bridgeVersion": "0.3.3",
+  "contractVersion": "t1-96",
+  "bridgeVersion": "0.4.0",
 
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.3.3",
+      "bridgeVersion": "0.4.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -53,7 +62,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.3.3",
+      "bridgeVersion": "0.4.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -83,7 +92,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.3.3",
+      "bridgeVersion": "0.4.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -99,7 +108,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.3.3",
+      "bridgeVersion": "0.4.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -133,7 +142,7 @@
   },
 
   "orderResultLimitNotReached": {
-    "_comment": "Der von T1-78 geforderte Fall: Order kam NICHT zustande, weil der Limitpreis nicht erreicht wurde. fillPrice bleibt weg — ein Preis fuer einen Handel, den es nicht gab, waere eine Erfindung.",
+    "_comment": "Der von T1-78 geforderte Fall: Order kam NICHT zustande, weil der Limitpreis nicht erreicht wurde. fillPrice bleibt weg — ein Preis fuer einen Handel, den es nicht gab, waere eine Erfindung. T1-96: dieser Koerper traegt KEIN brokerConfirmedEnd und steht damit zugleich fuer jede Bridge vor 0.4.0 — die Plattform muss ihn weiter annehmen und den Riegel geschlossen lassen.",
     "method": "PUT",
     "path": "/api/bridge/v1/orders/{dispatchId}/result",
     "body": {
@@ -142,6 +151,34 @@
       "fillQty": 0.0,
       "filledAtClient": "2026-08-12T20:00:01.010Z",
       "reasonCode": "limit_not_reached"
+    }
+  },
+
+  "orderResultCancelConfirmed": {
+    "_comment": "T1-96 — IBKR hat das Ende dieses Auftrags bestaetigt. Der Fall aus dem Smoke-Test vom 2026-08-14: der Nutzer storniert in TWS, wir haben nichts angefordert. Ohne dieses Feld blieb der Auftrag fuer die Plattform ungeklaert und das Signal liess sich nicht erneut freigeben.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/result",
+    "body": {
+      "status": "cancelled",
+      "brokerOrderId": "1149",
+      "fillQty": 0.0,
+      "filledAtClient": "2026-08-14T09:57:21.328Z",
+      "reasonCode": "limit_not_reached",
+      "brokerConfirmedEnd": true
+    }
+  },
+
+  "orderResultCancelUnconfirmed": {
+    "_comment": "T1-96 — dieselbe Zeile ohne Nachweis: ib_insync hat den Zustand selbst gesetzt (T1-88b). Der Auftrag kann weiterleben. false ist hier eine Aussage und heisst 'nicht bestaetigt' — der Riegel bleibt zu, und genau das ist der Rueckschritt, der nicht passieren darf.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/orders/{dispatchId}/result",
+    "body": {
+      "status": "cancelled",
+      "brokerOrderId": "1150",
+      "fillQty": 0.0,
+      "filledAtClient": "2026-08-14T10:02:11.004Z",
+      "reasonCode": "limit_not_reached",
+      "brokerConfirmedEnd": false
     }
   },
 

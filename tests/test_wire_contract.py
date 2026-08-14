@@ -264,6 +264,76 @@ def test_result_limit_not_reached_matches_contract() -> None:
     )
 
 
+def test_result_cancel_confirmed_matches_contract() -> None:
+    """T1-96 — der Nachweis reist mit, statt in der Bridge zu verpuffen.
+
+    `cancel_is_genuine` unterscheidet seit T1-88b die Stornierung von IBKR von
+    der, die ib_insync sich ausgedacht hat. Das Ergebnis blieb bis hierher im
+    Client; auf der Leitung stand nur `cancelled`. Die Plattform musste daraus
+    raten, ob das Ende belegt ist — und liess im Zweifel gesperrt, was ein
+    Signal gekostet hat.
+    """
+    expected = FIXTURES["orderResultCancelConfirmed"]["body"]
+    rec = _Recorder()
+    api = _client(rec)
+    api.result_order(
+        DISPATCH_ID,
+        status="cancelled",
+        fill_qty=0.0,
+        fill_price=None,
+        filled_at=expected["filledAtClient"],
+        reason_code="limit_not_reached",
+        broker_order_id=int(expected["brokerOrderId"]),
+        broker_confirmed_end=True,
+    )
+    assert rec.body == expected
+    assert rec.body["brokerConfirmedEnd"] is True
+
+
+def test_result_cancel_unconfirmed_is_an_explicit_false() -> None:
+    """`False` ist eine Aussage und darf nicht als „nichts" durchrutschen.
+
+    Faellt das Feld hier weg, liest die Plattform „keine Aussage" — und
+    behandelt eine unbestaetigte Stornierung wie eine bestaetigte, sobald sie
+    ihre Regel darauf stuetzt. Genau der Rueckschritt, gegen den T1-88b
+    entstanden ist.
+    """
+    expected = FIXTURES["orderResultCancelUnconfirmed"]["body"]
+    rec = _Recorder()
+    api = _client(rec)
+    api.result_order(
+        DISPATCH_ID,
+        status="cancelled",
+        fill_qty=0.0,
+        fill_price=None,
+        filled_at=expected["filledAtClient"],
+        reason_code="limit_not_reached",
+        broker_order_id=int(expected["brokerOrderId"]),
+        broker_confirmed_end=False,
+    )
+    assert rec.body == expected
+    assert rec.body["brokerConfirmedEnd"] is False
+
+
+def test_result_without_confirmation_omits_the_field() -> None:
+    """Ohne Aussage kein Feld — das ist der Koerper jeder Bridge vor 0.4.0."""
+    expected = FIXTURES["orderResultLimitNotReached"]["body"]
+    rec = _Recorder()
+    api = _client(rec)
+    api.result_order(
+        DISPATCH_ID,
+        status="cancelled",
+        fill_qty=0.0,
+        fill_price=None,
+        filled_at=expected["filledAtClient"],
+        reason_code="limit_not_reached",
+        broker_order_id=int(expected["brokerOrderId"]),
+        broker_confirmed_end=None,
+    )
+    assert rec.body == expected
+    assert "brokerConfirmedEnd" not in rec.body
+
+
 def test_result_rejected_matches_contract() -> None:
     expected = FIXTURES["orderResultRejected"]["body"]
     rec = _Recorder()
@@ -286,6 +356,8 @@ def test_result_rejected_matches_contract() -> None:
         "heartbeatUnknownCurrency",
         "orderAck",
         "orderResultFilled",
+        "orderResultCancelConfirmed",
+        "orderResultCancelUnconfirmed",
     ],
 )
 def test_no_snake_case_keys_on_the_wire(key: str) -> None:
