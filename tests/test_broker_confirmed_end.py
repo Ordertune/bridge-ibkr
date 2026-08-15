@@ -1,4 +1,4 @@
-"""T1-96: der Nachweis reist mit — und der Mitschnitt fuer die offene Frage.
+"""T1-96: der Nachweis reist mit.
 
 ## Woher das kommt
 
@@ -16,11 +16,7 @@ in der Bridge bereits vor — `cancel_is_genuine` — und wurde weggeworfen.
 2. **`False` ist eine Aussage, kein Weglassen.** Eine erfundene Stornierung
    muss als unbestaetigt ankommen, sonst oeffnet sie den Riegel — genau der
    Rueckschritt, gegen den T1-88b entstanden ist.
-3. **Der Mitschnitt bewertet nichts.** Er schreibt beide Kanaele nebeneinander
-   ins Protokoll, damit die Frage aus B-1 — Storno in TWS oder Verfall zum
-   Boersenschluss? — aus Beobachtung beantwortet wird statt aus Vermutung.
-
-## Der Befund, der B-1 vertagt hat
+## Der Befund aus der Messung nach Handelsschluss
 
 In ib_insync 0.9.86 fuehrt `wrapper.error` den Code 202 unter den Warnungen
 (Zeile 1097). Warnungen haengen dem Auftrag KEINEN Protokolleintrag an. Was
@@ -30,14 +26,18 @@ dem Feld-Default. Ein Storno in TWS und ein Verfall zum Boersenschluss sind
 darin nicht zu unterscheiden: beide Male `status='Cancelled'`, `message=''`,
 `errorCode=0`.
 
+Am 2026-08-14 nach Handelsschluss zu Ende gemessen: auch `errorEvent` trennt
+die beiden nicht. Beide senden `Warning 202, "Order storniert – Grund:"` mit
+leerem Grund — Order 58 (Verfall um 20:00:13 UTC) gegen die Orders 46 und 47
+(von Hand in TWS storniert um 13:24).
+
 Fuer den Riegel genuegt das trotzdem, denn die 0 beantwortet genau seine
-Frage: IBKR hat den Zustand gesetzt, nicht ib_insync. Fuer die Beschriftung
-Storno gegen Verfall genuegt es nicht — die haengt an Kanaelen, die diese
-Fassung nur noch mitschreibt.
+Frage: IBKR hat den Zustand gesetzt, nicht ib_insync. Die Beschriftung Storno
+gegen Verfall faellt seit T1-96 B-1 auf der Plattform, ueber den Zeitpunkt
+gegen den Sitzungsschluss.
 """
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -49,10 +49,8 @@ from ordertune_bridge_ibkr import main as m
 @pytest.fixture(autouse=True)
 def _reset():
     m._LAST_REPORTED.clear()
-    m._ORDER_NOTICES.clear()
     yield
     m._LAST_REPORTED.clear()
-    m._ORDER_NOTICES.clear()
 
 
 class FakeApi:
@@ -153,73 +151,3 @@ def test_the_deferred_path_re_reads_the_proof() -> None:
 
     m._report_status(api, "d-5", trade, "cancelled")
     assert api.calls[0]["broker_confirmed_end"] is True
-
-
-# ── 2) Der Mitschnitt fuer B-1 ───────────────────────────────────────────────
-
-
-def test_system_messages_are_not_recorded_against_an_order() -> None:
-    """reqId -1 sind Verbindungs- und Marktdatenmeldungen ohne Auftragsbezug."""
-    m.record_order_notice(-1, 2104, "Market data farm connection is OK")
-
-    assert m._ORDER_NOTICES == {}
-
-
-def test_the_notice_log_stays_bounded() -> None:
-    """Ein monatelang laufender Client darf nicht unbegrenzt wachsen."""
-    for i in range(m._ORDER_NOTICES_MAX + 50):
-        m.record_order_notice(i, 202, "Order Canceled - reason:")
-
-    assert len(m._ORDER_NOTICES) == m._ORDER_NOTICES_MAX
-    # Der juengste Eintrag ist da, der aelteste nicht mehr.
-    assert m.order_notice_for(m._ORDER_NOTICES_MAX + 49) is not None
-    assert m.order_notice_for(0) is None
-
-
-def test_the_error_callback_survives_an_unexpected_signature() -> None:
-    """Eine Ausnahme hier laege im Ereignis-Thread von ib_insync.
-
-    An dem Thread haengt der ganze Auftragsweg. Ein Mitschnitt, der nur
-    protokolliert, darf ihn unter keinen Umstaenden anhalten.
-    """
-    on_error = m._make_on_ibkr_error()
-    on_error(7, 202, "Order Canceled - reason:", None)
-    on_error()  # aeltere Fassung, keine Argumente
-    on_error("kein int", None, object())
-
-    assert m.order_notice_for(7) == (202, "Order Canceled - reason:")
-
-
-def test_both_channels_end_up_side_by_side_in_the_log(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Die Zeile, aus der B-1 entschieden wird.
-
-    Beide Kanaele nebeneinander: was in `trade.log` steht und was ueber
-    `errorEvent` kam. Aus `trade.log` allein ist ein Storno in TWS von einem
-    Verfall zum Boersenschluss nicht zu unterscheiden — beide erzeugen
-    `status='Cancelled'`, `message=''`, `errorCode=0`.
-    """
-    m.record_order_notice(42, 202, "Order Canceled - reason:")
-    api = FakeApi()
-
-    with caplog.at_level(logging.INFO):
-        m._report_status(api, "d-6", make_trade("Cancelled", error_code=0), "cancelled")
-
-    zeile = next(r.getMessage() for r in caplog.records if "T1-96-EVIDENCE" in r.getMessage())
-    assert "dispatch=d-6" in zeile
-    assert "log.errorCode=0" in zeile
-    assert "notice.code=202" in zeile
-    assert "tif=DAY" in zeile
-
-
-def test_a_live_state_writes_no_evidence_line(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Nur Endzustaende. Ein lebender Auftrag meldet sich mehrfach je Sekunde."""
-    api = FakeApi()
-
-    with caplog.at_level(logging.INFO):
-        m._report_status(api, "d-7", make_trade("Submitted"), "working")
-
-    assert not any("T1-96-EVIDENCE" in r.getMessage() for r in caplog.records)
