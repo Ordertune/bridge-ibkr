@@ -239,6 +239,10 @@ class IbkrClient:
         ausschliesslich ueber `errorEvent` (siehe `subscribe_error_callback`).
         `cancel_is_genuine` traegt trotzdem, weil die 0 genau das bedeutet,
         worauf es ankommt: IBKR hat den Zustand gesetzt, nicht ib_insync.
+        Storno und Verfall trennt sie NICHT — am 2026-08-14 nach
+        Handelsschluss gemessen, beide senden dieselbe Warnung 202 mit
+        leerem Grund. Diese Unterscheidung faellt seit T1-96 B-1 auf der
+        Plattform, ueber den Zeitpunkt gegen den Sitzungsschluss.
         """
         self._ib.cancelOrder(order)
 
@@ -255,24 +259,6 @@ class IbkrClient:
         """Register callback for order status updates."""
         self._ib.execDetailsEvent += cb  # type: ignore[operator]
         self._ib.orderStatusEvent += cb  # type: ignore[operator]
-
-    def subscribe_error_callback(self, cb: Any) -> None:
-        """T1-96 — Mitschnitt der Meldungen, die `trade.log` nie erreichen.
-
-        ib_insync fuehrt 202 in `warningCodes` (wrapper.py:1097). Warnungen
-        werden dort ausschliesslich geloggt: kein Protokolleintrag am Auftrag,
-        keine Zustandsaenderung. In `trade.log` steht bei einer Stornierung
-        durch IBKR deshalb ein Eintrag mit `errorCode = 0` — dem Feld-Default
-        aus `orderStatus` (wrapper.py:438) — und nie die 202.
-
-        Ueber `errorEvent` kommt sie an (wrapper.py:1173, fuer jeden Code,
-        auch fuer Warnungen), mitsamt Meldungstext. Das ist der einzige Kanal,
-        auf dem sich ein Storno in TWS von einem Verfall zum Boersenschluss
-        unterscheiden koennte — beide erzeugen sonst dasselbe Datum.
-
-        Registriert wird nur, was IBKR selbst sagt. Bewertet wird hier nichts.
-        """
-        self._ib.errorEvent += cb  # type: ignore[operator]
 
     def sleep(self, seconds: float) -> None:
         """ib_insync-native sleep that keeps event-loop running."""

@@ -157,8 +157,8 @@ def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
         trades = ibkr.open_trades()
     except Exception as exc:
         log.error(
-            "Offene Auftraege liessen sich nicht abfragen: %s. Ein Storno "
-            "koennte einen vor dem Neustart abgesendeten Auftrag nicht finden.",
+            "Could not query open orders: %s. A cancel might not find an order "
+            "that was submitted before this restart.",
             exc,
         )
         return 0
@@ -175,11 +175,11 @@ def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
 
     if wiederhergestellt:
         log.info(
-            "%d offene Auftraege ueber ihren Vermerk wieder zugeordnet.",
+            "Re-mapped %d open orders via their order reference.",
             wiederhergestellt,
         )
     else:
-        log.info("Keine offenen Auftraege von uns bei IBKR.")
+        log.info("No open orders of ours at IBKR.")
     return wiederhergestellt
 
 # T1-88b F3 — was zu einem Dispatch bereits als Endzustand gemeldet wurde.
@@ -273,7 +273,7 @@ def _handle_pending(
         # Durchlauf, dass er storniert werden solle.
         if getattr(order, "cancel_requested", False):
             log.info(
-                "Dispatch %s traegt einen Storno-Wunsch — wird nicht abgesendet.",
+                "Dispatch %s carries a cancel request — not submitting it.",
                 order.dispatch_id,
             )
             continue
@@ -385,9 +385,9 @@ def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
         if dispatch_id not in _CANCEL_UNRESOLVED:
             _CANCEL_UNRESOLVED.add(dispatch_id)
             log.warning(
-                "Storno fuer Dispatch %s angefordert, aber kein zugehoeriger "
-                "Auftrag auffindbar. Er ist bei IBKR vermutlich nicht mehr "
-                "offen. Falls doch: bitte in TWS stornieren.",
+                "Cancel requested for dispatch %s, but no matching order was "
+                "found. It is probably no longer open at IBKR. If it still is, "
+                "please cancel it in TWS.",
                 dispatch_id,
             )
         return
@@ -396,14 +396,14 @@ def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
         ibkr.cancel_order(trade.order)
         _CANCEL_SENT.add(dispatch_id)
         log.info(
-            "Storno fuer Dispatch %s an IBKR geschickt. Gemeldet wird er erst, "
-            "wenn der Broker ihn bestaetigt.",
+            "Cancel for dispatch %s sent to IBKR. It is reported only once the "
+            "broker confirms it.",
             dispatch_id,
         )
     except Exception as exc:
         log.error(
-            "Storno fuer Dispatch %s ist gescheitert: %s. Wird beim naechsten "
-            "Abruf erneut versucht.",
+            "Cancel for dispatch %s failed: %s. It will be retried on the next "
+            "poll.",
             dispatch_id,
             exc,
         )
@@ -587,8 +587,8 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
             # unbekannter Zustand ist entweder eine Ergaenzung der Bibliothek
             # oder ein Tippfehler in der Tabelle — beides will man sehen.
             log.warning(
-                "Unbekannter IBKR-Auftragszustand %r — nicht gemeldet. "
-                "Bitte melden, die Statustabelle ist unvollstaendig.",
+                "Unknown IBKR order status %r — not reported. Please report "
+                "this, the status table is incomplete.",
                 raw,
             )
             return
@@ -634,97 +634,6 @@ def cancel_is_genuine(trade: Any) -> bool:
     return code in _GENUINE_CANCEL_CODES
 
 
-# ── T1-96 B-1: der Mitschnitt, aus dem die Verfall-Regel entstehen soll ──────
-#
-# Ein Storno in TWS und ein Verfall zum Boersenschluss erzeugen in ib_insync
-# dasselbe Datum: `status = 'Cancelled'`, `message = ''`, `errorCode = 0`.
-# Beide laufen ueber `orderStatus` (wrapper.py:438), keiner ueber `error`.
-# Aus `trade.log` allein ist die Unterscheidung deshalb NICHT zu treffen —
-# die Annahme, der Bestaetigungscode entscheide, traegt nicht.
-#
-# Was es noch geben koennte, steht auf `errorEvent`: dorthin liefert ib_insync
-# jeden Code, auch die Warnung 202 samt Meldungstext. Ob IBKR dort zwischen
-# "vom Nutzer storniert" und "zum Schluss verfallen" unterscheidet, weiss hier
-# niemand — das laesst sich nur an laufendem TWS beobachten.
-#
-# Deshalb dieser Mitschnitt: er bewertet nichts und aendert nichts am Ergebnis.
-# Er schreibt bei jedem Endzustand eine Zeile ins Protokoll, in der beide
-# Kanaele nebeneinander stehen. Der naechste Smoke-Test — einmal in TWS
-# stornieren, einmal ein Limit zum Schluss verfallen lassen — beantwortet die
-# Frage damit aus Beobachtung statt aus Vermutung.
-_ORDER_NOTICES: dict[int, tuple[int, str]] = {}
-_ORDER_NOTICES_LOCK = threading.Lock()
-
-# Obergrenze, damit ein monatelang laufender Client nicht unbegrenzt waechst.
-# Aeltere Eintraege fallen zuerst heraus; ein Auftrag, der lange keine Meldung
-# mehr hatte, ist ohnehin laengst berichtet.
-_ORDER_NOTICES_MAX = 256
-
-
-def record_order_notice(req_id: int, error_code: int, error_string: str) -> None:
-    """Merkt die letzte IBKR-Meldung zu einem Auftrag. Nur fuers Protokoll."""
-    # reqId -1 sind Systemmeldungen ohne Auftragsbezug (Verbindungszustand,
-    # Marktdaten-Farmen). Sie gehoeren keinem Auftrag und wuerden den
-    # Mitschnitt nur zumuellen.
-    if req_id is None or req_id < 0:
-        return
-    with _ORDER_NOTICES_LOCK:
-        _ORDER_NOTICES[int(req_id)] = (int(error_code), str(error_string)[:300])
-        while len(_ORDER_NOTICES) > _ORDER_NOTICES_MAX:
-            _ORDER_NOTICES.pop(next(iter(_ORDER_NOTICES)))
-
-
-def _make_on_ibkr_error(_api: Any = None) -> Callable[..., None]:
-    """Baut den `errorEvent`-Empfaenger.
-
-    ib_insync ruft ihn mit (reqId, errorCode, errorString, contract) auf;
-    aeltere Fassungen ohne `contract`. Deshalb *args — ein Signaturfehler an
-    dieser Stelle wuerde eine Ausnahme im Ereignis-Thread von ib_insync
-    ausloesen, und das ist der Thread, an dem der ganze Auftragsweg haengt.
-    """
-
-    def on_error(*args: Any) -> None:
-        try:
-            req_id = int(args[0]) if len(args) > 0 else -1
-            code = int(args[1]) if len(args) > 1 else 0
-            text = str(args[2]) if len(args) > 2 else ""
-            record_order_notice(req_id, code, text)
-        except Exception:  # pragma: no cover - nie handelskritisch
-            pass
-
-    return on_error
-
-
-def order_notice_for(order_id: int) -> tuple[int, str] | None:
-    with _ORDER_NOTICES_LOCK:
-        return _ORDER_NOTICES.get(int(order_id))
-
-
-def _log_terminal_evidence(dispatch_id: str, trade: Any, mapped: str) -> None:
-    """Schreibt beide Kanaele nebeneinander ins Protokoll. Bewertet nichts."""
-    if mapped not in TERMINAL_STATES:
-        return
-    entries = getattr(trade, "log", None) or []
-    last = entries[-1] if entries else None
-    order_id = int(getattr(trade.order, "orderId", 0) or 0)
-    notice = order_notice_for(order_id)
-    log.info(
-        "T1-96-EVIDENCE dispatch=%s order=%s type=%s tif=%s status=%s "
-        "log.status=%r log.message=%r log.errorCode=%r "
-        "notice.code=%s notice.text=%r",
-        dispatch_id,
-        order_id,
-        getattr(trade.order, "orderType", ""),
-        getattr(trade.order, "tif", ""),
-        mapped,
-        getattr(last, "status", None),
-        getattr(last, "message", None),
-        getattr(last, "errorCode", None),
-        notice[0] if notice else None,
-        notice[1] if notice else None,
-    )
-
-
 def _defer_cancel_check(dispatch_id: str, trade: Any) -> None:
     """Merkt eine verdaechtige Stornierung zur Nachbeobachtung vor."""
     with _PENDING_CANCEL_LOCK:
@@ -737,10 +646,10 @@ def _defer_cancel_check(dispatch_id: str, trade: Any) -> None:
     entries = getattr(trade, "log", None) or []
     code = getattr(entries[-1], "errorCode", None) if entries else None
     log.warning(
-        "Stornierung fuer Dispatch %s kam mit Fehlercode %s statt einer "
-        "Stornobestaetigung. Das ist das Muster eines Phantom-Stornos aus "
-        "ib_insync — Meldung wird %.0fs zurueckgehalten und der Zustand danach "
-        "erneut gelesen.",
+        "Cancellation for dispatch %s arrived with error code %s instead of a "
+        "cancel confirmation. That is the signature of a phantom cancel from "
+        "ib_insync — holding the report for %.0fs and re-reading the state "
+        "afterwards.",
         dispatch_id,
         code,
         CANCEL_CONFIRM_DELAY_S,
@@ -776,8 +685,8 @@ def handle_deferred_cancels(
         mapped = _STATUS_MAP.get(raw)
         if mapped is None:
             log.warning(
-                "Nachbeobachtung fuer Dispatch %s: unbekannter Zustand %r, "
-                "nichts gemeldet.",
+                "Re-check for dispatch %s: unknown status %r, nothing "
+                "reported.",
                 dispatch_id,
                 raw,
             )
@@ -785,14 +694,14 @@ def handle_deferred_cancels(
 
         if mapped == "cancelled":
             log.info(
-                "Nachbeobachtung fuer Dispatch %s: der Auftrag ist weiterhin "
-                "storniert. Meldung geht jetzt raus.",
+                "Re-check for dispatch %s: the order is still cancelled. "
+                "Reporting it now.",
                 dispatch_id,
             )
         else:
             log.warning(
-                "Phantom-Storno fuer Dispatch %s aufgeloest: IBKR meldet %r. "
-                "Der Auftrag lebt — es wird %s gemeldet, nicht cancelled.",
+                "Phantom cancel for dispatch %s resolved: IBKR reports %r. "
+                "The order is alive — reporting %s, not cancelled.",
                 dispatch_id,
                 raw,
                 mapped,
@@ -811,8 +720,6 @@ def _report_status(
     avg_price = float(getattr(trade.orderStatus, "avgFillPrice", 0) or 0)
     order_type = str(getattr(trade.order, "orderType", "") or "")
     order_id = int(getattr(trade.order, "orderId", 0))
-
-    _log_terminal_evidence(dispatch_id, trade, mapped)
 
     # T1-96 B-2: der Nachweis reist mit.
     #
@@ -960,9 +867,6 @@ def main() -> int:
 
     dispatch_id_map: dict[int, str] = {}
     ibkr.subscribe_execution_callback(_make_on_order_status(api, dispatch_id_map))
-    # T1-96: der Mitschnitt der Meldungen, die `trade.log` nie erreichen.
-    # Aendert am Auftragsweg nichts, schreibt nur mit.
-    ibkr.subscribe_error_callback(_make_on_ibkr_error())
 
     # T1-88c: VOR der Schleife. Ohne diesen Schritt ist nach jedem Neustart
     # jeder vorher abgesendete Auftrag unauffindbar — und IBKR meldet TWS
