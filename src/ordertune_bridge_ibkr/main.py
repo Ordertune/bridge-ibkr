@@ -52,6 +52,7 @@ from .config import load_config
 from .fingerprint import compute_fingerprint
 from .ibkr_client import IbkrClient
 from .logging_setup import setup_logging
+from .probe import probe_requested, run_probe
 from .order_translator import make_contract, translate_intent
 from .position_sizing import (
     SizingConfig,
@@ -849,6 +850,16 @@ def main() -> int:
             exc,
         )
         return 1
+
+    # T1-94-Sonde: nur lesen, nichts absenden, dann beenden. Steht hier und
+    # nicht frueher, weil sie die Verbindung braucht — und hier, weil ab der
+    # naechsten Zeile die Plattform ins Spiel kaeme, die sie nicht braucht.
+    if probe_requested(sys.argv[1:]):
+        try:
+            run_probe(ibkr)
+        finally:
+            ibkr.disconnect()
+        return 0
 
     api = OrdertuneApiClient(
         base_url=str(config.ordertune_api_base),

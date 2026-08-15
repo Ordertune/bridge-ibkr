@@ -47,6 +47,21 @@ UPDATE_CHECK_ENABLED=true
 - **Order-Result-Push**: nach jedem Fill/Cancel/Reject wird ein Result-Event an Ordertune gesendet
 - **Update-Check** beim Start: prüft GitHub Latest Release und zeigt Warning bei neuerer Version
 
+## Diagnose: `--probe-foreign`
+
+```
+ordertune-bridge-ibkr.exe --probe-foreign
+```
+
+Verbindet sich, fragt IBKR dreimal — offene Aufträge über alle Clients,
+abgeschlossene des Tages einschliesslich der von Hand in TWS gestellten, sowie
+die Ausführungen des Tages —, schreibt auf, was zurückkommt, und beendet sich.
+
+**Es geht dabei kein Auftrag hinaus und keiner wird verändert.** Der Schalter
+beantwortet eine einzige Frage: sieht diese Verbindung überhaupt etwas von
+Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
+`FOREIGN` gekennzeichnet.
+
 ## Sicherheit
 
 - Der Access-Token wird nur lokal in `bridge.env` gespeichert. Er kann jederzeit über die Ordertune-Settings widerrufen werden.

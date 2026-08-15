@@ -246,6 +246,29 @@ class IbkrClient:
         """
         self._ib.cancelOrder(order)
 
+    def all_open_trades(self) -> list[Any]:
+        """T1-94-Sonde: alle offenen Auftraege, ueber alle Clients hinweg.
+
+        Dasselbe wie `open_trades`, nur mit anderem Zweck — dort geht es um
+        unsere eigenen nach einem Neustart, hier um die Frage, ob fremde
+        ueberhaupt sichtbar sind. Als eigene Methode, damit die Absicht am
+        Aufrufer ablesbar bleibt.
+        """
+        return list(self._ib.reqAllOpenOrders())
+
+    def completed_trades(self, api_only: bool = False) -> list[Any]:
+        """T1-94-Sonde: abgeschlossene Auftraege des laufenden Tages.
+
+        `api_only=False` schliesst die von Hand in TWS gestellten ausdruecklich
+        ein — so steht es im Parameter von ib_insync. IBKR haelt nur den
+        laufenden Tag vor.
+        """
+        return list(self._ib.reqCompletedOrders(apiOnly=api_only))
+
+    def executions(self) -> list[Any]:
+        """T1-94-Sonde: die Ausfuehrungen des laufenden Tages."""
+        return list(self._ib.reqExecutions())
+
     def open_trades(self) -> list[Any]:
         """Alle bei IBKR offenen Auftraege, frisch erfragt.
 
