@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from ordertune_bridge_ibkr import main as m
 from ordertune_bridge_ibkr import probe
 
 
@@ -165,3 +166,65 @@ def test_the_probe_never_sends_anything() -> None:
     probe.run_probe(ibkr)
     assert not hasattr(ibkr, "place_order")
     assert not hasattr(ibkr, "cancel_order")
+
+
+# ── Was die Messung vom 2026-08-15 zugesichert haben will ────────────────────
+#
+# Der von Hand gestellte TXN-Auftrag kam so zurueck:
+#
+#   [FOREIGN] TXN BUY MKT qty=1.0 status=PendingCancel
+#             orderId=0 clientId=0 permId=1960849477 orderRef=''
+#
+# **orderId 0.** TWS vergibt fuer fremde Auftraege keine API-Auftragsnummer.
+# Damit traegt JEDER fremde Auftrag dieselbe 0 — und `dispatch_id_map` ist
+# genau darueber geschluesselt. Stuende die 0 je als Schluessel darin, zeigte
+# jeder fremde Auftrag auf denselben Dispatch, und eine fremde Ausfuehrung
+# wuerde gegen ein Signal von uns gemeldet. Mit Echtgeld.
+#
+# `register_trade` haelt die 0 heraus. Das war bisher eine beilaeufige
+# Bedingung ohne Zusicherung; seit der Messung ist es die tragende.
+
+
+def _fremder_trade_wie_gemessen() -> SimpleNamespace:
+    return SimpleNamespace(
+        order=SimpleNamespace(orderId=0, clientId=0, permId=1960849477, orderRef=""),
+        orderStatus=SimpleNamespace(
+            status="PendingCancel", filled=0.0, avgFillPrice=0.0
+        ),
+        log=[SimpleNamespace(status="PendingCancel", message="", errorCode=0)],
+        fills=[],
+    )
+
+
+def test_zero_never_becomes_a_key_in_the_dispatch_map() -> None:
+    dispatch_id_map: dict[int, str] = {}
+    m.register_trade(dispatch_id_map, "disp-1", _fremder_trade_wie_gemessen())
+
+    assert 0 not in dispatch_id_map, (
+        "Jeder fremde TWS-Auftrag traegt orderId 0. Als Schluessel wuerde die 0 "
+        "sie alle auf denselben Dispatch zeigen lassen."
+    )
+
+
+def test_a_foreign_order_status_is_reported_to_nobody() -> None:
+    """Die Zusage aus der Sonde: fremde Auftraege werden nicht gemeldet.
+
+    Waehrend der Messung hat `reqAllOpenOrders` ein `orderStatus`-Ereignis fuer
+    den fremden Auftrag ausgeloest. Mit laufender Bridge waere es beim Rueckruf
+    angekommen — und muss dort folgenlos bleiben, solange T1-94 nicht gebaut
+    ist.
+    """
+    api = FakeApi()
+    on_status = m._make_on_order_status(api, {59: "d-eigen"})
+
+    on_status(_fremder_trade_wie_gemessen())
+
+    assert api.calls == []
+
+
+class FakeApi:
+    def __init__(self) -> None:
+        self.calls: list[Any] = []
+
+    def result_order(self, dispatch_id: str, **kwargs: Any) -> None:
+        self.calls.append({"dispatchId": dispatch_id, **kwargs})
