@@ -866,7 +866,7 @@ def main() -> int:
         return 1
 
     dispatch_id_map: dict[int, str] = {}
-    ibkr.subscribe_execution_callback(_make_on_order_status(api, dispatch_id_map))
+    ibkr.subscribe_order_status_callback(_make_on_order_status(api, dispatch_id_map))
 
     # T1-88c: VOR der Schleife. Ohne diesen Schritt ist nach jedem Neustart
     # jeder vorher abgesendete Auftrag unauffindbar — und IBKR meldet TWS

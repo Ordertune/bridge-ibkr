@@ -255,9 +255,32 @@ class IbkrClient:
         """
         return list(self._ib.reqAllOpenOrders())
 
-    def subscribe_execution_callback(self, cb: Any) -> None:
-        """Register callback for order status updates."""
-        self._ib.execDetailsEvent += cb  # type: ignore[operator]
+    def subscribe_order_status_callback(self, cb: Any) -> None:
+        """Meldet Zustandsaenderungen von Auftraegen. Ein Argument: der Auftrag.
+
+        ## Warum hier NICHT auch `execDetailsEvent` haengt
+
+        Bis 0.4.1 stand hier zusaetzlich `self._ib.execDetailsEvent += cb`, und
+        das hat nie funktioniert: `execDetailsEvent` emittiert `(trade, fill)`,
+        der Rueckruf nimmt ein Argument. eventkit faengt den TypeError ab und
+        schreibt ihn samt Traceback ins Protokoll — bei **jeder** Ausfuehrung,
+        seit es diese Zeile gibt.
+
+        Der naheliegende Fix waere, den Rueckruf `*args` nehmen zu lassen. Das
+        waere schlimmer als der Fehler, den er behebt:
+
+        `execDetails` trifft ein, sobald die Ausfuehrung vorliegt — die
+        Gebuehrenabrechnung kommt als eigenes, spaeteres Ereignis. Der Rueckruf
+        wuerde also `filled` melden, waehrend `_sum_commission` noch nichts
+        findet, und die spaetere `orderStatus`-Meldung mit derselben Aussage
+        faellt in `should_report` heraus. Ergebnis: die Gebuehr, an der die
+        Kostenbasis aus T1-78 haengt, ginge dauerhaft verloren.
+
+        `orderStatusEvent` allein traegt ohnehin alles: ib_insync vergleicht
+        dort den gesamten Auftragszustand, eine geaenderte Fuellmenge loest also
+        ein Ereignis aus. Genau darueber sind alle Ausfuehrungen bisher
+        gemeldet worden — der zweite Weg war seit jeher tot.
+        """
         self._ib.orderStatusEvent += cb  # type: ignore[operator]
 
     def sleep(self, seconds: float) -> None:

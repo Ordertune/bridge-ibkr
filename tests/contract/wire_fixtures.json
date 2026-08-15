@@ -42,13 +42,13 @@
   ],
 
   "contractVersion": "t1-96",
-  "bridgeVersion": "0.4.1",
+  "bridgeVersion": "0.4.2",
 
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.4.1",
+      "bridgeVersion": "0.4.2",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -62,7 +62,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.1",
+      "bridgeVersion": "0.4.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -92,7 +92,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.1",
+      "bridgeVersion": "0.4.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -108,7 +108,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.1",
+      "bridgeVersion": "0.4.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
