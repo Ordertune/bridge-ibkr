@@ -316,6 +316,29 @@ class OrdertuneApiClient:
             json=body,
         )
 
+    def report_external_execution(self, body: dict[str, Any]) -> bool:
+        """T1-94: POST /executions/external — eine Ausfuehrung, die nicht von uns ist.
+
+        Gibt zurueck, ob die Plattform sie NEU gebucht hat. `False` heisst in
+        aller Regel „kannten wir schon" und ist der Normalfall: die Bridge
+        fragt im Minutentakt ab, und nach einem Neustart ist ihr Gedaechtnis
+        leer. Die Entdopplung liegt auf dem Server, weil nur er den Neustart
+        ueberlebt.
+
+        Der Koerper wird hier NICHT umgebaut — er kommt fertig aus
+        `external_execution_bodies`, damit die Auswahl an einer Stelle liegt
+        und dort ohne Netz pruefbar ist.
+        """
+        response = _request_with_retry(
+            "POST", self._client,
+            f"{self._base}/api/bridge/v1/executions/external",
+            json=body,
+        )
+        try:
+            return bool(response.json().get("stored"))
+        except Exception:  # pragma: no cover - defensiv, nie handelskritisch
+            return False
+
     def result_order(
         self,
         dispatch_id: str,

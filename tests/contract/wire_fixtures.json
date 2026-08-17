@@ -41,14 +41,14 @@
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
 
-  "contractVersion": "t1-96",
-  "bridgeVersion": "0.4.4",
+  "contractVersion": "t1-94",
+  "bridgeVersion": "0.5.0",
 
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.4.4",
+      "bridgeVersion": "0.5.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -62,7 +62,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.4",
+      "bridgeVersion": "0.5.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -92,7 +92,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.4",
+      "bridgeVersion": "0.5.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -108,7 +108,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.4.4",
+      "bridgeVersion": "0.5.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -179,6 +179,41 @@
       "filledAtClient": "2026-08-14T10:02:11.004Z",
       "reasonCode": "limit_not_reached",
       "brokerConfirmedEnd": false
+    }
+  },
+
+  "externalExecution": {
+    "_comment": "T1-94 — eine Ausfuehrung im Depot, die nicht von uns stammt. Die tatsaechlich gemessenen Zahlen vom 2026-08-17: manueller FTNT-Kauf in TWS. `brokerExecId` ist der Entdopplungsschluessel; `brokerOrderId` fehlt bewusst, denn fremde Auftraege tragen dort 0.",
+    "method": "POST",
+    "path": "/api/bridge/v1/executions/external",
+    "body": {
+      "brokerExecId": "00015963.6a82ffde.01.01",
+      "brokerPermId": "1433603962",
+      "symbol": "FTNT",
+      "side": "buy",
+      "qty": 1.0,
+      "price": 157.21,
+      "executedAt": "2026-08-17T13:49:53Z",
+      "orderType": "MKT",
+      "orderRef": "",
+      "commissionUsd": 1.9
+    }
+  },
+
+  "externalExecutionWithoutCommission": {
+    "_comment": "T1-94 — dieselbe Ausfuehrung, bevor die Gebuehrenabrechnung eingetroffen ist. Das Feld FEHLT, statt 0 zu tragen: `CommissionReport()` hat 0.0 als Vorgabewert, und eine gebuchte 0 waere eine Behauptung ueber geflossenes Geld. Die Plattform schreibt dann NULL.",
+    "method": "POST",
+    "path": "/api/bridge/v1/executions/external",
+    "body": {
+      "brokerExecId": "00018d30.6a830453.01.01",
+      "brokerPermId": "1433603965",
+      "symbol": "FTNT",
+      "side": "sell",
+      "qty": 1.0,
+      "price": 156.88,
+      "executedAt": "2026-08-17T13:53:49Z",
+      "orderType": "MKT",
+      "orderRef": ""
     }
   },
 
