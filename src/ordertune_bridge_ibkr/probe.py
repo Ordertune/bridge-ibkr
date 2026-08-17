@@ -46,6 +46,11 @@ PROBE_FLAG = "--probe-foreign"
 
 ORDER_REF_PREFIX = "ot-"
 
+# Wie lange nach dem Abruf auf die Gebuehrenabrechnung gewartet wird. Gemessen
+# am 2026-08-17 traf sie im selben Sekundenbruchteil ein; zwei Sekunden sind
+# reichlich Reserve fuer eine Diagnose, die ohnehin nur einmal laeuft.
+COMMISSION_GRACE_S = 2.0
+
 
 def probe_requested(argv: list[str]) -> bool:
     """Steht die Sonde auf der Befehlszeile?
@@ -161,12 +166,28 @@ def run_probe(ibkr: Any) -> None:
         log.error("reqCompletedOrders ist gescheitert: %s", exc)
 
     try:
-        fills = ibkr.executions()
+        # Der Abruf holt die Ausfuehrungen. Die Gebuehr haengt danach noch
+        # nicht daran: `wrapper.commissionReport` schreibt sie als eigenes,
+        # spaeteres Ereignis in dasselbe Fill-Objekt. Am 2026-08-17 stand in
+        # dieser Zeile deshalb `commission=0.0`, waehrend zwei Zeilen darueber
+        # im Protokoll `commission=1.9` zu lesen war — kein Messwert, sondern
+        # ein Feld-Default.
+        #
+        # Dieselbe Staffelung zeigt sich an drei Stellen desselben Vorgangs:
+        # die Ausfuehrung kommt zuerst, die Gebuehr danach, und IBKR schreibt
+        # sogar `Position.avgCost` nach (157.21 wurde zu 159.11 = Kurs plus
+        # Gebuehr). Wer zu frueh liest, bekommt jedes Mal eine Zahl, die
+        # richtig aussieht.
+        ibkr.executions()
+        ibkr.sleep(COMMISSION_GRACE_S)
+        fills = ibkr.fills()
         _abschnitt(
             "reqExecutions — Ausfuehrungen des Tages",
             [describe_fill(f) for f in fills],
-            "Die Quelle fuer Herkunft, Uhrzeit, Kurs und Gebuehr. IBKR haelt "
-            "nur den laufenden Tag vor.",
+            f"Die Quelle fuer Herkunft, Uhrzeit, Kurs und Gebuehr. Gelesen "
+            f"{COMMISSION_GRACE_S:.0f}s nach dem Abruf, damit die "
+            f"Gebuehrenabrechnung eintreffen konnte. IBKR haelt nur den "
+            f"laufenden Tag vor.",
         )
     except Exception as exc:
         log.error("reqExecutions ist gescheitert: %s", exc)

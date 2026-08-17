@@ -85,21 +85,44 @@ def test_one_of_ours_is_marked_as_ours() -> None:
     assert "[OURS" in probe.describe_trade(auftrag)
 
 
+def _fremde_ausfuehrung(commission: float = 1.9) -> SimpleNamespace:
+    """Die gemessene FTNT-Ausfuehrung vom 2026-08-17."""
+    return SimpleNamespace(
+        contract=SimpleNamespace(symbol="FTNT"),
+        execution=SimpleNamespace(
+            side="BOT", shares=1.0, price=157.21,
+            time="2026-08-17 13:49:53+00:00",
+            orderId=0, clientId=0, permId=1433603962,
+            execId="00015963.6a82ffde.01.01", orderRef="",
+        ),
+        commissionReport=SimpleNamespace(commission=commission),
+    )
+
+
 def test_a_fill_carries_what_an_external_row_would_need() -> None:
     """Herkunft, Menge, Kurs, Zeitpunkt, Gebuehr."""
-    fill = SimpleNamespace(
-        contract=SimpleNamespace(symbol="TXN"),
-        execution=SimpleNamespace(
-            side="BOT", shares=1.0, price=280.54, time="2026-08-17T13:31:07Z",
-            orderId=61, clientId=0, permId=421610881, execId="0001a.01",
-            orderRef="",
-        ),
-        commissionReport=SimpleNamespace(commission=1.0),
-    )
-    zeile = probe.describe_fill(fill)
+    zeile = probe.describe_fill(_fremde_ausfuehrung())
     assert "[FOREIGN]" in zeile
-    for feld in ("shares=1.0", "price=280.54", "time=", "commission=1.0"):
+    for feld in ("shares=1.0", "price=157.21", "time=", "commission=1.9"):
         assert feld in zeile, feld
+
+
+def test_the_commission_is_read_after_the_grace_period() -> None:
+    """Der Fehler vom 2026-08-17: `commission=0.0` war kein Messwert.
+
+    `reqExecutions()` liefert die Ausfuehrung, die Gebuehrenabrechnung kommt
+    als eigenes, spaeteres Ereignis und wird von `wrapper.commissionReport`
+    nachtraeglich in dasselbe Fill-Objekt geschrieben. Wer sofort liest, sieht
+    den Feld-Default 0.0 und haelt ihn fuer eine gemessene Null.
+
+    Die Sonde ruft deshalb ab, wartet, und liest dann aus `fills()`.
+    """
+    ibkr = FakeIbkr()
+    probe.run_probe(ibkr)
+
+    assert ibkr.geschlafen == probe.COMMISSION_GRACE_S
+    assert ibkr.aufgerufen.index("sleep") > ibkr.aufgerufen.index("executions")
+    assert ibkr.aufgerufen.index("fills") > ibkr.aufgerufen.index("sleep")
 
 
 # ── Verhalten der Sonde ──────────────────────────────────────────────────────
@@ -112,6 +135,7 @@ class FakeIbkr:
         self.fehler = fehler
         self.aufgerufen: list[str] = []
         self.api_only_wert: Any = "nicht aufgerufen"
+        self.geschlafen: float | None = None
 
     def _vielleicht(self, name: str) -> None:
         self.aufgerufen.append(name)
@@ -129,7 +153,17 @@ class FakeIbkr:
 
     def executions(self) -> list[Any]:
         self._vielleicht("executions")
-        return []
+        # Wie bei IBKR: der Abruf liefert die Ausfuehrung OHNE Gebuehr.
+        return [_fremde_ausfuehrung(commission=0.0)]
+
+    def sleep(self, seconds: float) -> None:
+        self._vielleicht("sleep")
+        self.geschlafen = seconds
+
+    def fills(self) -> list[Any]:
+        self._vielleicht("fills")
+        # Und danach steht sie daran — dasselbe Objekt, nachtraeglich befuellt.
+        return [_fremde_ausfuehrung(commission=1.9)]
 
 
 def test_the_probe_asks_all_three_channels(caplog: pytest.LogCaptureFixture) -> None:
@@ -137,7 +171,13 @@ def test_the_probe_asks_all_three_channels(caplog: pytest.LogCaptureFixture) -> 
     with caplog.at_level(logging.INFO):
         probe.run_probe(ibkr)
 
-    assert ibkr.aufgerufen == ["all_open_trades", "completed_trades", "executions"]
+    assert ibkr.aufgerufen == [
+        "all_open_trades",
+        "completed_trades",
+        "executions",
+        "sleep",
+        "fills",
+    ]
     assert ibkr.api_only_wert is False, (
         "Mit apiOnly=True fielen genau die von Hand gestellten Auftraege heraus "
         "— also das, wonach gesucht wird."
@@ -152,7 +192,7 @@ def test_a_refused_channel_does_not_take_the_others_down(
     with caplog.at_level(logging.INFO):
         probe.run_probe(ibkr)
 
-    assert ibkr.aufgerufen == ["all_open_trades", "completed_trades", "executions"]
+    assert ibkr.aufgerufen[:3] == ["all_open_trades", "completed_trades", "executions"]
     assert any("ist gescheitert" in r.getMessage() for r in caplog.records)
 
 

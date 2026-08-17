@@ -266,8 +266,22 @@ class IbkrClient:
         return list(self._ib.reqCompletedOrders(apiOnly=api_only))
 
     def executions(self) -> list[Any]:
-        """T1-94-Sonde: die Ausfuehrungen des laufenden Tages."""
+        """T1-94-Sonde: die Ausfuehrungen des laufenden Tages.
+
+        Loest den Abruf aus. Die Gebuehr steht danach noch NICHT daran — sie
+        kommt als eigenes Ereignis hinterher. Dafuer `fills()`.
+        """
         return list(self._ib.reqExecutions())
+
+    def fills(self) -> list[Any]:
+        """Die Ausfuehrungen aus dem Speicher von ib_insync, mit Gebuehr.
+
+        `wrapper.commissionReport` schreibt die Gebuehr nachtraeglich in
+        dasselbe Fill-Objekt (`dataclassUpdate(fill.commissionReport, ...)`).
+        Wer direkt nach `reqExecutions()` liest, sieht deshalb den Feld-Default
+        0.0 und haelt ihn fuer eine Messung.
+        """
+        return list(self._ib.fills())
 
     def open_trades(self) -> list[Any]:
         """Alle bei IBKR offenen Auftraege, frisch erfragt.
