@@ -51,6 +51,10 @@ from .api_client import OrdertuneApiClient
 from .config import load_config
 from .fingerprint import compute_fingerprint
 from .ibkr_client import IbkrClient
+from .external_executions import (
+    external_execution_bodies,
+    order_types_by_perm_id,
+)
 from .logging_setup import setup_logging
 from .probe import probe_requested, run_probe
 from .order_translator import make_contract, translate_intent
@@ -408,6 +412,77 @@ def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
             dispatch_id,
             exc,
         )
+
+
+# T1-94: welche fremden Ausfuehrungen diese Sitzung schon gemeldet hat.
+#
+# Reine Sparsamkeit, KEINE Sicherung: der Abruf laeuft im Minutentakt und
+# lieferte sonst dieselbe Ausfuehrung sechzigmal pro Stunde. Nach einem Neustart
+# ist die Menge leer und alles wird erneut gemeldet — die Entdopplung liegt
+# deshalb auf dem Server, denn nur er ueberlebt den Neustart.
+_REPORTED_EXTERNAL: set[str] = set()
+
+# Wie lange nach dem Abruf auf die Gebuehrenabrechnung gewartet wird. Sie
+# trifft als eigenes, spaeteres Ereignis ein und wird nachtraeglich in dasselbe
+# Fill-Objekt geschrieben; gemessen am 2026-08-17 im selben Sekundenbruchteil.
+EXTERNAL_COMMISSION_GRACE_S = 2.0
+
+
+def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
+    """Fragt nach Ausfuehrungen, die nicht von uns sind, und meldet sie.
+
+    Laeuft im Heartbeat-Takt. Der Takt existiert ohnehin, und ein Abruf pro
+    Minute ist der billigste Ausloeser, den es gibt.
+
+    Bewusst NICHT an eine Positionsaenderung gekoppelt: Kauf und Verkauf
+    zwischen zwei Takten heben sich im Bestand auf, und beide Zeilen waeren
+    verloren.
+
+    Faengt alles ab. Der Heartbeat ist das Lebenszeichen der Bridge; ein
+    Fehlschlag hier darf ihn unter keinen Umstaenden mitreissen.
+    """
+    try:
+        ibkr.executions()
+        ibkr.sleep(EXTERNAL_COMMISSION_GRACE_S)
+        fills = ibkr.fills()
+        if not fills:
+            return
+
+        # Der Ordertyp haengt am Auftrag, nicht an der Ausfuehrung. Ueber die
+        # permId laesst er sich dazuholen — aus offenen wie abgeschlossenen.
+        order_types = order_types_by_perm_id(
+            ibkr.all_open_trades() + ibkr.completed_trades(api_only=False)
+        )
+
+        bodies = external_execution_bodies(
+            fills, order_types, _REPORTED_EXTERNAL
+        )
+    except Exception as exc:
+        log.warning("Could not collect external executions: %s", exc)
+        return
+
+    for body in bodies:
+        try:
+            stored = api.report_external_execution(body)
+        except Exception as exc:
+            # Nicht vermerken: beim naechsten Takt erneut versuchen.
+            log.warning(
+                "Could not report external execution %s: %s",
+                body["brokerExecId"],
+                exc,
+            )
+            continue
+
+        _REPORTED_EXTERNAL.add(body["brokerExecId"])
+        if stored:
+            log.info(
+                "External execution recorded: %s %s %s @ %s (execId %s)",
+                body["symbol"],
+                body["side"],
+                body["qty"],
+                body["price"],
+                body["brokerExecId"],
+            )
 
 
 def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
@@ -905,9 +980,16 @@ def main() -> int:
     )
 
     try:
+        def _beat() -> None:
+            # Zuerst das Lebenszeichen, dann die Fremdsicht. Umgekehrt haette
+            # ein langsamer Abruf den Heartbeat verzoegert, und der ist das
+            # Einzige, woran die Plattform erkennt, dass die Bridge lebt.
+            _handle_heartbeat(api, ibkr)
+            _handle_external_executions(api, ibkr)
+
         run_loop(
             ibkr,
-            heartbeat=lambda: _handle_heartbeat(api, ibkr),
+            heartbeat=_beat,
             pending=lambda: _handle_pending(api, ibkr, dispatch_id_map),
             stop=stop,
             on_tick=lambda: handle_deferred_cancels(api),

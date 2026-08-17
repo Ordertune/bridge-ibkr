@@ -334,6 +334,35 @@ def test_result_without_confirmation_omits_the_field() -> None:
     assert "brokerConfirmedEnd" not in rec.body
 
 
+def test_external_execution_matches_contract() -> None:
+    """T1-94 — der Koerper geht unveraendert hinaus.
+
+    Die Auswahl und das Formen liegen in `external_execution_bodies`, damit
+    beides ohne Netz pruefbar ist. Der Client haengt hier nichts an und laesst
+    nichts weg — genau das prueft dieser Test, denn ein stilles Umbauen an der
+    Aussengrenze ist die Fehlerklasse, aus der T1-78 entstanden ist.
+    """
+    expected = FIXTURES["externalExecution"]["body"]
+    rec = _Recorder()
+    api = _client(rec)
+    api.report_external_execution(dict(expected))
+
+    assert rec.body == expected
+    assert rec.method == "POST"
+    assert "/api/bridge/v1/executions/external" in rec.url
+
+
+def test_an_external_execution_without_commission_keeps_the_field_out() -> None:
+    """Fehlt die Gebuehr, fehlt das Feld — sie wird nicht zu 0 ergaenzt."""
+    expected = FIXTURES["externalExecutionWithoutCommission"]["body"]
+    rec = _Recorder()
+    api = _client(rec)
+    api.report_external_execution(dict(expected))
+
+    assert rec.body == expected
+    assert "commissionUsd" not in rec.body
+
+
 def test_result_rejected_matches_contract() -> None:
     expected = FIXTURES["orderResultRejected"]["body"]
     rec = _Recorder()
@@ -358,6 +387,8 @@ def test_result_rejected_matches_contract() -> None:
         "orderResultFilled",
         "orderResultCancelConfirmed",
         "orderResultCancelUnconfirmed",
+        "externalExecution",
+        "externalExecutionWithoutCommission",
     ],
 )
 def test_no_snake_case_keys_on_the_wire(key: str) -> None:
