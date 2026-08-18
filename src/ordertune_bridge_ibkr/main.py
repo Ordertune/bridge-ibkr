@@ -43,7 +43,7 @@ import sys
 import threading
 import time
 from datetime import datetime, time as dt_time, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from . import __version__
@@ -57,6 +57,10 @@ from .external_executions import (
 )
 from .logging_setup import setup_logging
 from .probe import probe_requested, run_probe
+from .order_reconcile import (
+    UnresolvedDispatch,
+    reconcile_open_dispatches,
+)
 from .order_translator import make_contract, translate_intent
 from .position_sizing import (
     SizingConfig,
@@ -205,7 +209,24 @@ _LAST_REPORTED: dict[str, str] = {}
 # Rangfolge der Endzustaende. Ein Endzustand darf einen bereits gemeldeten nur
 # ersetzen, wenn er hoeher steht. Eine Ausfuehrung ist die staerkste Aussage,
 # die es gibt: sie ist am Konto passiert und laesst sich nicht widerrufen.
-_TERMINAL_RANK = {"expired": 1, "cancelled": 1, "rejected": 1, "partial": 2, "filled": 3}
+# T1-98 / BUG-98-1: `unknown` steht mit Rang 0 UNTER allem anderen.
+#
+# Ohne Eintrag hier fiel es aus der Rangfolge heraus, und `should_report`
+# liess es jeden bereits gemeldeten Endzustand ueberschreiben — eine
+# bestaetigte Stornierung waere durch ein "wir wissen es nicht" ersetzt
+# worden. Genau die Richtung, gegen die die Rangfolge nach dem 2026-08-13
+# ueberhaupt eingefuehrt wurde: was belegt ist, bleibt belegt.
+#
+# Umgekehrt gilt weiter: eine spaetere Ausfuehrung darf ein `unknown`
+# ueberschreiben. Sie ist am Konto passiert.
+_TERMINAL_RANK = {
+    "unknown": 0,
+    "expired": 1,
+    "cancelled": 1,
+    "rejected": 1,
+    "partial": 2,
+    "filled": 3,
+}
 
 
 def should_report(dispatch_id: str, mapped: str) -> bool:
@@ -485,6 +506,134 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
             )
 
 
+def _handle_order_reconcile(
+    api: OrdertuneApiClient,
+    ibkr: IbkrClient,
+    session_connected_at: datetime,
+) -> None:
+    """T1-98 — was die Plattform als offen fuehrt, gegen das, was IBKR kennt.
+
+    Faengt alles ab. Der Abgleich ist eine Zusatzleistung; sein Fehlschlag darf
+    weder den Heartbeat noch den Sendeweg beruehren.
+
+    Die Zuordnung laeuft ueber den Auftragsvermerk `ot-<dispatchId>` und NICHT
+    ueber die Auftragsnummer: die wechselt mit der Client-Kennung, der Vermerk
+    nicht. Genau deshalb funktioniert der Wiederaufbau nach einem Neustart
+    ueberhaupt.
+    """
+    try:
+        rows = api.get_unresolved()
+    except Exception as exc:
+        # Auch ein 404 landet hier — eine Plattform vor T1-98 kennt den Weg
+        # nicht. Ohne Sollmenge wird nichts entschieden, und das ist richtig.
+        log.debug("Could not fetch unresolved dispatches: %s", exc)
+        return
+
+    if not rows:
+        return
+
+    unresolved = [
+        UnresolvedDispatch(
+            dispatch_id=row["dispatchId"],
+            symbol=row.get("symbol", ""),
+            submitted_at=_parse_iso(row.get("submittedAt")),
+        )
+        for row in rows
+        if row.get("dispatchId")
+    ]
+
+    open_query_failed = False
+    try:
+        open_by_ref = _by_dispatch_ref(ibkr.open_trades())
+    except Exception as exc:
+        # Eine leere Ablage aus einem Abfragefehler saehe aus wie ein leeres
+        # Buch — und daraus wuerde die Aussage "IBKR kennt keinen deiner
+        # Auftraege mehr". Dieselbe Unterscheidung wie bei den Positionen in
+        # T1-99: kein Eintrag ist etwas anderes als keine Antwort.
+        log.warning("Could not query open orders for reconcile: %s", exc)
+        open_by_ref = {}
+        open_query_failed = True
+
+    completed_by_ref: dict[str, Any] = {}
+    if not open_query_failed:
+        try:
+            completed_by_ref = _by_dispatch_ref(
+                ibkr.completed_trades(api_only=False)
+            )
+        except Exception as exc:
+            # Der Grund fehlt dann, der Abgleich laeuft trotzdem: ohne die
+            # abgeschlossenen Auftraege wird ein verschollener Auftrag als
+            # ungeklaert gemeldet statt als abgelehnt. Das ist die schwaechere,
+            # aber nie die falsche Aussage.
+            log.warning("Could not query completed orders: %s", exc)
+
+    actions = reconcile_open_dispatches(
+        unresolved=unresolved,
+        open_by_ref=open_by_ref,
+        completed_by_ref=completed_by_ref,
+        session_connected_at=session_connected_at,
+        open_query_failed=open_query_failed,
+    )
+
+    for action in actions:
+        if not should_report(action.dispatch_id, action.status):
+            continue
+        try:
+            api.result_order(
+                action.dispatch_id,
+                status=action.status,
+                reason_code=action.reason_code,
+                error_message=action.error_message,
+            )
+            log.info(
+                "Reconciled dispatch %s -> %s (%s)",
+                action.dispatch_id,
+                action.status,
+                action.reason_code,
+            )
+        except Exception as exc:
+            log.warning(
+                "Could not report reconciled dispatch %s: %s",
+                action.dispatch_id,
+                exc,
+            )
+
+
+def _by_dispatch_ref(trades: Iterable[Any]) -> dict[str, Any]:
+    """Auftragsliste -> Ablage nach Dispatch-Kennung.
+
+    Auftraege ohne unseren Vermerk fallen weg: was ohne `ot-`-Kennung im Buch
+    liegt, hat der Nutzer selbst gestellt und geht uns nichts an. Dieselbe
+    Grenze wie bei den fremden Positionen in T1-94.
+    """
+    out: dict[str, Any] = {}
+    for trade in trades:
+        dispatch_id = dispatch_id_from_order_ref(
+            getattr(getattr(trade, "order", None), "orderRef", None)
+        )
+        if dispatch_id:
+            out[dispatch_id] = trade
+    return out
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    """ISO-Zeitpunkt von der Leitung, oder nichts.
+
+    `None` heisst hier "kein Absendezeitpunkt bekannt", und der Abgleich
+    entscheidet daraufhin nichts — ohne ihn laesst sich der Riegel gegen das
+    Phantom nicht stellen.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
     if not ibkr.is_connected():
         log.warning("heartbeat: IBKR disconnected — skipping snapshot push")
@@ -577,6 +726,45 @@ _LIVE_STATES = {"submitting", "working"}
 #   10148 Auftrag konnte nicht storniert werden, weil bereits storniert
 #   0     kein Fehler, also eine Zustandsmeldung von IBKR selbst
 _GENUINE_CANCEL_CODES = {0, 202, 10148}
+
+# ── T1-102 A: eine Ablehnung ist keine Warnung ───────────────────────────────
+#
+# Die Regel darueber liest jeden Fehlercode ausserhalb der Storno-Liste als
+# "verdaechtig" und haelt den Auftrag im Zweifel fuer lebend. Fuer den Hinweis
+# 10349 vom 2026-08-13 war das richtig — er ist eine Warnung, und der Auftrag
+# lebte weiter.
+#
+# Am 2026-08-18 traf dieselbe Regel den Code 201:
+#
+#   Error 201, reqId 330: Order abgewiesen - Grund:Verfuegbare Mittel in
+#   Basiswaehrung: 1037.11 USD Barmittel fuer diese und weitere offene Orders
+#   benoetigt: 1418.40 USD
+#
+# 201 ist IBKRs Wort fuer "abgelehnt". Der Auftrag ist tot, und zwar auf
+# Ansage. Die Nachbeobachtung las danach `Inactive`, bildete das auf `working`
+# ab, und CRWD stand auf t1 als "AT BROKER" ueber einem Auftrag, den IBKR nie
+# angenommen hat.
+#
+# Bewusst eine ENGE, belegte Liste und keine Heuristik ueber Zahlenbereiche:
+# was hier falsch geraten wird, kostet entweder einen Echtauftrag oder ein
+# verlorenes Signal. Neue Codes kommen dazu, wenn sie beobachtet wurden — nicht
+# vorher.
+#
+#   201  Order rejected — IBKR weist den Auftrag ab, mit Begruendung im Text
+_REJECTION_CODES = {201}
+
+
+def rejection_reason(trade: Any) -> str | None:
+    """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
+
+    Durchsucht das Protokoll von hinten. `None` heisst "keine Ablehnung
+    gefunden" — und dann bleibt es bei der Vorsicht aus T1-88b.
+    """
+    for entry in reversed(list(getattr(trade, "log", None) or [])):
+        if getattr(entry, "errorCode", 0) in _REJECTION_CODES:
+            message = (getattr(entry, "message", "") or "").strip()
+            return message or "Rejected by IBKR."
+    return None
 
 # Wie lange eine verdaechtige Stornierung nachbeobachtet wird, bevor sie als
 # echt gilt. Im Vorfall lag zwischen erfundenem `Cancelled` und echtem
@@ -768,6 +956,34 @@ def handle_deferred_cancels(
                 del _PENDING_CANCEL_CHECKS[dispatch_id]
 
     for dispatch_id, trade in faellig:
+        # T1-102 A: zuerst die Frage, ob IBKR ueberhaupt abgelehnt hat. Sie
+        # schlaegt die Zustandsabbildung, weil ein `Inactive` nach einer
+        # Ablehnung kein lebender Auftrag ist, sondern die Leiche.
+        grund = rejection_reason(trade)
+        if grund is not None:
+            log.warning(
+                "Re-check for dispatch %s: IBKR rejected this order — %s. "
+                "Reporting it as rejected, not as alive.",
+                dispatch_id,
+                grund,
+            )
+            if should_report(dispatch_id, "rejected"):
+                try:
+                    api.result_order(
+                        dispatch_id,
+                        status="rejected",
+                        reason_code="rejected_by_broker",
+                        error_message=grund[:500],
+                        broker_confirmed_end=True,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Could not report rejection for dispatch %s: %s",
+                        dispatch_id,
+                        exc,
+                    )
+            continue
+
         raw = getattr(trade.orderStatus, "status", "")
         mapped = _STATUS_MAP.get(raw)
         if mapped is None:
@@ -928,6 +1144,10 @@ def main() -> int:
     )
     try:
         ibkr.connect()
+        # T1-98: der Zeitpunkt, ab dem diese Sitzung die Ereignisse von IBKR
+        # mitbekommt. Alles, was VORHER abgesendet wurde, kann sie nicht
+        # gesehen haben — und nur darauf darf der Abgleich ein Urteil faellen.
+        session_connected_at = datetime.now(timezone.utc)
     except Exception as exc:
         log.error(
             "Failed to connect to IBKR TWS/Gateway at %s:%d — %s",
@@ -997,6 +1217,10 @@ def main() -> int:
             # Einzige, woran die Plattform erkennt, dass die Bridge lebt.
             _handle_heartbeat(api, ibkr)
             _handle_external_executions(api, ibkr)
+            # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
+            # Fremdsicht — er ist die langsamste der drei Aufgaben und die
+            # einzige, deren Ausbleiben nichts kaputt macht.
+            _handle_order_reconcile(api, ibkr, session_connected_at)
 
         run_loop(
             ibkr,

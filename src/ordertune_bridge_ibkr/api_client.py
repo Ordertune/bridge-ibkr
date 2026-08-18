@@ -299,6 +299,26 @@ class OrdertuneApiClient:
             cancelling=[c["dispatchId"] for c in data.get("cancelling", [])],
         )
 
+    def get_unresolved(self) -> list[dict[str, Any]]:
+        """T1-98: GET /orders/unresolved → was die Plattform als offen fuehrt.
+
+        Die fehlende Haelfte des Abgleichs. Bis hierher kannte die Bridge nur,
+        was sie in ihrer EIGENEN Sitzung abgeschickt hatte — und nach einem
+        Neustart war das nichts. Sie protokollierte "Re-mapped 4 open orders"
+        und hatte keine Zahl, gegen die sie die Vier haette halten koennen.
+
+        Setzt t1 mit T1-98 voraus. Gegen eine aeltere Plattform antwortet der
+        Weg mit 404; der Aufrufer behandelt das als "keine Sollmenge" und
+        entscheidet dann nichts.
+        """
+        r = _request_with_retry(
+            "GET", self._client,
+            f"{self._base}/api/bridge/v1/orders/unresolved",
+        )
+        data = r.json()
+        rows = data.get("unresolved", [])
+        return rows if isinstance(rows, list) else []
+
     def ack_order(
         self,
         dispatch_id: str,

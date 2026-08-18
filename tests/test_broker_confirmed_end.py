@@ -151,3 +151,75 @@ def test_the_deferred_path_re_reads_the_proof() -> None:
 
     m._report_status(api, "d-5", trade, "cancelled")
     assert api.calls[0]["broker_confirmed_end"] is True
+
+
+# ── T1-102 A: eine Ablehnung ist keine Warnung ──────────────────────────────
+#
+# Am 2026-08-18 lehnte IBKR eine CRWD-Order mit Code 201 ab. Die Regel aus
+# T1-88b haelt jeden Code ausserhalb der Storno-Liste fuer verdaechtig, wartet
+# drei Sekunden, liest `Inactive`, bildet das auf `working` ab — und die tote
+# Order stand auf t1 als "AT BROKER".
+
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from ordertune_bridge_ibkr.main import rejection_reason
+
+
+@dataclass
+class _Entry:
+    errorCode: int = 0
+    message: str = ""
+
+
+@dataclass
+class _Trade:
+    log: list[Any] = field(default_factory=list)
+
+
+def test_der_gemessene_fall_wird_als_ablehnung_erkannt() -> None:
+    trade = _Trade(
+        log=[
+            _Entry(0, ""),
+            _Entry(0, ""),
+            _Entry(
+                201,
+                "Order abgewiesen - Grund:Verfuegbare Mittel in Basiswaehrung: "
+                "1037.11 USD Barmittel fuer diese und weitere offene Orders "
+                "benoetigt: 1418.40 USD",
+            ),
+            _Entry(0, ""),
+        ]
+    )
+    grund = rejection_reason(trade)
+    assert grund is not None
+    assert "1418.40" in grund
+
+
+def test_eine_warnung_ist_keine_ablehnung() -> None:
+    """10349 war der Ausloeser von T1-88b — der Auftrag lebte weiter.
+
+    Wuerde er hier als Ablehnung gelten, waere der Phantom-Storno vom
+    2026-08-13 wieder da, nur unter anderem Namen.
+    """
+    assert rejection_reason(_Trade(log=[_Entry(10349, "Gueltigkeitsdauer")])) is None
+
+
+def test_eine_echte_stornierung_ist_keine_ablehnung() -> None:
+    assert rejection_reason(_Trade(log=[_Entry(202, "Order Canceled")])) is None
+
+
+def test_ohne_protokoll_wird_nichts_behauptet() -> None:
+    assert rejection_reason(_Trade()) is None
+    assert rejection_reason(object()) is None
+
+
+def test_eine_ablehnung_ohne_text_bekommt_trotzdem_einen_grund() -> None:
+    """Der Code ist der Nachweis, der Text nur die Begruendung."""
+    assert rejection_reason(_Trade(log=[_Entry(201, "")])) == "Rejected by IBKR."
+
+
+def test_die_juengste_ablehnung_gewinnt() -> None:
+    trade = _Trade(log=[_Entry(201, "erste"), _Entry(0, ""), _Entry(201, "zweite")])
+    assert rejection_reason(trade) == "zweite"
