@@ -230,7 +230,7 @@ class OrdertuneApiClient:
         cash: float,
         equity: float,
         currency: str | None,
-        positions: list[dict[str, Any]],
+        positions: list[dict[str, Any]] | None,
         gateway_status: str,
         capabilities: dict[str, Any] | None = None,
         cpu_load: float | None = None,
@@ -251,8 +251,17 @@ class OrdertuneApiClient:
             "cash": float(cash),
             "equity": float(equity),
             "currency": currency,
-            "positions": [_wire_position(p) for p in positions],
         }
+        # T1-99: `positions=None` heisst „ich weiss es gerade nicht", und die
+        # einzige Art, das auf der Leitung zu sagen, ist das Feld wegzulassen.
+        # Ein leeres Array heisst „das Konto haelt nichts" — eine Aussage, die
+        # auf der Plattform Positionen schliesst. Die beiden zu verwechseln hat
+        # am 2026-08-18 zwei echte Positionen aus den Buechern genommen.
+        #
+        # Setzt eine Plattform-Version voraus, die das Feld optional fuehrt
+        # (t1 ab T1-99). Gegen eine aeltere gaebe es hier ein 422.
+        if positions is not None:
+            snapshot["positions"] = [_wire_position(p) for p in positions]
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 

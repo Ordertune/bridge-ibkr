@@ -491,6 +491,17 @@ def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
         return
     try:
         snap = ibkr.account_snapshot()
+        # T1-99: der Heartbeat geht auch ohne Depotauskunft raus — er ist
+        # zuerst ein Lebenszeichen. Ohne ihn hielte der Offline-Erkenner die
+        # Bridge fuer tot, und der Nutzer suchte den Fehler an der falschen
+        # Stelle. Die fehlende Liste sagt der Plattform genau das, was der
+        # Fall ist: Verbindung steht, Depot noch unbekannt.
+        if snap.positions is None:
+            log.warning(
+                "heartbeat: portfolio still unknown — sending a plain "
+                "liveness beat without positions. Ordertune will not book any "
+                "position as sold while this lasts."
+            )
         api.heartbeat(
             cash=snap.cash,
             equity=snap.equity,

@@ -30,12 +30,37 @@ class AccountSnapshot:
     cash: float
     equity: float
     currency: str | None
-    positions: list[dict[str, Any]]
+    #: T1-99: `None` heisst „ich weiss es gerade nicht", eine leere Liste
+    #: heisst „das Konto haelt nichts". Bis 0.5.x gab es nur die leere Liste
+    #: fuer beides — und die Plattform las sie als Aussage. Am 2026-08-18
+    #: wurden daraus zwei echte Positionen als extern verkauft gebucht.
+    positions: list[dict[str, Any]] | None
     gateway_status: str
 
 
 # Sammelzeilen des Kontos, die keine echte Waehrung benennen.
 _AGGREGATE_CURRENCY_MARKERS = {"BASE", ""}
+
+# T1-99: wie lange auf die Antwort der Positionsabfrage gewartet wird. Grosszuegig
+# gegenueber dem Verbindungs-Zeitueberlauf von ib_insync (4 s), weil TWS beim
+# Start unter Last steht — aber endlich, weil ein haengender Client fuer den
+# Nutzer aussieht wie ein abgestuerzter.
+POSITIONS_TIMEOUT_S = 20.0
+
+
+def _opt(value: Any) -> float | None:
+    """Eine Zahl, oder nichts — aber nie eine erfundene Null.
+
+    IBKR liefert fuer nicht abonnierte Marktdaten `nan` oder `None`. Beides als
+    0 zu melden waere eine Aussage ueber einen Marktwert, den niemand kennt.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f  # NaN faellt raus
 
 
 def resolve_account_currency(acct_values: list[AccountValue]) -> str | None:
@@ -70,12 +95,62 @@ class IbkrClient:
         self._port = port
         self._client_id = client_id
         self._ib = IB()
+        # T1-99: hat die Positionsabfrage in DIESER Sitzung je geantwortet?
+        # Nicht „sind Zeilen angekommen" — ein leeres Depot liefert keine
+        # Zeilen und ist trotzdem eine gueltige Auskunft. Es zaehlt, dass die
+        # Abfrage abgeschlossen wurde.
+        self._positions_known = False
+        self._multi_account_warned = False
 
     def connect(self) -> None:
         log.info("Connecting to IBKR TWS/Gateway at %s:%d (client-id=%d)",
                  self._host, self._port, self._client_id)
         self._ib.connect(self._host, self._port, clientId=self._client_id)
         log.info("Connected to IBKR TWS/Gateway.")
+        self._confirm_positions_subscription()
+
+    def _confirm_positions_subscription(self) -> None:
+        """T1-99 — die Positionsabfrage ausdruecklich abwarten.
+
+        ## Warum das nicht schon durch `connect()` erledigt ist
+
+        ib_insync fragt beim Verbinden Positionen UND Kontodaten an und
+        schluckt einen Zeitueberlauf bei beidem. Am 2026-08-18 lief genau das
+        Konto-Abo in einen Zeitueberlauf (`account updates for U... request
+        timed out`), waehrend die Positionen ankamen — sichtbar im Protokoll,
+        unsichtbar im Code. Danach war `portfolio()` leer und `positions()`
+        gefuellt, und die Bridge las ausgerechnet das leere.
+
+        Hier wird die Abfrage deshalb ein zweites Mal gestellt und ihr
+        Abschluss abgewartet. Antwortet sie, ist die Auskunft belastbar — auch
+        wenn sie leer ist. Antwortet sie nicht, schweigt der Heartbeat lieber,
+        als ein leeres Depot zu behaupten.
+
+        Der Zeitueberlauf ist hart begrenzt: ein Warten ohne Grenze wuerde die
+        Bridge beim Start haengen lassen, und ein haengender Client meldet
+        keinen Herzschlag — fuer den Nutzer nicht von einem Absturz zu
+        unterscheiden.
+        """
+        try:
+            self._ib.run(
+                self._ib.reqPositionsAsync(), timeout=POSITIONS_TIMEOUT_S
+            )
+        except Exception as exc:
+            self._positions_known = False
+            log.warning(
+                "IBKR did not answer the positions request within %.0fs (%s). "
+                "Ordertune will be told that the portfolio is unknown rather "
+                "than empty, so no position gets booked as sold. Model exits "
+                "stay blocked until the answer arrives.",
+                POSITIONS_TIMEOUT_S,
+                exc,
+            )
+            return
+        self._positions_known = True
+        log.info(
+            "Portfolio subscription confirmed — %d position(s) reported.",
+            len(self._ib.positions()),
+        )
 
     def disconnect(self) -> None:
         if self._ib.isConnected():
@@ -113,18 +188,7 @@ class IbkrClient:
 
         self._log_account_currency(acct_values, currency, equity)
 
-        portfolio: list[PortfolioItem] = self._ib.portfolio()
-        positions = [
-            {
-                "symbol": p.contract.symbol,
-                "qty": float(p.position),
-                "avg_cost": float(p.averageCost),
-                "market_price": float(p.marketPrice or 0),
-                "market_value": float(p.marketValue or 0),
-                "unrealized_pnl": float(p.unrealizedPNL or 0),
-            }
-            for p in portfolio
-        ]
+        positions = self._positions()
 
         return AccountSnapshot(
             cash=cash,
@@ -134,6 +198,103 @@ class IbkrClient:
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
         )
 
+
+    def _positions(self) -> list[dict[str, Any]] | None:
+        """T1-99 — der Depotbestand, aus der Quelle, die nicht schweigt.
+
+        ## Zwei Wege, und der bisher benutzte ist der schwaechere
+
+        IBKR liefert Positionen ueber zwei getrennte Kanaele:
+
+          - `positions()`  — gespeist aus `reqPositions`. Symbol, Menge,
+                             Einstand. Kommt frueh und zuverlaessig.
+          - `portfolio()`  — gespeist aus dem Konto-Abo. Zusaetzlich Kurs,
+                             Marktwert und unrealisiertes Ergebnis. Genau
+                             dieses Abo lief am 2026-08-18 in einen
+                             Zeitueberlauf, und `portfolio()` blieb leer.
+
+        Bis 0.5.x las diese Methode ausschliesslich den zweiten. Das Ergebnis
+        war eine leere Positionsliste bei vollem Depot — und die Plattform
+        buchte daraufhin zwei Positionen als extern verkauft.
+
+        Ab hier ist `positions()` die Wahrheit ueber Bestand und Menge;
+        `portfolio()` reichert nur noch an und darf fehlen.
+
+        ## Warum fehlende Anreicherung `None` ergibt und nicht 0
+
+        Eine Null ist eine Aussage. Ein Marktwert von 0 fuer eine Position,
+        die es gibt, waere schlicht falsch, und die Plattform zieht aus diesen
+        Zahlen Schluesse. Der Vertrag laesst beide Felder ausdruecklich leer.
+        """
+        if not self._positions_known:
+            return None
+
+        # BUG-99-1 — auf das Handelskonto begrenzen.
+        #
+        # `portfolio()` wurde von `reqAccountUpdates` gespeist, und ib_insync
+        # fragt das ausschliesslich fuer ein EINZELNES verwaltetes Konto an
+        # (`connectAsync`: `if not account and len(accounts) == 1`).
+        # `positions()` liefert dagegen alle Konten des Logins.
+        #
+        # Ohne diese Grenze summierte die Plattform bei einem Login mit mehreren
+        # Konten die Mengen je Symbol — die gemeldete Brokerzahl waere groesser
+        # als das, was das Handelskonto haelt, und `exitBudgetAllows` gaebe ein
+        # zu grosses Budget frei. Am Ende steht die Leerposition auf einem
+        # Long-Konto, gegen die T1-95 angetreten ist.
+        account = self._trading_account()
+        # Einmal je Sitzung. Der Heartbeat kommt jede Minute, und eine Warnung
+        # je Schlag ist dasselbe Rauschen, das BUG-99-2 im Protokoll der
+        # Plattform abgestellt hat — nur eine Ebene tiefer.
+        if account is None and not self._multi_account_warned:
+            self._multi_account_warned = True
+            log.warning(
+                "This login manages several accounts and Ordertune cannot tell "
+                "which one it trades. Portfolio quantities are reported across "
+                "all of them, which can overstate what any single account "
+                "holds. Please report this."
+            )
+
+        # Anreicherung ueber die Kontraktkennung, nicht ueber das Symbol: bei
+        # Optionen und mehreren Boersen ist das Symbol nicht eindeutig.
+        enrichment: dict[int, PortfolioItem] = {}
+        try:
+            for item in self._ib.portfolio():
+                enrichment[item.contract.conId] = item
+        except Exception as exc:  # pragma: no cover - defensiv
+            log.debug("portfolio() unavailable for enrichment: %s", exc)
+
+        rows: list[dict[str, Any]] = []
+        for p in self._ib.positions(account) if account else self._ib.positions():
+            extra = enrichment.get(p.contract.conId)
+            rows.append(
+                {
+                    "symbol": p.contract.symbol,
+                    "qty": float(p.position),
+                    "avg_cost": float(p.avgCost),
+                    "market_price": _opt(extra.marketPrice) if extra else None,
+                    "market_value": _opt(extra.marketValue) if extra else None,
+                    "unrealized_pnl": (
+                        _opt(extra.unrealizedPNL) if extra else None
+                    ),
+                }
+            )
+        return rows
+
+    def _trading_account(self) -> str | None:
+        """Das eine Konto, auf dem gehandelt wird — oder `None` bei mehreren.
+
+        Dieselbe Regel wie in ib_insync selbst: bei genau einem verwalteten
+        Konto ist es dieses, sonst laesst sich die Frage nicht entscheiden.
+        Nicht zu entscheiden ist hier die ehrlichere Antwort als das erste zu
+        nehmen — eine falsche Kontowahl waere ein stiller Faktor auf jede
+        Bestandszahl, und niemand saehe es an den Zahlen. Dieselbe Ueberlegung
+        wie bei der Waehrungsaufloesung in T1-85.
+        """
+        try:
+            accounts = [a for a in self._ib.managedAccounts() if a]
+        except Exception:  # pragma: no cover - defensiv
+            return None
+        return accounts[0] if len(accounts) == 1 else None
 
     def _log_account_currency(
         self,
