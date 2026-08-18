@@ -26,7 +26,9 @@ Der Token wurde widerrufen oder ist abgelaufen. Neuen Token in den Ordertune-Set
 
 ## `Handshake failed: 403 ip_mismatch`
 
-Server hat eine andere Source-IP registriert als die aktuelle. Ursache typischerweise: VPS wurde von anderer IP aus gestartet, oder Proxy dazwischen. Token wurde vom Server automatisch widerrufen (Sicherheitsschutz). Neuen Token generieren.
+Die Verbindung war auf eine andere Source-IP registriert als die, aus der die Bridge jetzt kommt. Typische Ursachen: VPS-Migration, eine wechselnde Ausgangs-IP beim Provider, oder ein Proxy dazwischen.
+
+Lösung: Im Ordertune-Settings-UI einen neuen Bridge-Token erzeugen, neue `bridge.env` herunterladen, Bridge neu starten. Damit die Verbindung dauerhaft stabil bleibt, sollte der VPS eine feste Ausgangs-IP haben.
 
 ## Sizing-Drift-Rejects
 

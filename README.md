@@ -65,7 +65,7 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 ## Sicherheit
 
 - Der Access-Token wird nur lokal in `bridge.env` gespeichert. Er kann jederzeit über die Ordertune-Settings widerrufen werden.
-- Hardware-Fingerprint (SHA-256 aus Hostname, CPU-ID, MAC-Adresse) bindet den Token an die konkrete VPS-Instanz. Ein Token-Diebstahl auf einer anderen Maschine schlägt beim Handshake fehl.
+- Die Verbindung ist an die VPS-Instanz gebunden: an ihre Hardware (SHA-256-Fingerprint aus Hostname, CPU-ID, MAC-Adresse) und an die Source-IP, unter der sie sich registriert hat. Beides schreibt der Server beim ersten Handshake fest. Läuft die Bridge danach auf anderer Hardware oder aus einem anderen Netz, verweigert der Server die Verbindung, bis der Token rotiert wurde. Die Bridge sollte deshalb auf einem VPS mit fester Ausgangs-IP laufen.
 - VPS-Wechsel: alten Token in Ordertune widerrufen, neuen erzeugen, `bridge.env` austauschen, Bridge starten. Der alte Fingerprint wird beim Rotate gecleart, der neue Handshake registriert die neue Hardware.
 
 ## Docs
