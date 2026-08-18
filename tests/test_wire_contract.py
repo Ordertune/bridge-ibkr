@@ -126,6 +126,55 @@ def test_heartbeat_body_matches_contract() -> None:
     assert "cpuLoad" not in rec.body
 
 
+def test_heartbeat_omits_positions_when_the_portfolio_is_unknown() -> None:
+    """T1-99 — „ich weiss es nicht" wird gesagt, indem das Feld fehlt.
+
+    Ein leeres Array waere die Aussage „das Konto haelt nichts", und die
+    Plattform schliesst darauf Positionen. Genau diese Verwechslung hat am
+    2026-08-18 zwei echte Positionen aus den Buechern genommen: die Bridge las
+    das Depot aus einem Kanal, der geschwiegen hat, und meldete das Schweigen
+    als Leere.
+    """
+    expected = FIXTURES["heartbeatPortfolioUnknown"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=None,
+        gateway_status="connected",
+        capabilities=snap["capabilities"],
+    )
+
+    assert "positions" not in rec.body["accountSnapshot"], (
+        "Ein weggelassenes Feld ist die einzige Art, Unwissen zu sagen. "
+        "Ein leeres Array heisst auf der Plattform: leeres Depot."
+    )
+    assert rec.body == expected
+
+
+def test_heartbeat_sends_an_empty_list_for_an_empty_account() -> None:
+    """Die Gegenprobe: leer bleibt sagbar.
+
+    Ein Konto ohne Positionen muss eine leere Liste schicken duerfen — sonst
+    wuerde ein Lot, das der Nutzer wirklich verkauft hat, nie geschlossen.
+    Der Unterschied liegt in „angekommen", nicht in „nicht leer".
+    """
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=0.0,
+        equity=0.0,
+        currency="USD",
+        positions=[],
+        gateway_status="connected",
+    )
+    assert rec.body["accountSnapshot"]["positions"] == []
+
+
 @pytest.mark.parametrize(
     "key", ["heartbeatForeignCurrency", "heartbeatUnknownCurrency"]
 )
@@ -383,6 +432,7 @@ def test_result_rejected_matches_contract() -> None:
         "heartbeat",
         "heartbeatForeignCurrency",
         "heartbeatUnknownCurrency",
+        "heartbeatPortfolioUnknown",
         "orderAck",
         "orderResultFilled",
         "orderResultCancelConfirmed",

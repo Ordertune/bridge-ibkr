@@ -26,7 +26,9 @@ Der Token wurde widerrufen oder ist abgelaufen. Neuen Token in den Ordertune-Set
 
 ## `Handshake failed: 403 ip_mismatch`
 
-Server hat eine andere Source-IP registriert als die aktuelle. Ursache typischerweise: VPS wurde von anderer IP aus gestartet, oder Proxy dazwischen. Token wurde vom Server automatisch widerrufen (Sicherheitsschutz). Neuen Token generieren.
+Die Verbindung war auf eine andere Source-IP registriert als die, aus der die Bridge jetzt kommt. Typische Ursachen: VPS-Migration, eine wechselnde Ausgangs-IP beim Provider, oder ein Proxy dazwischen.
+
+Lösung: Im Ordertune-Settings-UI einen neuen Bridge-Token erzeugen, neue `bridge.env` herunterladen, Bridge neu starten. Damit die Verbindung dauerhaft stabil bleibt, sollte der VPS eine feste Ausgangs-IP haben.
 
 ## Sizing-Drift-Rejects
 
@@ -34,6 +36,37 @@ Wenn die Konsole viele `Sizing drift for dispatch X` zeigt:
 - Ihr IBKR-Account-Equity hat sich seit dem letzten Server-Snapshot stark verändert (>5%)
 - Kann bei Margin-Calls, großen Fills anderer Trader oder starken Intraday-Kursbewegungen passieren
 - Lösung: Signal in der Ordertune-UI neu freigeben (der Server verwendet dann den frischen Equity-Snapshot)
+
+## `IBKR did not answer the positions request within 20s`
+
+Ab 0.6.0. Die Bridge liest das Depot ueber `reqPositions` und wartet beim
+Verbinden ausdruecklich auf die Antwort. Bleibt sie aus, meldet die Bridge
+Ordertune **keine** Depotauskunft — statt einer leeren, die "das Konto haelt
+nichts" bedeuten wuerde.
+
+Was Sie in dieser Lage sehen:
+
+- Der Heartbeat laeuft weiter, die Verbindung gilt als gesund.
+- Im Order Management steht in der Spalte "At broker" ein Strich.
+- Modell-Ausstiege gehen nicht hinaus, solange der Bestand ungeklaert ist.
+- **Es wird keine Position als verkauft gebucht.** Das ist der Zweck.
+
+Bis 0.5.x las die Bridge das Depot aus dem Konto-Abo. Lief dieses in einen
+Zeitueberlauf — im Log als `account updates for U... request timed out` —,
+meldete sie ein leeres Depot bei vollem Konto. Am 2026-08-18 wurden daraufhin
+zwei echte Positionen als extern verkauft gebucht.
+
+Abhilfe: TWS oder Gateway neu starten und pruefen, dass die API-Einstellungen
+Lese-Zugriff auf Konto und Positionen erlauben. Haelt es an, bitte die letzten
+200 Zeilen des Logs an den Support schicken.
+
+## `This login manages several accounts`
+
+Ihr IBKR-Login verwaltet mehr als ein Konto. Ordertune kann nicht entscheiden,
+auf welchem gehandelt wird, und meldet die Positionen deshalb ueber alle
+zusammen — die gemeldete Stueckzahl je Symbol kann dann groesser sein als das,
+was ein einzelnes Konto haelt. Bitte melden Sie sich beim Support; der Fall ist
+loesbar, aber nicht durch Raten.
 
 ## Log-Files
 

@@ -40,15 +40,13 @@
     "heisst das 'keine Aussage', nicht 'nein': so verhaelt sich jede Bridge vor",
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
-
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.5.0",
-
+  "bridgeVersion": "0.6.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.5.0",
+      "bridgeVersion": "0.6.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -57,12 +55,11 @@
       }
     }
   },
-
   "heartbeat": {
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.5.0",
+      "bridgeVersion": "0.6.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -86,13 +83,12 @@
       }
     }
   },
-
   "heartbeatForeignCurrency": {
     "_comment": "T1-85 — der Fall, der den Spec ausgeloest hat: ein EUR-gefuehrtes Konto. Der Depotwert ist echt und wird auch so gemeldet; die Plattform blockiert daraus die Mengenrechnung, statt die Zahl als USD zu verbuchen. Bis 0.2.x kam hier equityUsd 0 an und alles sah gesund aus.",
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.5.0",
+      "bridgeVersion": "0.6.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -102,13 +98,12 @@
       }
     }
   },
-
   "heartbeatUnknownCurrency": {
     "_comment": "T1-85 — der Client konnte die Kontowaehrung nicht eindeutig bestimmen (mehrere Waehrungssegmente). null heisst 'weiss ich nicht' und ist eine Aussage; ein geratenes USD waere ein stiller Faktor auf jede Stueckzahl.",
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.5.0",
+      "bridgeVersion": "0.6.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -118,7 +113,25 @@
       }
     }
   },
-
+  "heartbeatPortfolioUnknown": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.6.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        }
+      }
+    }
+  },
   "orderAck": {
     "method": "PUT",
     "path": "/api/bridge/v1/orders/{dispatchId}/ack",
@@ -127,7 +140,6 @@
       "submittedAtClient": "2026-08-12T13:31:04.512Z"
     }
   },
-
   "orderResultFilled": {
     "method": "PUT",
     "path": "/api/bridge/v1/orders/{dispatchId}/result",
@@ -140,7 +152,6 @@
       "filledAtClient": "2026-08-12T13:31:07.884Z"
     }
   },
-
   "orderResultLimitNotReached": {
     "_comment": "Der von T1-78 geforderte Fall: Order kam NICHT zustande, weil der Limitpreis nicht erreicht wurde. fillPrice bleibt weg — ein Preis fuer einen Handel, den es nicht gab, waere eine Erfindung. T1-96: dieser Koerper traegt KEIN brokerConfirmedEnd und steht damit zugleich fuer jede Bridge vor 0.4.0 — die Plattform muss ihn weiter annehmen und den Riegel geschlossen lassen.",
     "method": "PUT",
@@ -153,7 +164,6 @@
       "reasonCode": "limit_not_reached"
     }
   },
-
   "orderResultCancelConfirmed": {
     "_comment": "T1-96 — IBKR hat das Ende dieses Auftrags bestaetigt. Der Fall aus dem Smoke-Test vom 2026-08-14: der Nutzer storniert in TWS, wir haben nichts angefordert. Ohne dieses Feld blieb der Auftrag fuer die Plattform ungeklaert und das Signal liess sich nicht erneut freigeben.",
     "method": "PUT",
@@ -167,7 +177,6 @@
       "brokerConfirmedEnd": true
     }
   },
-
   "orderResultCancelUnconfirmed": {
     "_comment": "T1-96 — dieselbe Zeile ohne Nachweis: ib_insync hat den Zustand selbst gesetzt (T1-88b). Der Auftrag kann weiterleben. false ist hier eine Aussage und heisst 'nicht bestaetigt' — der Riegel bleibt zu, und genau das ist der Rueckschritt, der nicht passieren darf.",
     "method": "PUT",
@@ -181,7 +190,6 @@
       "brokerConfirmedEnd": false
     }
   },
-
   "externalExecution": {
     "_comment": "T1-94 — eine Ausfuehrung im Depot, die nicht von uns stammt. Die tatsaechlich gemessenen Zahlen vom 2026-08-17: manueller FTNT-Kauf in TWS. `brokerExecId` ist der Entdopplungsschluessel; `brokerOrderId` fehlt bewusst, denn fremde Auftraege tragen dort 0.",
     "method": "POST",
@@ -199,7 +207,6 @@
       "commissionUsd": 1.9
     }
   },
-
   "externalExecutionWithoutCommission": {
     "_comment": "T1-94 — dieselbe Ausfuehrung, bevor die Gebuehrenabrechnung eingetroffen ist. Das Feld FEHLT, statt 0 zu tragen: `CommissionReport()` hat 0.0 als Vorgabewert, und eine gebuchte 0 waere eine Behauptung ueber geflossenes Geld. Die Plattform schreibt dann NULL.",
     "method": "POST",
@@ -216,7 +223,6 @@
       "orderRef": ""
     }
   },
-
   "orderResultRejected": {
     "method": "PUT",
     "path": "/api/bridge/v1/orders/{dispatchId}/result",
