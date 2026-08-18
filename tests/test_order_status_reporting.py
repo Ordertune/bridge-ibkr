@@ -308,3 +308,44 @@ def test_a_dispatch_with_a_cancel_request_is_not_submitted() -> None:
 
     m._handle_pending(Api(), FakeIbkr(), {})
     assert gesendet == []
+
+
+# ── T1-98 / BUG-98-1: der Rang von `unknown` ────────────────────────────────
+#
+# Der Abgleich meldet einen verschollenen Auftrag als `unknown`. Ohne Eintrag
+# in der Rangfolge fiel dieser Wert aus ihr heraus, und `should_report` liess
+# ihn jeden bereits gemeldeten Endzustand ueberschreiben — eine bestaetigte
+# Stornierung waere durch ein "wir wissen es nicht" ersetzt worden.
+
+
+def test_unknown_darf_keinen_belegten_endzustand_ueberschreiben() -> None:
+    from ordertune_bridge_ibkr.main import _LAST_REPORTED, should_report
+
+    _LAST_REPORTED.clear()
+    assert should_report("d-rank-1", "cancelled") is True
+    assert should_report("d-rank-1", "unknown") is False
+
+
+def test_unknown_darf_eine_fuellung_nicht_ueberschreiben() -> None:
+    from ordertune_bridge_ibkr.main import _LAST_REPORTED, should_report
+
+    _LAST_REPORTED.clear()
+    assert should_report("d-rank-2", "filled") is True
+    assert should_report("d-rank-2", "unknown") is False
+
+
+def test_eine_fuellung_darf_unknown_sehr_wohl_ueberschreiben() -> None:
+    """Sie ist am Konto passiert und laesst sich nicht widerrufen."""
+    from ordertune_bridge_ibkr.main import _LAST_REPORTED, should_report
+
+    _LAST_REPORTED.clear()
+    assert should_report("d-rank-3", "unknown") is True
+    assert should_report("d-rank-3", "filled") is True
+
+
+def test_unknown_wird_nicht_zweimal_gemeldet() -> None:
+    from ordertune_bridge_ibkr.main import _LAST_REPORTED, should_report
+
+    _LAST_REPORTED.clear()
+    assert should_report("d-rank-4", "unknown") is True
+    assert should_report("d-rank-4", "unknown") is False
