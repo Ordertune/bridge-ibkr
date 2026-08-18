@@ -727,6 +727,45 @@ _LIVE_STATES = {"submitting", "working"}
 #   0     kein Fehler, also eine Zustandsmeldung von IBKR selbst
 _GENUINE_CANCEL_CODES = {0, 202, 10148}
 
+# ── T1-102 A: eine Ablehnung ist keine Warnung ───────────────────────────────
+#
+# Die Regel darueber liest jeden Fehlercode ausserhalb der Storno-Liste als
+# "verdaechtig" und haelt den Auftrag im Zweifel fuer lebend. Fuer den Hinweis
+# 10349 vom 2026-08-13 war das richtig — er ist eine Warnung, und der Auftrag
+# lebte weiter.
+#
+# Am 2026-08-18 traf dieselbe Regel den Code 201:
+#
+#   Error 201, reqId 330: Order abgewiesen - Grund:Verfuegbare Mittel in
+#   Basiswaehrung: 1037.11 USD Barmittel fuer diese und weitere offene Orders
+#   benoetigt: 1418.40 USD
+#
+# 201 ist IBKRs Wort fuer "abgelehnt". Der Auftrag ist tot, und zwar auf
+# Ansage. Die Nachbeobachtung las danach `Inactive`, bildete das auf `working`
+# ab, und CRWD stand auf t1 als "AT BROKER" ueber einem Auftrag, den IBKR nie
+# angenommen hat.
+#
+# Bewusst eine ENGE, belegte Liste und keine Heuristik ueber Zahlenbereiche:
+# was hier falsch geraten wird, kostet entweder einen Echtauftrag oder ein
+# verlorenes Signal. Neue Codes kommen dazu, wenn sie beobachtet wurden — nicht
+# vorher.
+#
+#   201  Order rejected — IBKR weist den Auftrag ab, mit Begruendung im Text
+_REJECTION_CODES = {201}
+
+
+def rejection_reason(trade: Any) -> str | None:
+    """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
+
+    Durchsucht das Protokoll von hinten. `None` heisst "keine Ablehnung
+    gefunden" — und dann bleibt es bei der Vorsicht aus T1-88b.
+    """
+    for entry in reversed(list(getattr(trade, "log", None) or [])):
+        if getattr(entry, "errorCode", 0) in _REJECTION_CODES:
+            message = (getattr(entry, "message", "") or "").strip()
+            return message or "Rejected by IBKR."
+    return None
+
 # Wie lange eine verdaechtige Stornierung nachbeobachtet wird, bevor sie als
 # echt gilt. Im Vorfall lag zwischen erfundenem `Cancelled` und echtem
 # `Submitted` eine Sekunde; drei sind Reserve, ohne eine echte Stornierung
@@ -917,6 +956,34 @@ def handle_deferred_cancels(
                 del _PENDING_CANCEL_CHECKS[dispatch_id]
 
     for dispatch_id, trade in faellig:
+        # T1-102 A: zuerst die Frage, ob IBKR ueberhaupt abgelehnt hat. Sie
+        # schlaegt die Zustandsabbildung, weil ein `Inactive` nach einer
+        # Ablehnung kein lebender Auftrag ist, sondern die Leiche.
+        grund = rejection_reason(trade)
+        if grund is not None:
+            log.warning(
+                "Re-check for dispatch %s: IBKR rejected this order — %s. "
+                "Reporting it as rejected, not as alive.",
+                dispatch_id,
+                grund,
+            )
+            if should_report(dispatch_id, "rejected"):
+                try:
+                    api.result_order(
+                        dispatch_id,
+                        status="rejected",
+                        reason_code="rejected_by_broker",
+                        error_message=grund[:500],
+                        broker_confirmed_end=True,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Could not report rejection for dispatch %s: %s",
+                        dispatch_id,
+                        exc,
+                    )
+            continue
+
         raw = getattr(trade.orderStatus, "status", "")
         mapped = _STATUS_MAP.get(raw)
         if mapped is None:
