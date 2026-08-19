@@ -139,3 +139,36 @@ def test_a_missing_first_heartbeat_is_not_overdue() -> None:
     """
     assert "if (!s.last_heartbeat_at) return false;" in PAGE_HTML
     assert "waiting for the first one" in PAGE_HTML
+
+
+# ── Vom ersten Lauf auf dem VPS (2026-08-19, v0.8.0) ────────────────────────
+
+
+def test_a_dropped_connection_does_not_print_a_traceback(capfd) -> None:
+    """Ein geschlossenes Fenster ist kein Fehler.
+
+    Beim ersten Lauf auf dem VPS stand nach dem Schliessen des Cockpits ein
+    `ConnectionAbortedError`-Stapelauszug in der Konsole — geschrieben von
+    `socketserver` direkt nach `stderr`, an jedem Protokoll vorbei. Genau in
+    der Konsole, die Abschnitt A lesbar gemacht hat, und ausgeloest durch eine
+    voellig normale Handlung.
+
+    Nachgestellt wird der Fall an seiner Wurzel: `handle_error` ist der Weg,
+    ueber den `socketserver` schreibt.
+    """
+    srv = CockpitServer(StateStore())
+    srv.start()
+    try:
+        capfd.readouterr()
+        try:
+            raise ConnectionAbortedError(10053, "aborted by the host machine")
+        except ConnectionAbortedError:
+            srv._httpd.handle_error(None, ("127.0.0.1", 59624))
+
+        ausgabe = capfd.readouterr()
+        assert "Traceback" not in ausgabe.err + ausgabe.out, (
+            "Der Stapelauszug steht wieder in der Konsole."
+        )
+        assert "ConnectionAbortedError" not in ausgabe.err + ausgabe.out
+    finally:
+        srv.stop()

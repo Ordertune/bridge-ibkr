@@ -249,6 +249,35 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
 
+class _QuietServer(ThreadingHTTPServer):
+    """Ein geschlossenes Fenster ist kein Fehler.
+
+    `socketserver` schreibt bei jeder Ausnahme in einem Bearbeiter einen
+    Stapelauszug nach `stderr` — an jedem Protokoll vorbei. Beim ersten Lauf
+    auf dem VPS stand deshalb das hier in der Konsole, unmittelbar nachdem das
+    Cockpit-Fenster geschlossen wurde:
+
+        Exception occurred during processing of request from ('127.0.0.1', ...)
+        ...
+        ConnectionAbortedError: [WinError 10053] An established connection was
+        aborted by the software in your host machine
+
+    Das kommt nicht aus dem Ereignisstrom — der faengt seine Abbrueche selbst
+    ab —, sondern aus dem Lesen der naechsten Anfrage auf einer offen
+    gehaltenen Verbindung, die die Gegenseite inzwischen fallengelassen hat.
+    Ein Browser tut das jedes Mal beim Schliessen.
+
+    Eine Wand aus Stapelauszug in genau der Konsole, die Abschnitt A lesbar
+    gemacht hat, und ausgeloest durch eine voellig normale Handlung: das ist
+    kein Schoenheitsfehler, das ist der Rueckfall in den Zustand davor.
+    """
+
+    def handle_error(self, request, client_address) -> None:
+        log.debug(
+            "cockpit: connection from %s dropped", client_address, exc_info=True
+        )
+
+
 class CockpitServer:
     """Der Server als Nebenlaeufer, mit einem sauberen Weg zum Anhalten."""
 
@@ -265,7 +294,7 @@ class CockpitServer:
         self.setup = setup
         self.token = secrets.token_urlsafe(32)
         self._stopping = threading.Event()
-        self._httpd: ThreadingHTTPServer | None = None
+        self._httpd: _QuietServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -294,7 +323,7 @@ class CockpitServer:
         # Port 0: das Betriebssystem waehlt einen freien. Damit kollidieren
         # zwei Bridges auf einer Maschine nicht, und es gibt keinen festen
         # Port, den etwas anderes belegt haben koennte.
-        self._httpd = ThreadingHTTPServer((BIND_HOST, 0), handler)
+        self._httpd = _QuietServer((BIND_HOST, 0), handler)
         self._httpd.daemon_threads = True
         self._thread = threading.Thread(
             target=self._httpd.serve_forever,
