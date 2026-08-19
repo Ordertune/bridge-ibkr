@@ -43,10 +43,11 @@ import sys
 import threading
 import time
 from datetime import datetime, time as dt_time, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
-from . import __version__
+from . import __version__, console, failures, order_vocabulary, port_probe
 from .api_client import OrdertuneApiClient
 from .config import load_config
 from .fingerprint import compute_fingerprint
@@ -634,10 +635,23 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed
 
 
-def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
+def _handle_heartbeat(
+    api: OrdertuneApiClient, ibkr: IbkrClient
+) -> tuple[Any | None, Exception | None]:
+    """T1-101 B-1/B-4: die gesendete Momentaufnahme und, falls es schiefging, warum.
+
+    Rein additiv — am Verhalten des Herzschlags aendert sich nichts. Der
+    Rueckgabewert speist den Zustandsblock des Cockpits, ohne dass dafuer ein
+    zweites Mal bei IBKR angefragt werden muesste.
+
+    Die Ausnahme wird mitgegeben, weil „der Herzschlag kam nicht durch" auf der
+    Flaeche zu wenig ist: ein widerrufener Token und ein ausgefallenes Netz
+    sehen gleich aus und verlangen Verschiedenes. Zugeordnet wird sie in
+    `failures.py`, wo auch die Startfehler zugeordnet werden (E-6).
+    """
     if not ibkr.is_connected():
         log.warning("heartbeat: IBKR disconnected — skipping snapshot push")
-        return
+        return None, None
     try:
         snap = ibkr.account_snapshot()
         # T1-99: der Heartbeat geht auch ohne Depotauskunft raus — er ist
@@ -659,8 +673,10 @@ def _handle_heartbeat(api: OrdertuneApiClient, ibkr: IbkrClient) -> None:
             gateway_status=snap.gateway_status,
             capabilities=IBKR_CAPABILITIES,
         )
+        return snap, None
     except Exception as exc:
         log.warning("heartbeat push failed: %s", exc)
+        return None, exc
 
 
 TERMINAL_STATES = {"filled", "cancelled", "rejected", "expired"}
@@ -1121,14 +1137,363 @@ def run_loop(
         ibkr.sleep(tick_s)
 
 
+ENV_FILE = "bridge.env"
+
+
+# ── T1-101 B-1: die vier Beruehrpunkte zum Cockpit ───────────────────────────
+#
+# Bewusst als vier kleine Funktionen und nicht als Objekt, das durch die
+# Schleife gereicht wird: der Kern soll das Cockpit nicht kennen muessen. Jede
+# von ihnen faengt alles ab, was schiefgehen kann. **Das Cockpit ist Beiwerk,
+# die Schleife ist es nicht** — ein Fehler in der Anzeige darf nie einen
+# Heartbeat kosten, und ein Heartbeat ist das Einzige, woran die Plattform
+# erkennt, dass diese Bridge lebt.
+
+
+def start_cockpit(
+    argv: list[str],
+    *,
+    config: Any,
+    version: str,
+    fingerprint: str,
+    log_file: Path | None,
+    session_connected_at: datetime,
+    write_access: Any,
+) -> Any | None:
+    """Startet das Cockpit — ausser unter `--headless`."""
+    if console.headless_requested(argv):
+        return None
+    try:
+        from .cockpit import CockpitServer, CockpitState, StateStore
+        from .cockpit import runfile
+
+        store = StateStore(
+            CockpitState(
+                bridge_version=version,
+                client_id=config.ibkr_client_id,
+                gateway_host=config.ibkr_gateway_host,
+                gateway_port=config.ibkr_gateway_port,
+                fingerprint_prefix=fingerprint[:16],
+                log_path=str(log_file) if log_file else "",
+                api_base=str(config.ordertune_api_base),
+                tws_connected=True,
+                ordertune_ok=True,
+                session_connected_at=session_connected_at.isoformat(),
+                write_access=write_access.state,
+                write_access_detail=write_access.detail,
+            )
+        )
+        from .cockpit import journal as journal_mod
+        from .cockpit import window as window_mod
+        from .logging_setup import LOG_FORMAT
+
+        journal = journal_mod.attach(LOG_FORMAT)
+
+        def diagnostics() -> dict[str, Any]:
+            """T1-101 B-5 — was der Support braucht, ohne das, was er nicht darf.
+
+            Kein Token, keine Connection-ID: „Copy diagnostics" landet als
+            Naechstes in einem Chat oder einer E-Mail.
+            """
+            state, _ = store.get()
+            return {
+                "bridgeVersion": version,
+                "endpoint": f"{config.ibkr_gateway_host}:{config.ibkr_gateway_port}",
+                "clientId": config.ibkr_client_id,
+                "fingerprintPrefix": fingerprint[:16],
+                "logPath": str(log_file) if log_file else "",
+                "apiBase": str(config.ordertune_api_base),
+                "logLevel": config.log_level,
+                "writeAccess": state.write_access,
+                "lastHeartbeatAt": state.last_heartbeat_at,
+                "failureCode": state.failure_code,
+            }
+
+        from .cockpit import SetupActions
+
+        server = CockpitServer(
+            store,
+            journal=journal,
+            diagnostics=diagnostics,
+            setup=SetupActions(
+                Path(ENV_FILE).resolve(),
+                store=store,
+                orders_in_flight=orders_in_flight,
+                api_base=str(config.ordertune_api_base),
+            ),
+        )
+        url = server.start()
+        runfile.write(config.ibkr_client_id, url)
+        log.info("Cockpit window: %s", window_mod.open_window(url))
+        return server
+    except Exception as exc:
+        log.warning("Cockpit could not start (the bridge keeps running): %s", exc)
+        return None
+
+
+def orders_for_cockpit() -> list[dict[str, Any]]:
+    """T1-101 B-3 — was diese Bridge gerade ueber ihre Auftraege weiss.
+
+    Quelle ist die lokale Ablage `_TRADES_BY_DISPATCH`. Sie ueberlebt einen
+    Neustart, weil `rebuild_dispatch_map` sie aus dem Auftragsvermerk bei IBKR
+    wieder aufbaut (T1-88c) — und sie traegt den Zustand, den IBKR **jetzt**
+    meldet, nicht den, den die Plattform zuletzt gespeichert hat.
+
+    Das Vokabular kommt aus T1-100 (D14): dieselben Worte wie im Order
+    Management, damit nicht zwei Flaechen ueber dieselbe Sache verschieden
+    reden. Ein abgelehnter Auftrag traegt IBKRs eigenen Wortlaut (T1-102, D16)
+    — der Satz, der die Frage des Nutzers vollstaendig beantwortet und bisher
+    nur im Protokoll stand.
+    """
+    with _DISPATCH_MAP_LOCK:
+        paare = list(_TRADES_BY_DISPATCH.items())
+
+    zeilen: list[dict[str, Any]] = []
+    for dispatch_id, trade in paare:
+        order = getattr(trade, "order", None)
+        contract = getattr(trade, "contract", None)
+        roh = _status_of_trade(trade)
+        grund = rejection_reason(trade)
+        zeilen.append(
+            {
+                "dispatchId": dispatch_id,
+                "symbol": getattr(contract, "symbol", None) or "?",
+                "action": getattr(order, "action", None) or "?",
+                "qty": getattr(order, "totalQuantity", None),
+                "status": order_vocabulary.label(
+                    "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
+                ),
+                "reason": grund,
+            }
+        )
+    zeilen.sort(key=lambda z: (str(z["symbol"]), str(z["dispatchId"])))
+    return zeilen
+
+
+def _status_of_trade(trade: Any) -> str | None:
+    return getattr(getattr(trade, "orderStatus", None), "status", None)
+
+
+def orders_in_flight() -> bool:
+    """T1-101 C-5 — ist gerade ein Auftrag unquittiert unterwegs?
+
+    Der Riegel vor dem Speichern: eine geaenderte Client-ID oder ein
+    geaenderter Port waehrend eines lebenden Auftrags heisst beim naechsten
+    Start, dass die Verbindung ihn nicht mehr findet.
+    """
+    with _DISPATCH_MAP_LOCK:
+        trades = list(_TRADES_BY_DISPATCH.values())
+    return any(
+        _STATUS_MAP.get(_status_of_trade(t) or "", "") in _LIVE_STATES for t in trades
+    )
+
+
+# Wie oft der Assistent nachsieht, ob `bridge.env` inzwischen ladbar ist.
+SETUP_POLL_S = 2.0
+
+
+def run_setup_cockpit(
+    failure: failures.Failure,
+    env_path: Path,
+    argv: list[str],
+) -> bool:
+    """T1-101 C-1 / D3 — die Oberflaeche startet vor der Konfiguration.
+
+    Bis hierher endete der Start bei einer fehlenden oder kaputten
+    `bridge.env` mit `return 1`. Ein Fenster, das nur erscheint, wenn schon
+    alles funktioniert, loest aber nichts — es muss genau dann da sein, wenn
+    nichts funktioniert.
+
+    Deshalb dreht sich die Reihenfolge: Fenster hoch, Assistent, und erst wenn
+    die Datei ladbar ist, geht es weiter. Der Rueckgabewert sagt, ob es
+    weitergeht.
+
+    Der Assistent geht nur auf, wenn auch jemand da ist, der etwas eintraegt —
+    dieselbe Bedingung wie beim Halt aus A-1. Sonst waere es kein Assistent,
+    sondern ein haengender Vorgang.
+    """
+    if not console.setup_wanted(argv):
+        return False
+
+    try:
+        from .cockpit import CockpitServer, CockpitState, SetupActions, StateStore
+        from .cockpit import runfile
+        from .cockpit import window as window_mod
+
+        store = StateStore(
+            CockpitState(
+                bridge_version=__version__,
+                setup_mode=True,
+                failure_code=failure.code,
+                failure_headline=failure.headline,
+                failure_detail=list(failure.detail),
+                failure_action=list(failure.action),
+            )
+        )
+        server = CockpitServer(
+            store, setup=SetupActions(env_path, store=store)
+        )
+        url = server.start()
+        runfile.write(0, url)
+        window_mod.open_window(url)
+        print(f"\n  A setup window has opened: {url}\n", flush=True)
+    except Exception as exc:
+        log.debug("Setup cockpit could not start: %s", exc)
+        return False
+
+    try:
+        while True:
+            time.sleep(SETUP_POLL_S)
+            try:
+                load_config()
+            except Exception:
+                continue
+            log.info("bridge.env is readable now — continuing startup.")
+            return True
+    except KeyboardInterrupt:
+        return False
+    finally:
+        server.stop()
+        runfile.remove(0)
+
+
+def report_heartbeat(
+    cockpit: Any | None,
+    tws_connected: bool,
+    snap: Any | None,
+    error: Exception | None = None,
+    api_base: str | None = None,
+) -> None:
+    """Traegt das Ergebnis eines Herzschlags in den Zustandsblock."""
+    if cockpit is None:
+        return
+    try:
+        changes: dict[str, Any] = {
+            "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
+            "tws_connected": tws_connected,
+            "ordertune_ok": snap is not None,
+            # Ohne Verbindung ist die Ablage nicht leer, sondern ohne Aussage.
+            "orders": orders_for_cockpit() if tws_connected else None,
+        }
+        # B-4: dieselbe Zuordnung wie beim Start, damit Konsole und Flaeche
+        # ueber dieselbe Stoerung dasselbe sagen (E-6).
+        if error is not None:
+            f = failures.classify_handshake_error(error, api_base)
+            changes.update(
+                failure_code=f.code,
+                failure_headline=f.headline,
+                failure_detail=list(f.detail),
+                failure_action=list(f.action),
+            )
+        elif snap is not None:
+            changes.update(
+                failure_code=None,
+                failure_headline=None,
+                failure_detail=[],
+                failure_action=[],
+            )
+        if snap is not None:
+            changes.update(
+                cash=snap.cash,
+                equity=snap.equity,
+                currency=snap.currency,
+                positions=snap.positions,
+                # T1-99 woertlich: die Positionsliste ist die einzige Quelle
+                # dafuer, ob ueberhaupt eine Depotauskunft vorliegt. `None`
+                # heisst „noch nichts gehoert", nicht „nichts im Depot".
+                account_known=snap.positions is not None,
+            )
+        cockpit.store.update(**changes)
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Cockpit state update failed: %s", exc)
+
+
+def report_poll(cockpit: Any | None) -> None:
+    if cockpit is None:
+        return
+    try:
+        cockpit.store.update(
+            last_pending_poll_at=datetime.now(timezone.utc).isoformat()
+        )
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Cockpit state update failed: %s", exc)
+
+
+def stop_cockpit(cockpit: Any | None, client_id: int) -> None:
+    if cockpit is None:
+        return
+    try:
+        from .cockpit import runfile
+
+        cockpit.stop()
+        runfile.remove(client_id)
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Cockpit shutdown failed: %s", exc)
+
+
+def _abort(
+    failure: failures.Failure,
+    log_file: Path | None,
+    argv: list[str],
+) -> int:
+    """T1-101 A-1 — der eine Ausgang fuer jeden Startfehler.
+
+    Bis 0.7.0 hatte jede der drei Abbruchstellen ihre eigene Ausgabe, und keine
+    ueberlebte den Doppelklick: gebaut wird mit `--console`, und Windows
+    schliesst das Fenster zusammen mit dem Vorgang. Hier laeuft alles zusammen:
+    gerahmter Klartext nach `stderr`, eine Zeile ins Protokoll fuer den Support,
+    und erst danach das Warten — damit die Meldung noch da ist, wenn jemand
+    hinsieht.
+
+    Der Rueckgabewert bleibt 1, wie vorher an allen drei Stellen.
+    """
+    print(
+        failures.render(failure, str(log_file) if log_file else None),
+        file=sys.stderr,
+        flush=True,
+    )
+    if log_file is not None:
+        # Nur Kennung und Satz, nicht der ganze Block: die Wurzel haengt an der
+        # Konsole, sonst stuende alles doppelt auf dem Bildschirm.
+        log.error("Startup aborted (%s): %s", failure.code, failure.headline)
+    console.hold(argv)
+    return 1
+
+
 def main() -> int:
+    argv = sys.argv[1:]
+
+    # Aufgeloest, bevor irgendetwas schiefgeht: bei einem Doppelklick ist das
+    # Arbeitsverzeichnis nicht zwingend der Ordner der EXE, und „Datei nicht
+    # gefunden" ohne Suchort ist keine Auskunft.
+    env_path = Path(ENV_FILE).resolve()
+
     try:
         config = load_config()
     except Exception as exc:
-        print(f"[FATAL] bridge.env invalid: {exc}", file=sys.stderr)
-        return 1
+        failure = failures.classify_config_error(
+            exc, str(env_path), env_path.exists()
+        )
+        # T1-101 C-1 / D3: erst der Assistent, dann der Abbruch. Der gerahmte
+        # Block steht trotzdem in der Konsole — wer ohne Fenster arbeitet, soll
+        # dieselbe Auskunft bekommen.
+        print(failures.render(failure), file=sys.stderr, flush=True)
+        if not run_setup_cockpit(failure, env_path, argv):
+            console.hold(argv)
+            return 1
+        try:
+            config = load_config()
+        except Exception as zweiter:
+            return _abort(
+                failures.classify_config_error(
+                    zweiter, str(env_path), env_path.exists()
+                ),
+                None,
+                argv,
+            )
 
-    setup_logging(level=config.log_level)
+    log_file = setup_logging(level=config.log_level)
+    log.info("Log file: %s", log_file)
     log.info("ordertune-bridge-ibkr v%s starting up", __version__)
 
     if config.update_check_enabled:
@@ -1149,13 +1514,20 @@ def main() -> int:
         # gesehen haben — und nur darauf darf der Abgleich ein Urteil faellen.
         session_connected_at = datetime.now(timezone.utc)
     except Exception as exc:
-        log.error(
-            "Failed to connect to IBKR TWS/Gateway at %s:%d — %s",
-            config.ibkr_gateway_host,
-            config.ibkr_gateway_port,
-            exc,
+        # T1-101 A-3: die Portsuche laeuft ausschliesslich hier — im
+        # Normalbetrieb wird kein zusaetzlicher Socket geoeffnet.
+        answering = port_probe.scan(config.ibkr_gateway_host)
+        return _abort(
+            failures.classify_connect_error(
+                config.ibkr_gateway_host,
+                config.ibkr_gateway_port,
+                exc,
+                answering,
+                config.ibkr_client_id,
+            ),
+            log_file,
+            argv,
         )
-        return 1
 
     # T1-94-Sonde: nur lesen, nichts absenden, dann beenden. Steht hier und
     # nicht frueher, weil sie die Verbindung braucht — und hier, weil ab der
@@ -1178,9 +1550,14 @@ def main() -> int:
         api.handshake(capabilities=IBKR_CAPABILITIES)
         log.info("Handshake successful — Bridge is active.")
     except Exception as exc:
-        log.error("Handshake failed: %s", exc)
         ibkr.disconnect()
-        return 1
+        return _abort(
+            failures.classify_handshake_error(
+                exc, str(config.ordertune_api_base)
+            ),
+            log_file,
+            argv,
+        )
 
     dispatch_id_map: dict[int, str] = {}
     ibkr.subscribe_order_status_callback(_make_on_order_status(api, dispatch_id_map))
@@ -1210,26 +1587,52 @@ def main() -> int:
         PENDING_INTERVAL_OFF_S,
     )
 
+    # T1-101 B-1 — das Cockpit. Beiwerk, und wird auch so behandelt: ein
+    # Fehler beim Starten kostet die Anzeige, nie den Handel.
+    cockpit = start_cockpit(
+        argv,
+        config=config,
+        version=__version__,
+        fingerprint=fingerprint,
+        log_file=log_file,
+        session_connected_at=session_connected_at,
+        write_access=ibkr.write_access(),
+    )
+
     try:
         def _beat() -> None:
             # Zuerst das Lebenszeichen, dann die Fremdsicht. Umgekehrt haette
             # ein langsamer Abruf den Heartbeat verzoegert, und der ist das
             # Einzige, woran die Plattform erkennt, dass die Bridge lebt.
-            _handle_heartbeat(api, ibkr)
+            snap, beat_error = _handle_heartbeat(api, ibkr)
             _handle_external_executions(api, ibkr)
             # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
             # Fremdsicht — er ist die langsamste der drei Aufgaben und die
             # einzige, deren Ausbleiben nichts kaputt macht.
             _handle_order_reconcile(api, ibkr, session_connected_at)
+            # Ganz zuletzt, und nur lesend: der Zustandsblock. Er darf keinen
+            # der drei Wege oben aufhalten.
+            report_heartbeat(
+                cockpit,
+                ibkr.is_connected(),
+                snap,
+                beat_error,
+                str(config.ordertune_api_base),
+            )
+
+        def _poll() -> None:
+            _handle_pending(api, ibkr, dispatch_id_map)
+            report_poll(cockpit)
 
         run_loop(
             ibkr,
             heartbeat=_beat,
-            pending=lambda: _handle_pending(api, ibkr, dispatch_id_map),
+            pending=_poll,
             stop=stop,
             on_tick=lambda: handle_deferred_cancels(api),
         )
     finally:
+        stop_cockpit(cockpit, config.ibkr_client_id)
         ibkr.disconnect()
         api.close()
 

@@ -74,6 +74,53 @@ def test_bridge_version_matches_fixture() -> None:
     )
 
 
+# Der uebliche Ort der Plattform-Kopie, wenn beide Repos nebeneinander liegen.
+_MIRROR = (
+    Path(__file__).parent.parent.parent
+    / "t1.ordertune.com"
+    / "scripts"
+    / "fixtures"
+    / "bridge-wire-fixtures.json"
+)
+
+
+@pytest.mark.skipif(
+    not _MIRROR.exists(),
+    reason="Plattform-Repo liegt nicht daneben (oeffentliche CI) — dort nicht pruefbar",
+)
+def test_the_platform_mirror_is_actually_a_mirror() -> None:
+    """Die Zusicherung darueber sagt „BEIDE Kopien" — hier wird es nachgehalten.
+
+    ## Warum das noetig wurde
+
+    Der Satz stand da und hat trotzdem zweimal nicht gereicht:
+
+      * T1-99 hat die Bridge-Kopie um den Fall `heartbeatPortfolioUnknown`
+        erweitert und die Spiegelung nicht angefasst. Ausgerechnet der Fall,
+        der den stillen Bestandsverlust verhindert — der Heartbeat **ohne**
+        `positions`-Feld —, wurde auf der Plattformseite nie geprueft.
+      * T1-98 hat auf 0.7.0 gehoben, waehrend die Spiegelung noch 0.5.0 trug.
+
+    Beide Male ist es aufgefallen, weil jemand zufaellig hingesehen hat. Eine
+    Regel, die nur in einer Fehlermeldung steht, ist keine Regel.
+
+    Der Test laeuft nur, wenn das Plattform-Repo daneben liegt — also auf der
+    Maschine, auf der der Versionssprung gemacht wird. In der oeffentlichen CI
+    des Bridge-Repos gibt es die Datei nicht, und sie darf dort auch nicht
+    verlangt werden.
+
+    **Stopgap, kein Entwurf.** Der saubere Weg waere eine Quelle statt zweier
+    Kopien; solange es zwei sind, faellt der Unterschied wenigstens auf.
+    """
+    mirror = json.loads(_MIRROR.read_text("utf-8"))
+    assert mirror == FIXTURES, (
+        "Die Plattform-Kopie der Vertrags-Fixture weicht ab. Beide Dateien "
+        "muessen zeichengleich sein:\n"
+        f"  Bridge:    {Path(__file__).parent / 'contract' / 'wire_fixtures.json'}\n"
+        f"  Plattform: {_MIRROR}"
+    )
+
+
 def test_handshake_body_matches_contract() -> None:
     rec = _Recorder()
     api = _client(rec)

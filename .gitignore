@@ -11,7 +11,12 @@ __pycache__/
 .venv/
 venv/
 .env
+# `bridge.env` UND alles, was daneben entsteht: die Sicherung aus dem
+# Cockpit (`bridge.env.bak`) traegt denselben Token wie das Original,
+# und die temporaere Datei des atomaren Schreibens ebenso.
 bridge.env
+bridge.env.*
+.bridge-env-*
 
 # IDE
 .vscode/
@@ -21,6 +26,10 @@ bridge.env
 # Logs
 logs/
 *.log
+
+# T1-101: die Ablagedatei des Cockpits traegt ein Zugangstoken.
+# Sie gehoert in keinen Commit, schon gar nicht in einen oeffentlichen.
+run/
 
 # Code signing artifacts (never commit)
 cert.pfx

@@ -31,8 +31,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 
 
-def _run(script: Path) -> subprocess.CompletedProcess[str]:
+def _run(script: Path, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run a file as `__main__`, with `src` importable — as PyInstaller does.
+
+    T1-101: `cwd` is now a parameter, and the caller that asserts on a MISSING
+    `bridge.env` passes a scratch directory. Running in the repository root
+    made the test depend on whether the developer happens to keep a real
+    `bridge.env` there — and on the owner's machine they do. It then found a
+    valid configuration, walked past the check it was written for, and failed
+    on the next step. A test whose result depends on an ignored file in the
+    working tree does not test the program; it tests the machine.
+
 
     The environment is INHERITED and only `PYTHONPATH` is overridden. Handing
     `subprocess` a hand-built environment instead broke the release build on
@@ -53,19 +62,19 @@ def _run(script: Path) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
-        cwd=ROOT,
+        cwd=str(cwd or ROOT),
         env=env,
     )
 
 
-def test_launcher_starts_and_reaches_configuration() -> None:
+def test_launcher_starts_and_reaches_configuration(tmp_path) -> None:
     """The launcher must get past its imports and into `main()`.
 
     With no `bridge.env` present, `main()` is expected to reject the
     configuration and exit 1. That is a SUCCESSFUL start for our purposes: it
     proves every import resolved and the program's own error handling ran.
     """
-    result = _run(ROOT / "launcher.py")
+    result = _run(ROOT / "launcher.py", cwd=tmp_path)
 
     combined = result.stdout + result.stderr
     assert "ImportError" not in combined, (
@@ -73,11 +82,28 @@ def test_launcher_starts_and_reaches_configuration() -> None:
         f"{combined}"
     )
     assert "attempted relative import" not in combined
-    assert "bridge.env invalid" in combined, (
+    # T1-101 A-1/A-2: the wording changed from `bridge.env invalid: <exception>`
+    # to a framed block with a stable reference code. The code is what this
+    # test anchors on -- it is the part meant to survive rewording.
+    assert "Reference: env_missing" in combined, (
         "expected the configuration check to run and complain; got:\n"
         f"{combined}"
     )
     assert result.returncode == 1
+
+
+def test_the_launcher_does_not_wait_for_input_when_run_from_source(tmp_path) -> None:
+    """T1-101 A-1 — der Halt gilt der gepackten EXE, nicht jedem Aufruf.
+
+    `_run` gibt keinen Eingabekanal mit. Bliebe der Halt auch ausserhalb einer
+    gepackten EXE stehen, liefe dieser Aufruf in eine Wartestellung statt in
+    einen Rueckgabewert — und mit ihm jede geplante Aufgabe und jeder
+    CI-Durchlauf.
+    """
+    result = _run(ROOT / "launcher.py", cwd=tmp_path)
+
+    assert result.returncode == 1
+    assert "Press Enter" not in result.stdout + result.stderr
 
 
 def test_package_module_is_not_a_launch_script() -> None:

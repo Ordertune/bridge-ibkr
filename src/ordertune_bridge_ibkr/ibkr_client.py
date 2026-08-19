@@ -11,7 +11,21 @@ from typing import Any
 
 from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 
+from .write_access import (
+    CONFIRMED as READ_ONLY_CONFIRMED,
+    SUSPECTED as READ_ONLY_SUSPECTED,
+    VALIDATION_ERROR_CODE,
+    WriteAccess,
+    classify as classify_write_access,
+)
+
 log = logging.getLogger(__name__)
+
+# T1-101 B-2: wie lange auf die Antwort des Auftragskanals gewartet wird. Auf
+# einer gesunden Verbindung kommt sie in Millisekunden; unter Schreibschutz
+# kommt sie nie. Drei Sekunden sind reichlich Reserve und halten den Start
+# kurz, wenn es schiefgeht — bei ib_insync selbst sind es vier.
+WRITE_ACCESS_TIMEOUT_S = 3.0
 
 
 @dataclass
@@ -101,13 +115,92 @@ class IbkrClient:
         # Abfrage abgeschlossen wurde.
         self._positions_known = False
         self._multi_account_warned = False
+        # T1-101 B-2: die 321er aus dem Verbindungsfenster, mit ihrem Text.
+        self._validation_errors: list[str] = []
+        self._write_access = WriteAccess()
+
+    def _on_error(self, reqId: int, errorCode: int, errorString: str, *_: Any) -> None:
+        """Sammelt die Fehler, die TWS von sich aus schickt.
+
+        Nur die 321er, und nur zur Diagnose. Alles andere haengt bereits an
+        anderen Wegen — dieser Rueckruf darf nichts entscheiden.
+        """
+        if errorCode == VALIDATION_ERROR_CODE:
+            self._validation_errors.append(str(errorString or "").strip())
 
     def connect(self) -> None:
         log.info("Connecting to IBKR TWS/Gateway at %s:%d (client-id=%d)",
                  self._host, self._port, self._client_id)
+        # VOR dem Verbinden angehaengt: der 321er kommt rund eine Zehntel-
+        # sekunde nach den Positionen, also mitten im Verbindungsvorgang.
+        # Danach angehaengt waere er schon durch.
+        self._ib.errorEvent += self._on_error
         self._ib.connect(self._host, self._port, clientId=self._client_id)
         log.info("Connected to IBKR TWS/Gateway.")
         self._confirm_positions_subscription()
+        self._confirm_write_access()
+
+    def _confirm_write_access(self) -> None:
+        """T1-101 B-2 — antwortet der Auftragskanal ueberhaupt?
+
+        Das sprachunabhaengige Signal. Unter Schreibschutz beantwortet TWS die
+        Auftragsanfrage nicht; `ib_insync` laesst sie beim Verbinden deshalb
+        ganz aus, wenn man ihm `readonly=True` mitgibt. Hier wird sie
+        ausdruecklich gestellt und ihr Ausbleiben gemessen.
+
+        **Es ist eine reine Leseanfrage.** Es geht kein Auftrag hinaus und
+        keiner wird veraendert. Auf einer gesunden Verbindung antwortet sie in
+        Millisekunden, auch wenn gar kein Auftrag offen ist.
+
+        ## Es muss `reqOpenOrders` sein, NICHT `reqAllOpenOrders`
+
+        Am 2026-08-19 gemessen, an einer TWS mit eingeschaltetem Schreibschutz:
+
+          * `reqOpenOrders` — die eigenen Auftraege — wird **verweigert**.
+          * `reqAllOpenOrders` — alle Clients — **antwortet weiterhin** und
+            liefert sogar die von Hand gestellte Order.
+
+        Wer das hier auf `reqAllOpenOrders` umstellt, weil es „dasselbe" tut,
+        schaltet die Erkennung ab: sie wuerde nie wieder ausloesen, und zwar
+        stumm. Und stumm ist hier das Schlimmste, was passieren kann — unter
+        Schreibschutz sieht die Bridge kerngesund aus, meldet Herzschlaege und
+        laesst jeden Auftrag abprallen.
+
+        Die Frist ist ebenfalls tragend: `IB.reqCompletedOrders` und
+        `IB.reqAllOpenOrders` laufen ueber `_run()` **ohne** Frist, und unter
+        Schreibschutz haengt der erste davon endlos (Fehler 321 kommt mit
+        `reqId -1` und loest die wartende Anfrage nicht auf). Siehe T1-103.
+        """
+        beantwortet = True
+        try:
+            self._ib.run(
+                self._ib.reqOpenOrdersAsync(), timeout=WRITE_ACCESS_TIMEOUT_S
+            )
+        except Exception:
+            beantwortet = False
+
+        self._write_access = classify_write_access(
+            validation_errors=list(self._validation_errors),
+            open_orders_answered=beantwortet,
+        )
+
+        if self._write_access.state == READ_ONLY_CONFIRMED:
+            log.error(
+                "TWS is running with Read-Only API. Everything else looks "
+                "healthy — positions arrive, heartbeats go out — but every "
+                "order will be rejected. Turn off 'Read-Only API' in the API "
+                "settings and restart TWS. IBKR said: %s",
+                self._write_access.detail,
+            )
+        elif self._write_access.state == READ_ONLY_SUSPECTED:
+            log.warning(
+                "TWS did not answer the open-orders request within %.0fs. "
+                "Read-Only API is the usual cause; orders would be rejected.",
+                WRITE_ACCESS_TIMEOUT_S,
+            )
+
+    def write_access(self) -> WriteAccess:
+        return self._write_access
 
     def _confirm_positions_subscription(self) -> None:
         """T1-99 — die Positionsabfrage ausdruecklich abwarten.

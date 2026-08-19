@@ -39,6 +39,71 @@ LOG_LEVEL=INFO
 UPDATE_CHECK_ENABLED=true
 ```
 
+## Erste Einrichtung
+
+Fehlt die `bridge.env` beim Doppelklick, öffnet sich ein Einrichtungs-Fenster statt einer Fehlermeldung. Vier Schritte:
+
+1. **`bridge.env` einfügen** — den Block aus Ordertune (Settings → Broker) hineinkopieren. Ein Token wird nie von Hand getippt.
+2. **TWS suchen** — die vier IBKR-Standardports werden abgeklopft, der gefundene lässt sich übernehmen. Das ist die häufigste Falle: der Port ist eine Einstellung in TWS und folgt **nicht** aus dem Kontotyp.
+3. **Port prüfen**
+4. **Zugangsdaten prüfen** — ein echter Aufruf gegen Ordertune.
+
+Sobald die Datei lesbar ist, läuft die Bridge von selbst an, und das Fenster wird zum Cockpit.
+
+Im Reiter **Settings** lassen sich später Port, Client-ID, Log-Level und der Update-Check ändern. Token und Connection-ID stehen dort nur zum Ansehen — ersetzt werden sie, indem eine frische `bridge.env` eingefügt wird. Eine Änderung wird gespeichert und wirkt beim **nächsten Start**; solange ein Auftrag unterwegs ist, wird nicht gespeichert.
+
+## Das Cockpit
+
+Beim Start öffnet die Bridge ein lokales Fenster mit ihrem Zustand — ein Urteil statt eines Protokolls:
+
+- **Oben ein Satz** und vier Lämpchen: TWS, Ordertune, Konto, Order access.
+- **Verbindung**: wann der letzte Heartbeat kam (mitlaufend), wann zuletzt Signale abgeholt wurden. Bleibt der Heartbeat über 90 Sekunden aus, wird es als `overdue` markiert.
+- **Orders**: die Aufträge, die IBKR gerade zu dieser Bridge kennt — mit denselben Zustandsvokabeln wie das Order Management auf t1. Eine abgelehnte Order trägt IBKRs eigene Begründung.
+- **Account**: Währung, Cash, Equity, Bestand. Liegt noch keine Depotauskunft vor, steht dort „no position data yet" und **keine leere Tabelle** — das ist ein Unterschied.
+- **Details**: Version, Endpunkt, Fingerprint, Protokollpfad, die letzten 200 Protokollzeilen und ein Knopf „Copy diagnostics" für den Support. Der Zugangstoken ist darin nicht enthalten.
+
+Das Fenster ist Edge im App-Modus; fehlt Edge, öffnet sich der Standardbrowser, und sonst steht die Adresse in der Konsole.
+
+**Es erkennt auch den Fall, den man sonst erst am ersten Auftrag bemerkt:** läuft TWS mit eingeschalteter „Read-Only API", sieht alles gesund aus — Verbindung steht, Heartbeats laufen — und jede Order würde abprallen. Das Cockpit sagt es beim Start.
+
+### Sicherheit und Grenzen
+
+- Der Server hört **ausschliesslich** auf `127.0.0.1`, auf einem vom Betriebssystem gewählten Port, und jede Anfrage braucht ein Token, das bei jedem Start neu erzeugt wird. Es gibt keinen Zugriff von aussen und keinen Firewall-Dialog.
+- Die Adresse liegt in `run/cockpit-<client-id>.json` und wird beim Beenden gelöscht.
+- **Im Cockpit wird nichts freigegeben, gesendet oder storniert.** Es liest. Freigaben passieren ausschliesslich in der Ordertune-Weboberfläche.
+- Ein Fehler im Cockpit hält den Handel nicht auf. Mit `--headless` startet es gar nicht erst.
+
+## Wenn der Start fehlschlägt
+
+Die Bridge beendet sich bei einem Startfehler nicht mehr stillschweigend. Sie zeigt stattdessen einen Klartext-Block: was passiert ist, was zu tun ist, wo die Protokolldatei liegt, und eine feste Kennung für den Support.
+
+```
+========================================================================
+  BRIDGE COULD NOT START
+========================================================================
+
+  WHAT HAPPENED
+  Nothing answers on port 7497, but something does elsewhere.
+
+  bridge.env says:  IBKR_GATEWAY_PORT=7497
+  Answering ports:  7496 (TWS live)
+  ...
+  Reference: tws_wrong_port
+========================================================================
+```
+
+Beim Doppelklick auf die EXE **bleibt das Fenster offen**, bis eine Taste gedrückt wird — vorher schloss Windows es zusammen mit dem Prozess, und die Meldung war nicht lesbar.
+
+Findet die Bridge auf dem konfigurierten Port nichts, klopft sie die vier IBKR-Standardports ab (TWS 7497/7496, Gateway 4002/4001) und nennt, wo sich etwas meldet. Dabei geht **keine API-Anfrage** hinaus: es ist ein reiner Verbindungsversuch, der sofort wieder geschlossen wird.
+
+### `--headless`
+
+```
+ordertune-bridge-ibkr.exe --headless
+```
+
+Unterdrückt das Warten auf eine Eingabe **und startet das Cockpit nicht**. Für den unbeaufsichtigten Betrieb — IBC, geplante Aufgaben, CI —, wo niemand da ist, der eine Taste drückt oder ein Fenster ansieht. Der Rückgabewert ist derselbe. Ohne den Schalter wartet nur die gepackte EXE; aus dem Quelltext gestartet wartet die Bridge nie.
+
 ## Laufverhalten
 
 - **Heartbeat** alle 60 Sekunden: Cash, Equity, Positions + Gateway-Status an Ordertune
