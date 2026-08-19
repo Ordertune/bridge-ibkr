@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import stat
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -44,6 +45,17 @@ def test_nothing_carrying_the_token_can_be_committed(name: str) -> None:
     )
 
 
+# `chmod` setzt auf Windows nur das Schreibschutz-Bit; die Zugriffsgrenze
+# liegt dort in den ACLs des Benutzerprofils, nicht in den Modus-Bits. Der
+# Riegel ist deshalb POSIX-only — und weil Windows die Zielplattform ist,
+# steht das hier ausdruecklich da statt in einer Fussnote.
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod ist auf Windows wirkungslos; dort schuetzen die ACLs des Profils",
+)
+
+
+@posix_only
 def test_the_backup_is_no_more_readable_than_the_original(tmp_path) -> None:
     p = tmp_path / "bridge.env"
     p.write_text("ORDERTUNE_BRIDGE_TOKEN=ot_bridge_geheim\n", encoding="utf-8")
@@ -62,6 +74,7 @@ def test_the_backup_is_no_more_readable_than_the_original(tmp_path) -> None:
 # ── BUG-101-3 (mittel): die Ablagedatei traegt ein Zugangstoken ─────────────
 
 
+@posix_only
 def test_the_run_file_is_owner_only(tmp_path) -> None:
     p = runfile.write(17, "http://127.0.0.1:1/?t=geheim", run_dir=tmp_path)
     assert p is not None

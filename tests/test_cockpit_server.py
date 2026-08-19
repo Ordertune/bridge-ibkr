@@ -23,6 +23,7 @@ import urllib.request
 import pytest
 
 from ordertune_bridge_ibkr.cockpit import CockpitServer, CockpitState, StateStore
+from ordertune_bridge_ibkr.cockpit.server import BIND_HOST
 
 
 @pytest.fixture()
@@ -45,23 +46,32 @@ def _get(url: str, timeout: float = 5.0) -> tuple[int, str]:
 
 
 def test_it_binds_the_loopback_only(server) -> None:
-    """Nicht „es antwortet auf 127.0.0.1", sondern „es antwortet SONST NICHT".
+    """Gefragt wird das Betriebssystem, nicht die eigene Konstante.
 
-    Der Beleg: ein zweiter Socket kann dieselbe Portnummer auf einer anderen
-    Adresse noch binden. Waere der Server auf 0.0.0.0 gebunden, ginge das nicht.
+    `server_address` setzt `socketserver` nach dem Binden aus `getsockname()`
+    — es ist die Antwort des Kernels darauf, woran der Socket tatsaechlich
+    haengt, und nicht der Wert, den wir hineingegeben haben.
+
+    ## Warum hier zuerst etwas Klaemmeres stand
+
+    Der erste Anlauf versuchte einen Beweis ueber das Verhalten: ein zweiter
+    Socket bindet dieselbe Portnummer auf `0.0.0.0`; klappt das, kann der
+    Server dort nicht haengen. Auf macOS geht das mit `SO_REUSEADDR` — auf
+    Linux nicht, dort kollidiert ein Wildcard-Bind mit einem spezifischen auf
+    demselben Port. Der Test war auf der einen Plattform gruen aus einem
+    BSD-Detail und auf der anderen rot, obwohl der Server beide Male richtig
+    gebunden war.
+
+    Eine Zusicherung, deren Ergebnis von der Plattform abhaengt, sagt nichts
+    ueber das Programm. Die schlichtere Frage ist auch die belastbarere.
     """
-    zweiter = socket.socket()
-    zweiter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        zweiter.bind(("0.0.0.0", server.port))
-    except OSError:
-        pytest.fail(
-            "Der Port ist auf allen Adressen belegt — der Server haengt nicht "
-            "nur an der Rueckschleife. Das loest den Windows-Firewall-Dialog "
-            "aus und stellt ein depotnahes Interface ins Netz."
-        )
-    finally:
-        zweiter.close()
+    assert server._httpd is not None
+    gebunden = server._httpd.socket.getsockname()[0]
+    assert gebunden == BIND_HOST, (
+        f"Der Server haengt an {gebunden} statt an {BIND_HOST}. Das loest den "
+        "Windows-Firewall-Dialog aus und stellt ein depotnahes Interface ins "
+        "Netz."
+    )
 
 
 def test_without_the_token_nothing_is_served(server) -> None:

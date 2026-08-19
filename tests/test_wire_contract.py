@@ -17,6 +17,7 @@ aufgefallen.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,34 @@ _MIRROR = (
 )
 
 
+def _mirror_text() -> str:
+    """Die Plattform-Kopie — aus dem gleichnamigen Branch, sonst aus dem Baum.
+
+    Beide Haelften eines Vorgangs liegen ueblicherweise auf einem Branch je
+    Repo. Waehrend der eine schon gepusht ist und der andere noch nicht — oder
+    waehrend im Plattform-Repo an etwas anderem gearbeitet wird — zeigt der
+    Arbeitsbaum dort einen fremden Stand, und ein blosser Dateivergleich
+    schluege Alarm ohne Anlass. Das ist der schnellste Weg, einen Riegel
+    beizubringen, den alle ignorieren.
+
+    Deshalb: liegt drueben ein Branch mit demselben Namen wie hier, wird
+    dessen Fassung gelesen. Sonst die des Arbeitsbaums.
+    """
+    # Der Branch DIESES Repos — nicht der, auf dem der Nachbar gerade steht.
+    hier = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=Path(__file__).parent.parent, capture_output=True, text=True,
+    ).stdout.strip()
+    if hier:
+        gezeigt = subprocess.run(
+            ["git", "show", f"{hier}:scripts/fixtures/bridge-wire-fixtures.json"],
+            cwd=_MIRROR.parents[2], capture_output=True, text=True,
+        )
+        if gezeigt.returncode == 0 and gezeigt.stdout.strip():
+            return gezeigt.stdout
+    return _MIRROR.read_text("utf-8")
+
+
 @pytest.mark.skipif(
     not _MIRROR.exists(),
     reason="Plattform-Repo liegt nicht daneben (oeffentliche CI) — dort nicht pruefbar",
@@ -112,7 +141,7 @@ def test_the_platform_mirror_is_actually_a_mirror() -> None:
     **Stopgap, kein Entwurf.** Der saubere Weg waere eine Quelle statt zweier
     Kopien; solange es zwei sind, faellt der Unterschied wenigstens auf.
     """
-    mirror = json.loads(_MIRROR.read_text("utf-8"))
+    mirror = json.loads(_mirror_text())
     assert mirror == FIXTURES, (
         "Die Plattform-Kopie der Vertrags-Fixture weicht ab. Beide Dateien "
         "muessen zeichengleich sein:\n"
