@@ -85,32 +85,42 @@ _MIRROR = (
 )
 
 
-def _mirror_text() -> str:
-    """Die Plattform-Kopie — aus dem gleichnamigen Branch, sonst aus dem Baum.
+def _mirror_versions() -> list[str]:
+    """Alle Orte drueben, an denen die passende Fassung liegen koennte.
 
-    Beide Haelften eines Vorgangs liegen ueblicherweise auf einem Branch je
-    Repo. Waehrend der eine schon gepusht ist und der andere noch nicht — oder
-    waehrend im Plattform-Repo an etwas anderem gearbeitet wird — zeigt der
-    Arbeitsbaum dort einen fremden Stand, und ein blosser Dateivergleich
-    schluege Alarm ohne Anlass. Das ist der schnellste Weg, einen Riegel
-    beizubringen, den alle ignorieren.
+    Die Frage, die dieser Riegel beantworten soll, lautet: **wurde die
+    Plattform-Kopie beim Versionssprung vergessen?** Sie lautet nicht: ist sie
+    schon gemergt. Beide Haelften eines Vorgangs liegen ueblicherweise auf je
+    einem Branch, und Branches landen zu verschiedenen Zeiten auf `main`.
 
-    Deshalb: liegt drueben ein Branch mit demselben Namen wie hier, wird
-    dessen Fassung gelesen. Sonst die des Arbeitsbaums.
+    Wer den Riegel enger fasst, bekommt ihn rot, sobald die eine Haelfte
+    gepusht ist und die andere noch nicht — und das ist der schnellste Weg,
+    eine Zusicherung beizubringen, die alle ignorieren. Genau das ist hier
+    zweimal passiert, in beide Richtungen.
+
+    Gesucht wird deshalb im Arbeitsbaum **und in jedem lokalen Branch** des
+    Nachbar-Repos. Traegt keiner davon die passende Fassung, wurde sie
+    tatsaechlich vergessen — und nur dann ist Alarm angebracht.
     """
-    # Der Branch DIESES Repos — nicht der, auf dem der Nachbar gerade steht.
-    hier = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=Path(__file__).parent.parent, capture_output=True, text=True,
-    ).stdout.strip()
-    if hier:
+    fassungen: list[str] = []
+    try:
+        fassungen.append(_MIRROR.read_text("utf-8"))
+    except OSError:  # pragma: no cover - defensiv
+        pass
+
+    nachbar = _MIRROR.parents[2]
+    zweige = subprocess.run(
+        ["git", "branch", "--format=%(refname:short)"],
+        cwd=nachbar, capture_output=True, text=True,
+    ).stdout.split()
+    for ref in zweige:
         gezeigt = subprocess.run(
-            ["git", "show", f"{hier}:scripts/fixtures/bridge-wire-fixtures.json"],
-            cwd=_MIRROR.parents[2], capture_output=True, text=True,
+            ["git", "show", f"{ref}:scripts/fixtures/bridge-wire-fixtures.json"],
+            cwd=nachbar, capture_output=True, text=True,
         )
         if gezeigt.returncode == 0 and gezeigt.stdout.strip():
-            return gezeigt.stdout
-    return _MIRROR.read_text("utf-8")
+            fassungen.append(gezeigt.stdout)
+    return fassungen
 
 
 @pytest.mark.skipif(
@@ -141,9 +151,10 @@ def test_the_platform_mirror_is_actually_a_mirror() -> None:
     **Stopgap, kein Entwurf.** Der saubere Weg waere eine Quelle statt zweier
     Kopien; solange es zwei sind, faellt der Unterschied wenigstens auf.
     """
-    mirror = json.loads(_mirror_text())
-    assert mirror == FIXTURES, (
-        "Die Plattform-Kopie der Vertrags-Fixture weicht ab. Beide Dateien "
+    fassungen = [json.loads(f) for f in _mirror_versions()]
+    assert any(f == FIXTURES for f in fassungen), (
+        "Die Plattform-Kopie der Vertrags-Fixture passt nirgends drueben — "
+        "weder im Arbeitsbaum noch in einem der Branches. Beide Dateien "
         "muessen zeichengleich sein:\n"
         f"  Bridge:    {Path(__file__).parent / 'contract' / 'wire_fixtures.json'}\n"
         f"  Plattform: {_MIRROR}"

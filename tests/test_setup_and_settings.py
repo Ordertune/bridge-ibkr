@@ -179,8 +179,9 @@ def test_something_that_is_not_a_bridge_env_is_refused(env) -> None:
 
 
 def test_the_assistant_only_opens_when_somebody_is_there(monkeypatch) -> None:
-    """Der Fehler, der beim Bauen passiert ist: der Testlauf des Pakets startet
-    den Launcher ohne `bridge.env` — und der wartete danach endlos."""
+    """Der Assistent wartet ohne Ende. Ist niemand da, ist das kein Assistent."""
+    monkeypatch.setattr(console, "is_interactive", lambda: True)
+
     monkeypatch.setattr(console, "is_frozen", lambda: False)
     assert console.setup_wanted([]) is False
     assert console.setup_wanted(["--setup"]) is True
@@ -190,6 +191,28 @@ def test_the_assistant_only_opens_when_somebody_is_there(monkeypatch) -> None:
     assert console.setup_wanted(["--headless"]) is False, (
         "Ein wartender Vorgang meldet keinen Herzschlag und ist fuer die "
         "Plattform nicht von einem Absturz zu unterscheiden."
+    )
+
+
+def test_a_packed_exe_without_a_console_never_waits(monkeypatch) -> None:
+    """Der Fall, der den Release-Build zum Stehen gebracht hat.
+
+    Der Smoke-Test des Workflows startet die fertige EXE in einem leeren
+    Verzeichnis. Dort ist `is_frozen()` wahr, eine `bridge.env` gibt es nicht,
+    und eine Eingabe kommt nie — der Assistent lief endlos, der Lauf hing
+    zwoelf Minuten im Schritt „Smoke-test the built EXE".
+
+    Dahinter der Fall, der nicht nur die Bauumgebung trifft: eine geplante
+    Aufgabe oder ein Dienst startet die EXE ohne Konsole.
+    """
+    monkeypatch.setattr(console, "is_frozen", lambda: True)
+    monkeypatch.setattr(console, "is_interactive", lambda: False)
+
+    assert console.setup_wanted([]) is False, (
+        "Gepackt, aber ohne Konsole: dort tippt niemand etwas ein."
+    )
+    assert console.setup_wanted(["--setup"]) is True, (
+        "Ausdruecklich angefordert bleibt ausdruecklich angefordert."
     )
 
 

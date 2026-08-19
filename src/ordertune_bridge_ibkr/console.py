@@ -56,21 +56,53 @@ def should_hold(argv: list[str]) -> bool:
     return is_frozen() and not headless_requested(argv)
 
 
+def is_interactive() -> bool:
+    """Sitzt ueberhaupt jemand davor?
+
+    Bei einem Doppelklick bekommt der Vorgang eine echte Konsole, und die
+    Eingabe haengt an einem Konsolen-Handle. Unter einer geplanten Aufgabe,
+    einem Dienst oder in einer Bauumgebung ist es eine Pipe — dort tippt
+    niemand etwas ein.
+    """
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (ValueError, AttributeError, OSError):  # pragma: no cover - defensiv
+        return False
+
+
 def setup_wanted(argv: list[str]) -> bool:
     """Soll bei fehlender `bridge.env` der Assistent aufgehen?
 
-    Dieselbe Bedingung wie beim Halt — und aus demselben Grund. Der Assistent
-    wartet, bis jemand etwas eintraegt. Ist niemand da, waere das kein
-    Assistent, sondern ein haengender Vorgang, der keinen Herzschlag meldet:
-    fuer die Plattform nicht von einem Absturz zu unterscheiden.
+    Drei Bedingungen, und die dritte ist teuer erkauft:
 
-    Genau das ist beim Bauen passiert — der Testlauf des Pakets startet den
-    Launcher ohne `bridge.env`, und der wartete danach endlos. `--setup`
-    holt den Assistenten fuer die Entwicklung ausdruecklich zurueck.
+      * nicht `--headless`,
+      * gepackte EXE (oder ausdruecklich `--setup` fuer die Entwicklung),
+      * **und eine interaktive Konsole.**
+
+    ## Warum die dritte dazukam
+
+    Der Assistent wartet, bis jemand etwas eintraegt — in einer Schleife, ohne
+    Ende. Ist niemand da, ist das kein Assistent, sondern ein haengender
+    Vorgang: er meldet keinen Herzschlag und ist fuer die Plattform von einem
+    Absturz nicht zu unterscheiden.
+
+    Das ist beim Bauen zweimal passiert, und beim zweiten Mal an der
+    gefaehrlichen Stelle. Zuerst hing der Testlauf des Pakets, weil er den
+    Launcher ohne `bridge.env` startet — dagegen kam `is_frozen()`. Dann hing
+    der Smoke-Test des **Release-Workflows**, der die fertige EXE in einem
+    leeren Verzeichnis startet: dort ist `is_frozen()` wahr, und der Assistent
+    lief endlos. Der Schritt heisst „Smoke-test the built EXE" und existiert
+    genau fuer diese Sorte Fehler.
+
+    Dahinter steht der Fall, der nicht nur die Bauumgebung trifft: eine
+    geplante Aufgabe oder ein Dienst-Wrapper startet die EXE ohne Konsole. Ohne
+    diese Bedingung wartete sie dort bis zum Neustart der Maschine.
     """
     if headless_requested(argv):
         return False
-    return SETUP_FLAG in argv or is_frozen()
+    if SETUP_FLAG in argv:
+        return True
+    return is_frozen() and is_interactive()
 
 
 def hold(argv: list[str] | None = None) -> None:

@@ -64,8 +64,17 @@ jobs:
             Write-Error "The built EXE fails to start. Publishing this would ship a binary that dies on launch."
             exit 1
           }
-          if ($out -notmatch "bridge.env invalid") {
+          # T1-101 A-2: der Text heisst nicht mehr `bridge.env invalid`, sondern
+          # ist ein gerahmter Block mit einer stabilen Kennung. Geprueft wird
+          # die Kennung — sie ist der Teil, der Umformulierungen ueberleben
+          # soll. Zusaetzlich, dass der Assistent hier NICHT aufgeht: er wartet
+          # ohne Ende, und in diesem Schritt sitzt niemand davor.
+          if ($out -notmatch "Reference: env_missing") {
             Write-Error "Expected the configuration check to run and reject the missing bridge.env. It did not — the startup path changed."
+            exit 1
+          }
+          if ($out -match "A setup window has opened") {
+            Write-Error "The packed EXE opened the setup assistant with nobody there. It waits forever — that is a hang, not a prompt."
             exit 1
           }
           if ($code -ne 1) {
