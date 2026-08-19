@@ -286,6 +286,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
     <section>
       <h2>Account</h2>
       <dl>
+        <dt>Account</dt><dd id="acct">-</dd>
         <dt>Currency</dt><dd id="ccy">-</dd>
         <dt>Cash</dt><dd id="cash">-</dd>
         <dt>Equity</dt><dd id="equity">-</dd>
@@ -530,6 +531,7 @@ function render() {
   q("hb").style.color = heartbeatStale(s) ? "var(--neg)" : "";
   q("poll").textContent = age(s.last_pending_poll_at);
   q("since").textContent = age(s.session_connected_at);
+  q("acct").textContent = s.account_masked || "-";
   q("ccy").textContent = s.currency || "-";
   q("cash").textContent = money(s.cash, s.currency);
   q("equity").textContent = money(s.equity, s.currency);

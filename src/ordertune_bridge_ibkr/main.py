@@ -58,6 +58,7 @@ from .external_executions import (
 )
 from .logging_setup import setup_logging
 from .probe import probe_requested, run_probe
+from .submitted_store import SubmittedStore
 from .order_reconcile import (
     UnresolvedDispatch,
     reconcile_open_dispatches,
@@ -207,6 +208,14 @@ def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
 # gefuellt.
 _LAST_REPORTED: dict[str, str] = {}
 
+# T1-103 H — Auftraege, die bei IBKR liegen, deren Bestaetigung die Plattform
+# aber nicht erreicht hat. dispatch_id → IBKR-Auftragsnummer. Wird beim
+# naechsten Abruf nachgeholt; ueberlebt bewusst nur die Sitzung, denn nach
+# einem Neustart liefert `rebuild_dispatch_map` die Nummer aus dem Vermerk am
+# Auftrag selbst.
+_ACK_PENDING: dict[str, int] = {}
+_ACK_LOCK = threading.Lock()
+
 # Rangfolge der Endzustaende. Ein Endzustand darf einen bereits gemeldeten nur
 # ersetzen, wenn er hoeher steht. Eine Ausfuehrung ist die staerkste Aussage,
 # die es gibt: sie ist am Konto passiert und laesst sich nicht widerrufen.
@@ -273,10 +282,29 @@ IBKR_CAPABILITIES: dict[str, Any] = {
 _REPORTED_LOCK = threading.Lock()
 
 
+def _dispatch_ist_abgelaufen(
+    expires_at: Any, *, jetzt: datetime | None = None
+) -> bool:
+    """Ist die Frist dieser Freigabe verstrichen?
+
+    Ohne Angabe wird NICHT abgelaufen: eine Plattform vor T1-103 sendet das
+    Feld moeglicherweise nicht, und eine fehlende Angabe als „abgelaufen" zu
+    lesen hiesse, jeden Auftrag zu verschlucken. Der Riegel auf der Plattform
+    greift in dem Fall ohnehin.
+    """
+    if not expires_at:
+        return False
+    frist = _parse_iso(expires_at)
+    if frist is None:
+        return False
+    return frist <= (jetzt or datetime.now(timezone.utc))
+
+
 def _handle_pending(
     api: OrdertuneApiClient,
     ibkr: IbkrClient,
     dispatch_id_map: dict[int, str],
+    submitted: SubmittedStore,
 ) -> None:
     """Poll pending dispatches und submit die konformen an IBKR."""
     try:
@@ -303,6 +331,42 @@ def _handle_pending(
                 "Dispatch %s carries a cancel request — not submitting it.",
                 order.dispatch_id,
             )
+            continue
+
+        # T1-103 H — der Riegel gegen den zweiten Echtauftrag.
+        #
+        # Die Plattform liefert einen Dispatch so lange aus, bis sie eine
+        # Bestaetigung hat. Kam die Bestaetigung nicht durch — Zeitueberschrei-
+        # tung, 502, Neustart —, steht dieselbe Zeile beim naechsten Abruf
+        # wieder da, obwohl der Auftrag bei IBKR laengst liegt. Ohne diese
+        # Abfrage ginge er ein zweites Mal hinaus.
+        #
+        # Statt abzusenden wird die Bestaetigung nachgeholt. Das ist der
+        # Schritt, der wirklich fehlt.
+        # T1-103 I — der zweite Riegel gegen den Auftrag von vorgestern.
+        #
+        # Der erste sitzt seit T1-103 in der WHERE-Klausel des Abholpfads. Wie
+        # beim Storno-Riegel steht hier ein zweiter, und aus demselben Grund:
+        # ein Versehen an dieser Stelle bewegt echtes Geld. Uhrenunterschiede
+        # spielen keine Rolle — die Frist ist auf Sitzungsschluss plus halbe
+        # Stunde gelegt, und so genau geht keine Rechneruhr daneben.
+        if _dispatch_ist_abgelaufen(order.expires_at):
+            log.warning(
+                "Dispatch %s expired at %s and is not being submitted. A "
+                "release is only good for its own trading session.",
+                order.dispatch_id,
+                order.expires_at,
+            )
+            continue
+
+        if submitted.bereits_abgeschickt(order.dispatch_id):
+            log.warning(
+                "Dispatch %s was already sent to IBKR in this or an earlier "
+                "session — not sending it again. Retrying the acknowledgement "
+                "to Ordertune instead.",
+                order.dispatch_id,
+            )
+            _retry_acknowledge(api, order.dispatch_id, dispatch_id_map)
             continue
 
         intent = order.order_intent
@@ -344,33 +408,36 @@ def _handle_pending(
                 continue
 
         # ── Submit via IBKR ───────────────────────────────────────────
+        #
+        # T1-103 H — zwei Schritte, zwei Fehlerbehandlungen.
+        #
+        # Bis hierher lagen `place_order` und `ack_order` in EINEM try-Block mit
+        # EINEM except, und dieses except meldete `rejected`. Damit hatte ein
+        # Netzfehler beim Bestaetigen zwei Wirkungen, beide falsch:
+        #
+        #   - Die Plattform trug einen lebenden Auftrag als abgelehnt ein. Der
+        #     Nutzer las „Rejected", haelt aber eine echte Position.
+        #   - `rejected` ist ein Endzustand und gibt die Wiederfreigabe frei.
+        #     Ein zweiter Klick — und zwei Auftraege auf dieselbe Position.
+        #
+        # Getrennt behandelt bedeutet jeder Fehler das, was er ist: Scheitert
+        # das Absenden, liegt nichts beim Broker und `rejected` ist richtig.
+        # Scheitert nur die Bestaetigung, liegt der Auftrag da und die Bridge
+        # sagt darueber gar nichts — der naechste Abruf holt die Bestaetigung
+        # nach, und der Vermerk oben verhindert das zweite Absenden.
         try:
             contract = make_contract(intent["symbol"])
             ib_order = translate_intent(intent)
             ib_order.orderRef = f"ot-{order.dispatch_id}"
+            # Der Vermerk steht VOR dem Absenden. Ein Vermerk ohne Auftrag
+            # kostet eine ausgelassene Order — die der Nutzer erneut freigeben
+            # kann. Ein Auftrag ohne Vermerk kostet einen zweiten Echtauftrag.
+            submitted.vermerken(order.dispatch_id)
             trade = ibkr.place_order(contract, ib_order)
-            ib_order_id = int(getattr(trade.order, "orderId", 0))
-            # HB-1: Register mapping BEFORE ack so the status-callback can
-            # find the dispatch_id if IBKR fires a fill-event faster than
-            # our ack-round-trip.
-            #
-            # T1-88c: haelt jetzt beide Richtungen fest — die Rueckrichtung
-            # braucht der Storno, um den Auftrag ueberhaupt zu finden.
-            register_trade(dispatch_id_map, order.dispatch_id, trade)
-            api.ack_order(
-                order.dispatch_id,
-                broker_order_id=ib_order_id,
-                submitted_at=datetime.now(timezone.utc).isoformat(),
-            )
-            log.info(
-                "Submitted dispatch %s (%s %s x%s) — ib_order_id=%s",
-                order.dispatch_id,
-                intent["symbol"],
-                intent["side"],
-                intent["qty"],
-                ib_order_id,
-            )
         except Exception as exc:
+            # Nichts ist hinausgegangen: der Vermerk faellt wieder weg, damit
+            # ein spaeterer Versuch moeglich bleibt.
+            submitted.vergessen(order.dispatch_id)
             log.error("submit failed for dispatch %s: %s", order.dispatch_id, exc)
             try:
                 api.result_order(
@@ -379,8 +446,33 @@ def _handle_pending(
                     reason_code="rejected_by_broker",
                     error_message=f"submit_error: {exc}",
                 )
-            except Exception:
-                pass
+            except Exception as melde_fehler:
+                log.error(
+                    "Could not report the failed submit for dispatch %s: %s. "
+                    "Ordertune will keep this row open until the reconcile "
+                    "round resolves it.",
+                    order.dispatch_id,
+                    melde_fehler,
+                )
+            continue
+
+        ib_order_id = int(getattr(trade.order, "orderId", 0))
+        # HB-1: Register mapping BEFORE ack so the status-callback can
+        # find the dispatch_id if IBKR fires a fill-event faster than
+        # our ack-round-trip.
+        #
+        # T1-88c: haelt jetzt beide Richtungen fest — die Rueckrichtung
+        # braucht der Storno, um den Auftrag ueberhaupt zu finden.
+        register_trade(dispatch_id_map, order.dispatch_id, trade)
+        _acknowledge(api, order.dispatch_id, ib_order_id)
+        log.info(
+            "Submitted dispatch %s (%s %s x%s) — ib_order_id=%s",
+            order.dispatch_id,
+            intent["symbol"],
+            intent["side"],
+            intent["qty"],
+            ib_order_id,
+        )
 
     for dispatch_id in resp.cancelling:
         _handle_cancel(ibkr, dispatch_id)
@@ -393,6 +485,76 @@ _CANCEL_SENT: set[str] = set()
 # Dispatches, zu denen kein Auftrag auffindbar war. Nur damit die Warnung
 # einmal erscheint statt im Fuenf-Sekunden-Takt.
 _CANCEL_UNRESOLVED: set[str] = set()
+
+
+def _acknowledge(
+    api: OrdertuneApiClient, dispatch_id: str, ib_order_id: int
+) -> None:
+    """T1-103 H — die Bestaetigung. Ihr Scheitern sagt nichts ueber den Auftrag.
+
+    Der Auftrag liegt an dieser Stelle bereits bei IBKR. Geht die Bestaetigung
+    nicht durch, ist das ein Problem der Leitung und keines des Handels — und
+    die einzig richtige Antwort ist, es spaeter erneut zu versuchen. Was hier
+    NICHT passieren darf, ist eine Aussage ueber den Auftrag: `rejected` waere
+    gelogen, und die Luege gaebe die Wiederfreigabe frei.
+    """
+    try:
+        api.ack_order(
+            dispatch_id,
+            broker_order_id=ib_order_id,
+            submitted_at=datetime.now(timezone.utc).isoformat(),
+        )
+        with _ACK_LOCK:
+            _ACK_PENDING.pop(dispatch_id, None)
+    except Exception as exc:
+        with _ACK_LOCK:
+            _ACK_PENDING[dispatch_id] = ib_order_id
+        log.error(
+            "The order for dispatch %s IS at your broker (IBKR order %s), but "
+            "Ordertune could not be told: %s. The order is untouched. The next "
+            "poll retries the acknowledgement — no second order will be sent.",
+            dispatch_id,
+            ib_order_id,
+            exc,
+        )
+
+
+def _retry_acknowledge(
+    api: OrdertuneApiClient,
+    dispatch_id: str,
+    dispatch_id_map: dict[int, str],
+) -> None:
+    """Holt eine ausgebliebene Bestaetigung nach.
+
+    Die Broker-Auftragsnummer kommt aus zwei Quellen, in dieser Reihenfolge:
+    der gemerkten Fehlschlagliste dieser Sitzung, sonst der nach einem Neustart
+    wiederhergestellten Zuordnung. Findet sich keine, bleibt es beim Vermerk —
+    dann klaert der Abgleich (`/orders/unresolved`) den Fall, und ein zweites
+    Absenden bleibt in jedem Fall aus.
+    """
+    with _ACK_LOCK:
+        ib_order_id = _ACK_PENDING.get(dispatch_id)
+
+    if ib_order_id is None:
+        trade = trade_for_dispatch(dispatch_id)
+        if trade is not None:
+            ib_order_id = int(getattr(getattr(trade, "order", None), "orderId", 0)) or None
+    if ib_order_id is None:
+        with _DISPATCH_MAP_LOCK:
+            for order_id, kennung in dispatch_id_map.items():
+                if kennung == dispatch_id:
+                    ib_order_id = order_id
+                    break
+
+    if ib_order_id is None:
+        log.warning(
+            "No IBKR order number known for dispatch %s — the reconcile round "
+            "will resolve it. Not sending a second order.",
+            dispatch_id,
+        )
+        return
+
+    _acknowledge(api, dispatch_id, ib_order_id)
 
 
 def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
@@ -769,18 +931,105 @@ _GENUINE_CANCEL_CODES = {0, 202, 10148}
 #   201  Order rejected — IBKR weist den Auftrag ab, mit Begruendung im Text
 _REJECTION_CODES = {201}
 
+# ── T1-103 G: die Liste war der Fehler, nicht ihre Laenge ────────────────────
+#
+# `_REJECTION_CODES = {201}` ist eine Positivliste, und eine Positivliste ueber
+# fremde Fehlercodes ist immer unvollstaendig. Am 2026-08-19 traf es NBIS: TWS
+# hat den Auftrag abgelehnt, der Code stand nicht in der Liste, und die Bridge
+# meldete `cancelled`. Auf t1 stand danach „Cancelled" an einem Auftrag, den
+# niemand storniert hatte — und die Wiederfreigabe war gesperrt, weil ein
+# unbestaetigtes Ende den Riegel schliesst.
+#
+# Die Frage laesst sich auch andersherum stellen, und dann wird sie
+# vollstaendig: WELCHE Codes bedeuten, dass der Auftrag noch lebt oder
+# ordentlich storniert wurde? Das sind genau zwei Gruppen, und beide sind
+# bekannt:
+#
+#   1. Die echten Stornobestaetigungen — `_GENUINE_CANCEL_CODES`, seit T1-88b.
+#      Code 0 gehoert dazu: ein Protokolleintrag ohne Fehlercode ist ein
+#      blosser Zustandswechsel.
+#   2. Die Warnungen. IBKR dokumentiert den Block 2100–2199 als „Warning
+#      Message"; sie beenden keinen Auftrag. Genau aus dieser Klasse stammt
+#      der Vorfall vom 2026-08-13.
+#
+# Alles andere, was am Ende des Protokolls eines endgueltig toten Auftrags
+# steht, ist eine Ablehnung. Diese Richtung ist auch die sichere: der Irrtum
+# faellt auf `rejected` statt auf `cancelled`, und `rejected` ist der Zustand,
+# der NICHTS beim Broker behauptet — er kann keinen zweiten Echtauftrag
+# ausloesen, er gibt nur die Wiederfreigabe frei.
+_WARNING_CODE_MIN = 2100
+_WARNING_CODE_MAX = 2200
+
+# Warnungen ausserhalb des 2100er-Blocks, die uns nachweislich begegnet sind.
+# 10349 ist der Ausloeser von T1-88b: „Gueltigkeitsdauer auf DAY gesetzt" —
+# eine Anpassung, keine Ablehnung, und ib_insync macht daraus trotzdem ein
+# erfundenes `Cancelled`. Die Liste ist bewusst kurz und waechst nur mit
+# gemessenen Faellen.
+_KNOWN_WARNING_CODES = {10349}
+
+
+def _is_warning_code(code: int) -> bool:
+    """Ist das eine Warnung von IBKR und damit kein Ende des Auftrags?"""
+    if code in _KNOWN_WARNING_CODES:
+        return True
+    return _WARNING_CODE_MIN <= code < _WARNING_CODE_MAX
+
 
 def rejection_reason(trade: Any) -> str | None:
     """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
 
-    Durchsucht das Protokoll von hinten. `None` heisst "keine Ablehnung
-    gefunden" — und dann bleibt es bei der Vorsicht aus T1-88b.
+    Zwei Wege zur selben Antwort:
+
+    1. Ein Code aus `_REJECTION_CODES` irgendwo im Protokoll. Das ist der
+       belegte Fall und bleibt unveraendert.
+    2. Der allgemeine Fall (T1-103 G): der LETZTE Protokolleintrag traegt einen
+       Fehlercode, der weder eine Stornobestaetigung noch eine Warnung ist.
+       Der letzte Eintrag ist der, der den aktuellen Zustand ausgeloest hat —
+       dieselbe Stelle, an der `cancel_is_genuine` seit T1-88b nachsieht.
+
+    Der zweite Weg wird nur beschritten, wenn nichts gefuellt wurde. Eine
+    Ausfuehrung ist am Konto passiert; was danach im Protokoll steht, kann sie
+    nicht mehr zu einer Ablehnung machen.
+
+    `None` heisst „keine Ablehnung gefunden" — und dann bleibt es bei der
+    Vorsicht aus T1-88b.
     """
-    for entry in reversed(list(getattr(trade, "log", None) or [])):
+    entries = list(getattr(trade, "log", None) or [])
+
+    for entry in reversed(entries):
         if getattr(entry, "errorCode", 0) in _REJECTION_CODES:
             message = (getattr(entry, "message", "") or "").strip()
             return message or "Rejected by IBKR."
-    return None
+
+    if not entries:
+        return None
+
+    # Der allgemeine Weg deutet einen als storniert gemeldeten Auftrag um. Er
+    # gilt deshalb NUR dort, wo genau das vorliegt: der Auftrag steht jetzt auf
+    # `Cancelled`. Lebt er noch — und das ist der Verlauf des Vorfalls vom
+    # 2026-08-13, wo eine Sekunde spaeter `Submitted` kam —, ist hier nichts zu
+    # entscheiden. Ohne Zustandsangabe wird ebenfalls nichts behauptet.
+    status = getattr(getattr(trade, "orderStatus", None), "status", "")
+    if _STATUS_MAP.get(str(status)) != "cancelled":
+        return None
+
+    filled = float(getattr(getattr(trade, "orderStatus", None), "filled", 0) or 0)
+    if filled != 0:
+        return None
+
+    letzter = entries[-1]
+    code = getattr(letzter, "errorCode", None)
+    if code is None:
+        return None
+    # Code 0 steckt bereits in `_GENUINE_CANCEL_CODES` — ein Eintrag ohne
+    # Fehlercode ist ein Zustandswechsel und sagt nichts ueber eine Ablehnung.
+    if code in _GENUINE_CANCEL_CODES:
+        return None
+    if _is_warning_code(code):
+        return None
+
+    message = (getattr(letzter, "message", "") or "").strip()
+    return message or "Rejected by IBKR."
 
 # Wie lange eine verdaechtige Stornierung nachbeobachtet wird, bevor sie als
 # echt gilt. Im Vorfall lag zwischen erfundenem `Cancelled` und echtem
@@ -1357,6 +1606,25 @@ def run_setup_cockpit(
         runfile.remove(0)
 
 
+def mask_account(account: str | None) -> str | None:
+    """T1-103 O — die Kontokennung, so weit gekuerzt, dass sie noch unterscheidet.
+
+    Der Zweck ist, ein Live- von einem Papierkonto zu unterscheiden, nicht die
+    Nummer auszuweisen. IBKR-Papierkonten beginnen mit `D`, Livekonten mit `U`
+    — der erste Buchstabe und die letzten beiden Stellen reichen dafuer, und
+    mehr gehoert nicht in eine Anzeige, die ueber HTTP ausgeliefert wird.
+
+    Die Zusage aus T1-97 lautet, dass die vollstaendige Nummer den Prozess nur
+    maskiert verlaesst. Das Cockpit ist ein Prozessausgang.
+    """
+    if not account:
+        return None
+    kennung = str(account).strip()
+    if len(kennung) <= 3:
+        return kennung
+    return f"{kennung[0]}***{kennung[-2:]}"
+
+
 def report_heartbeat(
     cockpit: Any | None,
     tws_connected: bool,
@@ -1402,6 +1670,7 @@ def report_heartbeat(
                 # dafuer, ob ueberhaupt eine Depotauskunft vorliegt. `None`
                 # heisst „noch nichts gehoert", nicht „nichts im Depot".
                 account_known=snap.positions is not None,
+                account_masked=mask_account(getattr(snap, "account", None)),
             )
         cockpit.store.update(**changes)
     except Exception as exc:  # pragma: no cover - defensiv
@@ -1567,6 +1836,17 @@ def main() -> int:
     # taeglich gegen 05:00 MEZ zwangsweise ab.
     rebuild_dispatch_map(ibkr, dispatch_id_map)
 
+    # T1-103 H: der Riegel gegen den zweiten Echtauftrag. Er muss vor dem
+    # ersten Abruf stehen und ueberlebt als Datei den Neustart, gegen den er
+    # schuetzt.
+    submitted = SubmittedStore()
+    if not submitted.schreibbar:
+        log.warning(
+            "The bridge cannot remember which orders it already sent. Trading "
+            "continues, but a restart between sending an order and confirming "
+            "it to Ordertune could send that order twice."
+        )
+
     stop = threading.Event()
 
     # Der Handler setzt nur eine Fahne. Frueher rief er `sys.exit(0)` und raeumte
@@ -1621,7 +1901,7 @@ def main() -> int:
             )
 
         def _poll() -> None:
-            _handle_pending(api, ibkr, dispatch_id_map)
+            _handle_pending(api, ibkr, dispatch_id_map, submitted)
             report_poll(cockpit)
 
         run_loop(

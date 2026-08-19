@@ -274,7 +274,7 @@ def test_reason_code_without_a_trade_keeps_the_old_behaviour() -> None:
 # ── Der Riegel im Abholpfad ──────────────────────────────────────────────────
 
 
-def test_a_dispatch_with_a_cancel_request_is_not_submitted() -> None:
+def test_a_dispatch_with_a_cancel_request_is_not_submitted(tmp_path) -> None:
     """Der zweite von zwei Riegeln — der erste sitzt serverseitig.
 
     Ohne ihn ginge der Auftrag raus und die Bridge protokollierte im selben
@@ -306,7 +306,7 @@ def test_a_dispatch_with_a_cancel_request_is_not_submitted() -> None:
                 cancelling=[],
             )
 
-    m._handle_pending(Api(), FakeIbkr(), {})
+    m._handle_pending(Api(), FakeIbkr(), {}, m.SubmittedStore(tmp_path))
     assert gesendet == []
 
 

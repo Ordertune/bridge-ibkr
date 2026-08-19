@@ -67,6 +67,11 @@ class CockpitState:
     currency: str | None = None
     cash: float | None = None
     equity: float | None = None
+    # T1-103 O: welches IBKR-Konto am Draht haengt. Beim Wechsel zwischen
+    # Live- und Papierkonto war das nirgends abzulesen, und man musste es aus
+    # dem Depotwert erraten. Maskiert — die vollstaendige Nummer gehoert nicht
+    # in eine Anzeige, die ueber HTTP ausgeliefert wird.
+    account_masked: str | None = None
     # None heisst „keine Aussage", [] heisst „das Konto haelt nichts".
     positions: list[dict[str, Any]] | None = None
 

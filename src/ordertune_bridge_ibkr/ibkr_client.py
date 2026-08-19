@@ -50,6 +50,17 @@ class AccountSnapshot:
     #: wurden daraus zwei echte Positionen als extern verkauft gebucht.
     positions: list[dict[str, Any]] | None
     gateway_status: str
+    # T1-103 O — auf WELCHEM Konto das hier alles passiert.
+    #
+    # Am 2026-08-19 hat der Owner zwischen Live- (7496) und Papierkonto (7497)
+    # gewechselt. Weder das Cockpit noch t1 haben irgendwo gezeigt, welches
+    # Konto gerade am Draht haengt — die Zahlen aenderten sich, und man musste
+    # aus dem Depotwert raten. Bei einem Werkzeug, das Echtauftraege schickt,
+    # ist das die wichtigste Angabe ueberhaupt.
+    #
+    # `None` heisst „nicht eindeutig bestimmbar" — ein Login mit mehreren
+    # Konten. Das ist eine Aussage und keine Vermutung.
+    account: str | None = None
 
 
 # Sammelzeilen des Kontos, die keine echte Waehrung benennen.
@@ -289,6 +300,7 @@ class IbkrClient:
             currency=currency,
             positions=positions,
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
+            account=self._trading_account(),
         )
 
 
