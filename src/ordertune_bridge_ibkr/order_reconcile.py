@@ -58,6 +58,22 @@ class UnresolvedDispatch:
 
 
 @dataclass(frozen=True)
+class DispatchFill:
+    """T1-105 — was IBKRs Ausfuehrungsberichte ueber einen Dispatch sagen.
+
+    Zusammengefasst ueber alle Teilausfuehrungen eines Auftrags: die Menge
+    addiert sich, der Kurs ist der mengengewichtete Durchschnitt, die Gebuehr
+    die Summe der gemeldeten.
+    """
+
+    qty: float
+    #: Mengengewichteter Durchschnittskurs, oder None wenn keiner ermittelbar.
+    price: float | None
+    #: Summe der gemeldeten Gebuehren, oder None wenn IBKR keine geliefert hat.
+    commission: float | None
+
+
+@dataclass(frozen=True)
 class ReconcileAction:
     """Was der Bridge daraus zu melden hat."""
 
@@ -83,6 +99,7 @@ def reconcile_open_dispatches(
     completed_by_ref: dict[str, Any],
     session_connected_at: datetime,
     open_query_failed: bool = False,
+    fills_by_ref: dict[str, DispatchFill] | None = None,
 ) -> list[ReconcileAction]:
     """Der Abgleich, als Entscheidung ohne Nebenwirkung.
 
@@ -122,15 +139,31 @@ def reconcile_open_dispatches(
     if open_query_failed:
         return []
 
+    fills = fills_by_ref or {}
     aktionen: list[ReconcileAction] = []
 
     for d in unresolved:
         if d.dispatch_id in open_by_ref:
             continue
 
+        fill = fills.get(d.dispatch_id)
+
         trade = completed_by_ref.get(d.dispatch_id)
         if trade is not None:
-            aktionen.append(_from_completed(d, trade))
+            aktionen.append(_from_completed(d, trade, fill))
+            continue
+
+        # T1-105 — Fall 2b: IBKR fuehrt den Auftrag nicht mehr, aber seine
+        # Ausfuehrung liegt vor.
+        #
+        # `reqCompletedOrders` haelt nur den laufenden Tag vor und ist ausserdem
+        # nicht verlaesslich vollstaendig. Der Ausfuehrungsbericht dagegen ist
+        # eine Tatsache ueber das Konto: er existiert, weil Stuecke den Besitzer
+        # gewechselt haben. Ihn zu ignorieren und `unknown` zu melden hiesse,
+        # eine belegte Position ungebucht zu lassen — genau der Zustand, der am
+        # 2026-08-19 unter „Held outside Ordertune" stand.
+        if fill is not None:
+            aktionen.append(_from_fill(d, fill))
             continue
 
         # Fall 4 — der Riegel gegen das Phantom in der Gegenrichtung.
@@ -153,7 +186,28 @@ def reconcile_open_dispatches(
     return aktionen
 
 
-def _from_completed(d: UnresolvedDispatch, trade: Any) -> ReconcileAction:
+def _from_fill(d: UnresolvedDispatch, fill: DispatchFill) -> ReconcileAction:
+    """T1-105 — die Ausfuehrung allein traegt die Meldung.
+
+    Gemeldet wird `filled`, nicht `partial`: ob noch etwas aussteht, sagt der
+    Auftrag, und den kennt IBKR hier nicht mehr. Eine Teilausfuehrung, deren
+    Auftrag noch lebt, kaeme gar nicht bis hierher — sie stuende in
+    `open_by_ref` und wuerde uebersprungen.
+    """
+    return ReconcileAction(
+        dispatch_id=d.dispatch_id,
+        status="filled",
+        reason_code=None,
+        error_message=None,
+        fill_qty=fill.qty,
+        fill_price=fill.price,
+        commission_usd=fill.commission,
+    )
+
+
+def _from_completed(
+    d: UnresolvedDispatch, trade: Any, fill: DispatchFill | None = None
+) -> ReconcileAction:
     """Ein abgeschlossener Auftrag — mit dem Grund, den IBKR dazu liefert.
 
     Ein noch lebender Zustand in der Liste der abgeschlossenen Auftraege ist ein
@@ -217,7 +271,15 @@ def _from_completed(d: UnresolvedDispatch, trade: Any) -> ReconcileAction:
         #
         # Dann bleibt es bei der ehrlichen Antwort. Eine Fuellung ohne Menge
         # waere genau die Meldung, vor der der alte Kommentar gewarnt hat.
+        # T1-105 — zuerst der Auftrag, dann der Ausfuehrungsbericht.
+        #
+        # T1-104 hat nur den Auftrag gefragt. Am 2026-08-19 gemessen: IBKR
+        # meldet ueber `reqCompletedOrders` den Zustand `Filled` und laesst die
+        # Mengenfelder leer. Der Riegel hielt richtig — und die Position blieb
+        # trotzdem ohne Zuordnung. Der Ausfuehrungsbericht kennt die Zahlen.
         menge = _filled_qty(trade)
+        if (menge is None or menge <= 0) and fill is not None:
+            return _from_fill(d, fill)
         if menge is None or menge <= 0:
             return ReconcileAction(
                 dispatch_id=d.dispatch_id,
@@ -236,8 +298,14 @@ def _from_completed(d: UnresolvedDispatch, trade: Any) -> ReconcileAction:
             reason_code=None,
             error_message=None,
             fill_qty=menge,
-            fill_price=_avg_fill_price(trade),
-            commission_usd=_commission(trade),
+            # Auch hier faellt jedes einzelne Feld auf den Ausfuehrungsbericht
+            # zurueck. Eine Menge ohne Kurs ist eine unbewertete Position; sie
+            # zu vermeiden kostet nichts, wenn die Zahl ohnehin vorliegt.
+            fill_price=_avg_fill_price(trade)
+            or (fill.price if fill is not None else None),
+            commission_usd=_commission(trade)
+            if _commission(trade) is not None
+            else (fill.commission if fill is not None else None),
         )
 
     if status in ("Cancelled", "ApiCancelled"):
@@ -333,3 +401,103 @@ def _commission(trade: Any) -> float | None:
         summe += wert
         gesehen = True
     return summe if gesehen else None
+
+
+# ── T1-105: die Ausfuehrungsberichte als Quelle der Zahlen ───────────────────
+#
+# ## Warum es diesen Weg braucht
+#
+# T1-104 hat die Zahlen am abgeschlossenen Auftrag gesucht — `orderStatus.filled`
+# und `avgFillPrice`. Am 2026-08-19 an drei echten Ausfuehrungen gemessen:
+# **dort stehen sie nicht.** IBKR meldet ueber `reqCompletedOrders` den Zustand
+# `Filled`, laesst die Mengenfelder aber leer. Die Bridge tat daraufhin genau
+# das Richtige und buchte nichts — nur blieb die Position damit weiter ohne
+# Strategiezuordnung.
+#
+# Die Zahlen stehen im Ausfuehrungsbericht, und der wird laengst abgeholt:
+# `external_executions.py` fragt ihn in jedem Herzschlag ab, um FREMDE Handel
+# zu erkennen — und wirft die eigenen weg (`if is_ours(...): continue`). Der
+# Vermerk `ot-<dispatchId>`, an dem dort „nicht unserer" entschieden wird, ist
+# derselbe, an dem hier „unserer, und hier sind die Zahlen" entschieden wird.
+#
+# ## Warum nach execId entdoppelt wird
+#
+# `ib.fills()` sammelt die Ausfuehrungen des Tages im Speicher. Eine
+# Korrekturmeldung von IBKR trifft unter derselben Kennung ein; ohne
+# Entdopplung addierte sich die Menge ein zweites Mal — und aus einem
+# Buchungsdetail wuerde ein zu grosser Bestand und ein zu grosser Ausstieg.
+
+ORDER_REF_PREFIX = "ot-"
+
+
+def dispatch_id_from_ref(order_ref: Any) -> str | None:
+    """`ot-<dispatchId>` → `<dispatchId>`, sonst nichts.
+
+    Wortgleich zur Gegenprobe in `external_executions.is_ours`. Die beiden
+    beantworten dieselbe Frage aus entgegengesetzter Richtung, und genau
+    deshalb duerfen sie nicht auseinanderlaufen.
+    """
+    if not order_ref:
+        return None
+    text = str(order_ref).strip()
+    if not text.startswith(ORDER_REF_PREFIX):
+        return None
+    kennung = text[len(ORDER_REF_PREFIX) :]
+    return kennung or None
+
+
+def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:
+    """Die Ausfuehrungen des Tages, zusammengefasst je Dispatch.
+
+    Nur, was unseren Auftragsvermerk traegt. Alles andere gehoert dem Nutzer
+    und laeuft ueber den Weg aus T1-94.
+    """
+    roh: dict[str, dict[str, Any]] = {}
+    gesehen: set[str] = set()
+
+    for fill in fills or []:
+        ex = getattr(fill, "execution", None)
+        if ex is None:
+            continue
+
+        kennung = dispatch_id_from_ref(getattr(ex, "orderRef", None))
+        if kennung is None:
+            continue
+
+        exec_id = str(getattr(ex, "execId", "") or "")
+        if not exec_id or exec_id in gesehen:
+            continue
+        gesehen.add(exec_id)
+
+        menge = _num(getattr(ex, "shares", None))
+        if menge is None or menge <= 0:
+            continue
+        kurs = _num(getattr(ex, "price", None))
+
+        eintrag = roh.setdefault(
+            kennung, {"qty": 0.0, "wert": 0.0, "bewertet": 0.0, "gebuehr": None}
+        )
+        eintrag["qty"] += menge
+        if kurs is not None and kurs > 0:
+            eintrag["wert"] += menge * kurs
+            eintrag["bewertet"] += menge
+
+        # Die Gebuehr nur, wenn ein echter Bericht vorliegt. ib_insync legt das
+        # Feld mit 0.0 an, bevor IBKR es fuellt — dieselbe Falle, die
+        # `external_executions.has_commission_report` beschreibt.
+        report = getattr(fill, "commissionReport", None)
+        if report is not None and str(getattr(report, "execId", "") or ""):
+            gebuehr = _num(getattr(report, "commission", None))
+            if gebuehr is not None:
+                eintrag["gebuehr"] = (eintrag["gebuehr"] or 0.0) + gebuehr
+
+    ergebnis: dict[str, DispatchFill] = {}
+    for kennung, e in roh.items():
+        if e["qty"] <= 0:
+            continue
+        ergebnis[kennung] = DispatchFill(
+            qty=e["qty"],
+            price=(e["wert"] / e["bewertet"]) if e["bewertet"] > 0 else None,
+            commission=e["gebuehr"],
+        )
+    return ergebnis

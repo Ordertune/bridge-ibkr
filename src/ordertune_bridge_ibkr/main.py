@@ -60,6 +60,7 @@ from .logging_setup import setup_logging
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .order_reconcile import (
+    fills_by_dispatch,
     UnresolvedDispatch,
     reconcile_open_dispatches,
 )
@@ -730,12 +731,26 @@ def _handle_order_reconcile(
             # aber nie die falsche Aussage.
             log.warning("Could not query completed orders: %s", exc)
 
+    # T1-105: die Ausfuehrungsberichte des Tages. Sie tragen die Zahlen, die
+    # der abgeschlossene Auftrag nicht traegt — gemessen am 2026-08-19 an drei
+    # echten Ausfuehrungen. Derselbe Abruf, den `external_executions` fuer die
+    # FREMDEN Handel macht; hier wird die andere Haelfte gelesen.
+    fills_by_ref: dict[str, Any] = {}
+    try:
+        fills_by_ref = fills_by_dispatch(ibkr.fills())
+    except Exception as exc:
+        # Ohne sie faellt der Abgleich auf das Verhalten von 0.9.1 zurueck:
+        # ein Auftrag ohne Mengenangabe bleibt ungeklaert. Schwaecher, nie
+        # falsch.
+        log.warning("Could not read executions for reconcile: %s", exc)
+
     actions = reconcile_open_dispatches(
         unresolved=unresolved,
         open_by_ref=open_by_ref,
         completed_by_ref=completed_by_ref,
         session_connected_at=session_connected_at,
         open_query_failed=open_query_failed,
+        fills_by_ref=fills_by_ref,
     )
 
     for action in actions:

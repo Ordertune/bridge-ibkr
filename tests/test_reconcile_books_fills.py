@@ -24,8 +24,12 @@ from typing import Any
 
 import pytest
 
+from ordertune_bridge_ibkr.external_executions import is_ours
 from ordertune_bridge_ibkr.order_reconcile import (
+    DispatchFill,
     UnresolvedDispatch,
+    dispatch_id_from_ref,
+    fills_by_dispatch,
     reconcile_open_dispatches,
 )
 
@@ -181,3 +185,197 @@ def test_ein_gerade_abgesendeter_auftrag_wird_nicht_fuer_verschollen_erklaert() 
         session_connected_at=VERBUNDEN,
     )
     assert aktionen == []
+
+
+# ── T1-105: die Ausfuehrungsberichte tragen die Zahlen ───────────────────────
+#
+# Der gemessene Fall vom 2026-08-19, zweiter Durchgang: die Bridge lief mit
+# 0.9.1, der Abgleich fand die drei Auftraege als `Filled` — und meldete
+# trotzdem `unknown`, mit der Begruendung „IBKR reports this order as filled
+# but gives no quantity". Der Riegel hielt richtig; nur standen die Zahlen
+# nirgends, wo T1-104 gesucht hat.
+#
+# Sie stehen im Ausfuehrungsbericht, und der wird in jedem Herzschlag
+# abgeholt — `external_executions` wirft die eigenen nur weg.
+
+def _fill(
+    ref: str | None,
+    *,
+    exec_id: str = "e1",
+    shares: Any = 1.0,
+    price: Any = 100.0,
+    commission: float | None = None,
+    commission_exec_id: str | None = None,
+) -> Any:
+    report = None
+    if commission is not None:
+        report = SimpleNamespace(
+            commission=commission,
+            execId=commission_exec_id if commission_exec_id is not None else exec_id,
+        )
+    return SimpleNamespace(
+        execution=SimpleNamespace(
+            orderRef=ref, execId=exec_id, shares=shares, price=price
+        ),
+        commissionReport=report,
+    )
+
+
+def test_der_vermerk_wird_zum_dispatch() -> None:
+    assert dispatch_id_from_ref("ot-abc123") == "abc123"
+    assert dispatch_id_from_ref("  ot-abc123  ") == "abc123"
+    assert dispatch_id_from_ref("abc123") is None, "fremde Ausfuehrung"
+    assert dispatch_id_from_ref("") is None
+    assert dispatch_id_from_ref(None) is None
+    assert dispatch_id_from_ref("ot-") is None, "leere Kennung ist keine"
+
+
+def test_fremde_ausfuehrungen_bleiben_draussen() -> None:
+    """Die Gegenprobe zu `external_executions.is_ours`."""
+    assert fills_by_dispatch([_fill(None), _fill(""), _fill("manuell")]) == {}
+
+
+def test_teilausfuehrungen_werden_zusammengefasst() -> None:
+    ergebnis = fills_by_dispatch(
+        [
+            _fill("ot-d1", exec_id="a", shares=1.0, price=100.0, commission=0.5),
+            _fill("ot-d1", exec_id="b", shares=3.0, price=104.0, commission=0.7),
+        ]
+    )
+    f = ergebnis["d1"]
+    assert f.qty == 4.0
+    # Mengengewichtet: (1*100 + 3*104) / 4 = 103.0
+    assert f.price == pytest.approx(103.0)
+    assert f.commission == pytest.approx(1.2)
+
+
+def test_dieselbe_ausfuehrung_zaehlt_einmal() -> None:
+    """Eine Korrekturmeldung traegt dieselbe execId.
+
+    Ohne Entdopplung addierte sich die Menge ein zweites Mal — und aus einem
+    Buchungsdetail wuerde ein zu grosser Bestand und ein zu grosser Ausstieg.
+    """
+    ergebnis = fills_by_dispatch(
+        [_fill("ot-d1", exec_id="a", shares=2.0), _fill("ot-d1", exec_id="a", shares=2.0)]
+    )
+    assert ergebnis["d1"].qty == 2.0
+
+
+def test_ohne_echten_gebuehrenbericht_wird_keine_gebuehr_gebucht() -> None:
+    """ib_insync legt das Feld mit 0.0 an, bevor IBKR es fuellt."""
+    ergebnis = fills_by_dispatch(
+        [_fill("ot-d1", commission=0.0, commission_exec_id="")]
+    )
+    assert ergebnis["d1"].commission is None
+
+
+def test_unbrauchbare_mengen_fallen_heraus() -> None:
+    for menge in (0.0, -1.0, None, "abc"):
+        assert fills_by_dispatch([_fill("ot-d1", shares=menge)]) == {}
+
+
+def test_ohne_kurs_bleibt_die_menge_erhalten() -> None:
+    f = fills_by_dispatch([_fill("ot-d1", shares=2.0, price=0.0)])["d1"]
+    assert f.qty == 2.0
+    assert f.price is None
+
+
+# ── Das Zusammenspiel: der gemessene Fall, jetzt vollstaendig ────────────────
+
+
+def test_gefuellt_ohne_menge_am_auftrag_wird_aus_der_ausfuehrung_gebucht() -> None:
+    """Genau der Fall vom 2026-08-19, zweiter Durchgang."""
+    aktionen = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={},
+        completed_by_ref={"disp-intc": _trade("Filled", filled=0.0, avg=0.0)},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={"disp-intc": DispatchFill(qty=2.0, price=92.58, commission=1.05)},
+    )
+    a = aktionen[0]
+    assert a.status == "filled"
+    assert a.fill_qty == 2.0
+    assert a.fill_price == 92.58
+    assert a.commission_usd == pytest.approx(1.05)
+
+
+def test_der_auftrag_gewinnt_wenn_er_zahlen_traegt() -> None:
+    """Der Ausfuehrungsbericht ist der Rueckfall, nicht die erste Quelle."""
+    a = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={},
+        completed_by_ref={"disp-intc": _trade("Filled", filled=5.0, avg=90.0)},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={"disp-intc": DispatchFill(qty=2.0, price=92.58, commission=1.05)},
+    )[0]
+    assert a.fill_qty == 5.0
+    assert a.fill_price == 90.0
+
+
+def test_ohne_auftrag_aber_mit_ausfuehrung_wird_trotzdem_gebucht() -> None:
+    """`reqCompletedOrders` haelt nur den laufenden Tag vor und ist lueckenhaft.
+
+    Der Ausfuehrungsbericht ist dagegen eine Tatsache ueber das Konto: er
+    existiert, weil Stuecke den Besitzer gewechselt haben.
+    """
+    a = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={},
+        completed_by_ref={},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={"disp-intc": DispatchFill(qty=1.0, price=283.13, commission=None)},
+    )[0]
+    assert a.status == "filled"
+    assert a.fill_qty == 1.0
+    assert a.commission_usd is None
+
+
+def test_ein_lebender_auftrag_wird_auch_mit_ausfuehrung_nicht_angefasst() -> None:
+    """Solange er offen ist, gehoert er dem Ereignispfad."""
+    aktionen = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={"disp-intc": _trade("Submitted")},
+        completed_by_ref={},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={"disp-intc": DispatchFill(qty=1.0, price=95.0, commission=None)},
+    )
+    assert aktionen == []
+
+
+def test_ohne_ausfuehrung_bleibt_es_bei_der_ehrlichen_antwort() -> None:
+    a = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={},
+        completed_by_ref={"disp-intc": _trade("Filled", filled=0.0)},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={},
+    )[0]
+    assert a.status == "unknown"
+    assert a.fill_qty is None
+
+
+# ── Die beiden Haelften derselben Regel ──────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["ot-abc", "ot-6eca593e-9792-451f-8601-0e2f8bfb92d7", "manuell", "", None, "ot-"],
+)
+def test_die_beiden_haelften_der_orderref_regel_stimmen_ueberein(ref) -> None:
+    """`is_ours` und `dispatch_id_from_ref` beantworten dieselbe Frage.
+
+    Die eine entscheidet in `external_executions`, dass eine Ausfuehrung dem
+    Nutzer gehoert und als fremd gemeldet wird. Die andere entscheidet hier,
+    dass sie uns gehoert und in die Buecher kommt. Laufen sie auseinander,
+    faellt eine Ausfuehrung entweder durch beide Raster — dann fehlt sie
+    ueberall — oder durch keines, und dann steht sie zweimal.
+
+    `ot-` ohne Kennung ist der eine Fall, in dem sie sich absichtlich
+    unterscheiden duerfen: `is_ours` sagt „nicht fremd", und das ist richtig;
+    buchen laesst sich daraus trotzdem nichts.
+    """
+    kennung = dispatch_id_from_ref(ref)
+    if kennung is not None:
+        assert is_ours(ref), "was wir buchen, darf nicht als fremd gemeldet werden"
+    if not is_ours(ref):
+        assert kennung is None, "was fremd gemeldet wird, darf nicht gebucht werden"
