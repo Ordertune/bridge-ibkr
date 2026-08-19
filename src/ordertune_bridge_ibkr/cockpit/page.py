@@ -1,34 +1,62 @@
-"""T1-101 B-2..B-6 — die Flaeche.
+"""T1-101 — die Flaeche des Cockpits.
 
 ## Woher die Gestaltung kommt
 
-Aus den t1-Tokens (`t1.ordertune.com/src/app/globals.css`), **nicht** aus dem
-Quiet-Luxury-Papier von ordertune.com: weisser Grund, kuehlgraue Flaechen,
-Inter, ein Akzent `#c8f23e`, Radius 6 px, Ampelfarben `#16a34a` / `#d97706` /
-`#dc2626`. Der Nutzer kommt aus dem Einrichtungs-Assistenten auf t1 — das
-Cockpit muss aussehen wie die Flaeche, von der er kommt.
+Aus dem **Ordertune-Design-System**: beiges Papier (`#F4EFE6`), Tinte statt
+reinem Schwarz (`#2A2A2A`), ein einziger Akzent (`#C8F23E`), Inter selbst
+gehostet, kaum Rahmen. Die erste Fassung nahm die t1-Tokens (weiss/kuehlgrau)
+mit der Begruendung, der Nutzer komme aus dem Einrichtungs-Assistenten auf t1.
+Der Owner hat entschieden: eine Sprache mit ordertune.com.
 
-Die Tokens sind eine **Kopie**, keine Verknuepfung. Ein Einbinden zur Bauzeit
-koppelte zwei Repos mit verschiedenen Veroeffentlichungstakten; ein Nachladen
-zur Laufzeit braeche ausgerechnet auf der Maschine mit dem Netzproblem — also
-dann, wenn das Cockpit gebraucht wird.
+## Was das konkret geaendert hat
 
-## Die Regeln, die hier sichtbar eingehalten werden
+Der erste Entwurf verstiess gegen drei Regeln des Systems, jede davon
+ausdruecklich aufgeschrieben:
 
-  * **Urteil zuerst, Protokoll zuletzt.** Ein Satz oben, drei Laempchen, dann
-    der Beleg. Die Rohzeilen liegen im Reiter „Details".
+  * **Ampelfarben.** `#dc2626` ist Trader-Rot, und das ist verboten — „red is
+    for losses we want to talk *with*, not panic about". Fehlertext ist
+    `--data-neg-2` (weiches Ocker). Wo es wirklich laut werden muss, benutzt
+    die Marke ihr eigenes Mittel: den **schwarzen Statement-Block**.
+  * **Karte mit farbigem linken Rand.** Steht woertlich auf der Verbotsliste.
+  * **Vier bunte Laempchen.** Das System kennt genau einen Statuspunkt, in
+    genau zwei Zustaenden: Lime (live) oder `--fg-2` (idle). Die Bedeutung
+    traegt das Wort daneben, nicht die Farbe — was fuer eine Betriebsflaeche
+    ohnehin die bessere Bauform ist.
+
+Dazu: **ein Lime-Knopf je Ansicht**, keine Icons, keine Emojis, keine
+Unicode-Piktogramme, Ziffern immer `tabular-nums`, Unterzeilen nie fett.
+
+## Die Regeln, die aus dem Entwurf bleiben
+
   * **Das Alter rechnet die Seite selbst**, aus einem Zeitpunkt des Servers,
-    und zaehlt weiter, auch wenn der Strom schweigt. Genau dann ist es die
-    wichtigste Angabe.
+    und zaehlt weiter, auch wenn der Strom schweigt.
   * **„Keine Auskunft" ist ein eigener Zustand.** `null` heisst nicht „nichts
     da" — bei Positionen (T1-99) wie bei Auftraegen.
-  * **Nichts aus dem Netz.** Kein CDN, keine Schrift von aussen.
+  * **Nichts aus dem Netz.** Schrift und Icon liegen als Base64 daneben.
   * **Es wird nichts freigegeben.** Kein Knopf sendet, storniert oder gibt
     frei. Das Pull-Pattern ist das §32-KWG-Schutzschild; das Cockpit liest.
 
-Nutzertexte englisch, keine Emojis.
+Nutzertexte englisch.
 """
 from __future__ import annotations
+
+from .assets import ICON_PNG, INTER_400, INTER_500, INTER_600, INTER_700
+
+
+def _schrift(gewicht: int, daten: str) -> str:
+    return (
+        f"@font-face{{font-family:Inter;font-style:normal;font-weight:{gewicht};"
+        f"font-display:swap;src:url(data:font/woff2;base64,{daten}) "
+        "format('woff2')}"
+    )
+
+
+FONT_FACES = "".join(
+    _schrift(g, d)
+    for g, d in (
+        (400, INTER_400), (500, INTER_500), (600, INTER_600), (700, INTER_700)
+    )
+)
 
 PAGE_HTML = """<!doctype html>
 <html lang="en">
@@ -36,120 +64,167 @@ PAGE_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ordertune Bridge</title>
+<link rel="icon" href="data:image/png;base64,""" + ICON_PNG + """">
 <style>
+""" + FONT_FACES + """
 :root {
-  /* Kopie der t1-Tokens. Gegenstueck: t1.ordertune.com/src/app/globals.css */
-  --bg: #ffffff; --surface: #f5f7fa; --surface-2: #eef1f5; --surface-3: #e6eaf0;
-  --fg-1: #18181b; --fg-2: #52525b; --fg-3: #a1a1aa;
-  --border: #d4d8df; --border-strong: #b9bec7;
-  --lime: #c8f23e; --lime-ink: #0a0a0a;
-  --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
-  --radius: 6px;
-  --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Kopie der Ordertune-Tokens. Gegenstueck: das Design-System-Verzeichnis. */
+  --beige: #F4EFE6; --beige-soft: #ECE6DA; --beige-deep: #E4DDCC;
+  --black: #0E0E0E; --ink: #2A2A2A;
+  --fg-1: #1F1F1F; --fg-2: #5A5A55; --fg-3: #8A867D;
+  --inv-1: #F4EFE6; --inv-2: #B5B0A6; --inv-3: #6F6B62;
+  --lime: #C8F23E; --lime-deep: #B6DF2B; --lime-ink: #0E0E0E;
+  --pos: #5E9C2E; --neg: #C99A82;
+  --hair: rgba(31,31,31,0.08); --soft: rgba(31,31,31,0.14);
+  --hair-dark: rgba(255,255,255,0.10);
+  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-pill: 999px;
+  --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg-1); font-family: var(--sans);
-       font-size: 14px; line-height: 1.5; }
-.shell { max-width: 60rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
-header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.5rem; }
-header h1 { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase;
-            color: var(--fg-2); margin: 0; font-weight: 600; }
-header .ver { font-family: var(--mono); font-size: .75rem; color: var(--fg-3); }
+html { -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--beige); color: var(--ink);
+       font-family: var(--sans); font-size: 15px; line-height: 1.55;
+       font-weight: 400; }
+.shell { max-width: 62rem; margin: 0 auto; padding: 40px 24px 96px; }
 
-.verdict { font-size: 1.5rem; font-weight: 600; letter-spacing: -.01em; margin: 0 0 1rem; }
-.verdict.bad { color: var(--bad); }
-.verdict.warn { color: var(--warn); }
+/* ── Kopf ──────────────────────────────────────────────────────────── */
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 48px; }
+header img { width: 28px; height: 28px; border-radius: var(--r-xs); display: block; }
+.eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
+           color: var(--fg-2); font-weight: 500; }
+header .ver { margin-left: auto; font-size: 12px; color: var(--fg-3);
+              font-variant-numeric: tabular-nums; }
 
-.lights { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 2rem; }
-.light { display: inline-flex; align-items: center; gap: .5rem; padding: .35rem .7rem;
-         background: var(--surface); border: 1px solid var(--border);
-         border-radius: var(--radius); font-size: .8rem; }
-.dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--fg-3); }
-.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-.dot.bad { background: var(--bad); }
+/* ── Urteil ────────────────────────────────────────────────────────── */
+.verdict { font-size: 30px; line-height: 1.2; letter-spacing: -0.02em;
+           font-weight: 700; color: var(--fg-1); margin: 0 0 20px;
+           max-width: 34ch; }
 
-.card { border: 1px solid var(--border); border-left: 3px solid var(--bad);
-        background: var(--surface); border-radius: var(--radius);
-        padding: 1rem 1.25rem; margin-bottom: 2rem; }
-.card h2 { margin: 0 0 .5rem; font-size: .95rem; }
-.card pre { font-family: var(--mono); font-size: .78rem; white-space: pre-wrap;
-            color: var(--fg-2); margin: .5rem 0 0; }
-.card a { color: var(--fg-1); }
+/* Der schwarze Statement-Block ist das Mittel der Marke, wenn es laut werden
+   muss. Kein Rot, kein farbiger Randstreifen — beides steht auf der
+   Verbotsliste des Systems. */
+.statement { background: var(--black); color: var(--inv-1);
+             border-radius: var(--r-md); padding: 28px 32px; margin: 0 0 32px; }
+.statement h2 { margin: 0 0 14px; font-size: 22px; line-height: 1.25;
+                letter-spacing: -0.01em; font-weight: 700; max-width: 40ch; }
+.statement pre { font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+                 white-space: pre-wrap; color: var(--inv-2); margin: 0; }
+.statement pre + pre { margin-top: 14px; padding-top: 14px;
+                       border-top: 1px solid var(--hair-dark); }
 
-nav { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+/* ── Statuspunkte: Lime oder idle. Die Bedeutung traegt das Wort. ──── */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 44px; }
+.chip { display: inline-flex; align-items: center; gap: 8px;
+        padding: 6px 14px 6px 12px; background: var(--beige-soft);
+        border: 1px solid var(--hair); border-radius: var(--r-pill);
+        font-size: 13px; color: var(--fg-2); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3);
+       flex: none; }
+.dot.live { background: var(--lime-deep); }
+
+/* ── Reiter ────────────────────────────────────────────────────────── */
+nav { display: flex; gap: 4px; border-bottom: 1px solid var(--hair);
+      margin-bottom: 36px; }
 nav button { background: none; border: 0; border-bottom: 2px solid transparent;
-             padding: .5rem .9rem; font: inherit; color: var(--fg-2); cursor: pointer; }
-nav button[aria-selected="true"] { color: var(--fg-1); border-bottom-color: var(--lime); font-weight: 600; }
+             padding: 10px 16px; font: inherit; font-size: 14px;
+             color: var(--fg-2); cursor: pointer; margin-bottom: -1px; }
+nav button[aria-selected="true"] { color: var(--fg-1); font-weight: 600;
+                                   border-bottom-color: var(--lime); }
 
-section h2 { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
-             color: var(--fg-2); margin: 2rem 0 .6rem; font-weight: 600; }
-section:first-of-type h2 { margin-top: 0; }
-dl { display: grid; grid-template-columns: minmax(9rem, 14rem) 1fr; gap: .3rem 1rem; margin: 0; }
-dt { color: var(--fg-2); }
-dd { margin: 0; font-variant-numeric: tabular-nums; }
-.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all; }
+/* ── Abschnitte ────────────────────────────────────────────────────── */
+section { margin-bottom: 44px; }
+section h2 { text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
+             color: var(--fg-2); font-weight: 500; margin: 0 0 16px; }
+dl { display: grid; grid-template-columns: minmax(9rem, 15rem) 1fr;
+     gap: 10px 24px; margin: 0; }
+dt { color: var(--fg-2); font-size: 14px; }
+dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all;
+        color: var(--fg-2); }
 .muted { color: var(--fg-3); }
+.warn { color: var(--neg); }
 
+/* ── Tabellen: schlichte Zellen, keine Sortierpfeile, keine Badges ──── */
 .scroll { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-size: .85rem; }
-th { text-align: left; font-weight: 600; color: var(--fg-2); font-size: .72rem;
-     text-transform: uppercase; letter-spacing: .06em; }
-th, td { padding: .45rem .75rem .45rem 0; border-bottom: 1px solid var(--surface-3);
-         white-space: nowrap; }
-td.reason { white-space: normal; color: var(--bad); font-size: .8rem; }
-.pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
-        background: var(--surface-2); border: 1px solid var(--border);
-        font-size: .75rem; }
-.pill.bad { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
-.pill.ok { background: #dcfce7; border-color: #bbf7d0; color: #14532d; }
+table { border-collapse: collapse; width: 100%; font-size: 14px;
+        font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 500; color: var(--fg-2); font-size: 11px;
+     text-transform: uppercase; letter-spacing: .1em; padding-bottom: 10px;
+     border-bottom: 1px solid var(--soft); white-space: nowrap; }
+td { padding: 11px 20px 11px 0; border-bottom: 1px solid var(--hair);
+     white-space: nowrap; color: var(--fg-1); }
+th { padding-right: 20px; }
+td.state { color: var(--fg-2); }
+td.state.done { color: var(--pos); }
+td.state.gone { color: var(--neg); }
+td.reason { white-space: normal; color: var(--neg); font-size: 13px;
+            max-width: 34rem; }
 
-#loglines { font-family: var(--mono); font-size: .74rem; white-space: pre-wrap;
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius); padding: .75rem; max-height: 30rem;
-            overflow: auto; margin: 0; }
-button.action { font: inherit; cursor: pointer; background: var(--lime);
-                color: var(--lime-ink); border: 0; border-radius: var(--radius);
-                padding: .45rem .9rem; font-weight: 600; }
-button.action:disabled { background: var(--surface-3); color: var(--fg-3); cursor: default; }
-input, select, textarea { font: inherit; background: var(--bg); color: var(--fg-1);
-  border: 1px solid var(--border); border-radius: var(--radius); padding: .3rem .5rem; }
-textarea { width: 100%; font-family: var(--mono); font-size: .78rem; }
-.note { font-size: .8rem; margin-left: .5rem; }
-.note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
-.steps { list-style: none; padding: 0; counter-reset: s; }
-.steps li { border-left: 2px solid var(--surface-3); padding: 0 0 1.5rem 1.25rem; }
-.steps h3 { font-size: .9rem; margin: 0 0 .35rem; }
-.steps p { margin: .35rem 0; }
-.banner { background: var(--surface-2); border: 1px solid var(--border);
-  border-left: 3px solid var(--warn); border-radius: var(--radius);
-  padding: .6rem .9rem; margin-bottom: 1.5rem; font-size: .85rem; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #0a0a0a; --surface: #111111; --surface-2: #171717; --surface-3: #1f1f1f;
-          --fg-1: #fafafa; --fg-2: #a3a3a3; --fg-3: #6b6b6b;
-          --border: #262626; --border-strong: #3a3a3a; }
-  .pill.bad { background: #2a1112; border-color: #4a1d1f; color: #fca5a5; }
-  .pill.ok { background: #0f2417; border-color: #1c3d28; color: #86efac; }
-}
+/* ── Knoepfe: genau EINER in Lime je Ansicht ───────────────────────── */
+button.action { font: inherit; font-size: 14px; font-weight: 600;
+                cursor: pointer; background: transparent; color: var(--fg-1);
+                border: 1px solid var(--soft); border-radius: var(--r-sm);
+                padding: 9px 18px; }
+button.action:hover { background: var(--beige-soft); }
+button.action.primary { background: var(--lime); color: var(--lime-ink);
+                        border-color: var(--lime); }
+button.action.primary:hover { background: var(--lime-deep);
+                              border-color: var(--lime-deep); }
+button.action:disabled { color: var(--fg-3); border-color: var(--hair);
+                         background: transparent; cursor: default; }
+
+input, select, textarea { font: inherit; font-size: 14px;
+  background: var(--beige-soft); color: var(--fg-1);
+  border: 1px solid var(--soft); border-radius: var(--r-sm); padding: 8px 10px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--lime);
+  outline-offset: 1px; }
+textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
+           line-height: 1.6; }
+.note { font-size: 13px; margin-left: 12px; color: var(--fg-2); }
+.note.ok { color: var(--pos); } .note.bad { color: var(--neg); }
+
+/* ── Assistent ─────────────────────────────────────────────────────── */
+.steps { list-style: none; padding: 0; margin: 0; }
+.steps li { padding: 0 0 40px 0; }
+.steps li + li { border-top: 1px solid var(--hair); padding-top: 32px; }
+.steps h3 { font-size: 17px; font-weight: 600; margin: 0 0 6px;
+            letter-spacing: -0.01em; }
+.steps p { margin: 6px 0 14px; font-size: 14px; color: var(--fg-2);
+           max-width: 62ch; font-weight: 400; }
+
+.banner { background: var(--beige-deep); border: 1px solid var(--hair);
+          border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 32px;
+          font-size: 14px; color: var(--fg-1); }
+
+#loglines { font-family: var(--mono); font-size: 12px; line-height: 1.65;
+            white-space: pre-wrap; background: var(--beige-soft);
+            border: 1px solid var(--hair); border-radius: var(--r-sm);
+            padding: 16px; max-height: 32rem; overflow: auto; margin: 0;
+            color: var(--fg-2); }
 </style>
 </head>
 <body>
 <div class="shell">
-  <header><h1>Ordertune Bridge</h1><span class="ver" id="ver"></span></header>
+  <header>
+    <img src="data:image/png;base64,""" + ICON_PNG + """" alt="">
+    <span class="eyebrow">Bridge</span>
+    <span class="ver" id="ver"></span>
+  </header>
 
   <div class="banner" id="restart" hidden>
     A setting was changed. It takes effect the next time the Bridge starts.
   </div>
 
   <p class="verdict" id="verdict">Connecting...</p>
-  <div class="lights">
-    <span class="light"><span class="dot" id="d-tws"></span> TWS</span>
-    <span class="light"><span class="dot" id="d-ot"></span> Ordertune</span>
-    <span class="light"><span class="dot" id="d-acct"></span> Account</span>
-    <span class="light"><span class="dot" id="d-write"></span> Order access</span>
+  <div class="chips">
+    <span class="chip"><span class="dot" id="d-tws"></span><span id="l-tws">TWS</span></span>
+    <span class="chip"><span class="dot" id="d-ot"></span><span id="l-ot">Ordertune</span></span>
+    <span class="chip"><span class="dot" id="d-acct"></span><span id="l-acct">Account</span></span>
+    <span class="chip"><span class="dot" id="d-write"></span><span id="l-write">Order access</span></span>
   </div>
 
-  <div class="card" id="card" hidden>
+  <div class="statement" id="card" hidden>
     <h2 id="card-title"></h2>
     <pre id="card-detail"></pre>
     <pre id="card-action"></pre>
@@ -163,7 +238,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: .78rem; }
         whole block. You never have to type a token by hand.</p>
         <textarea id="envbox" rows="7" spellcheck="false"
           placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
-        <p><button class="action" id="s1">Save bridge.env</button>
+        <p><button class="action primary" id="s1">Save bridge.env</button>
            <span class="note" id="s1msg"></span></p>
       </li>
       <li>
@@ -215,7 +290,10 @@ textarea { width: 100%; font-family: var(--mono); font-size: .78rem; }
         <dt>Cash</dt><dd id="cash">-</dd>
         <dt>Equity</dt><dd id="equity">-</dd>
       </dl>
-      <div id="positions" class="scroll muted" style="margin-top:.75rem">no position data yet</div>
+    </section>
+    <section>
+      <h2>Positions</h2>
+      <div id="positions" class="scroll muted">No position data yet.</div>
     </section>
   </div>
 
@@ -244,7 +322,7 @@ textarea { width: 100%; font-family: var(--mono); font-size: .78rem; }
         <dd><input id="f-upd" type="checkbox"></dd>
       </dl>
       <p style="margin-top:1rem">
-        <button class="action" id="f-save">Save</button>
+        <button class="action primary" id="f-save">Save</button>
         <span class="note" id="f-savemsg"></span></p>
     </section>
     <section>
@@ -304,7 +382,13 @@ function money(v, ccy) {
   return v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})
        + (ccy ? " " + ccy : "");
 }
-function dot(el, level) { el.className = "dot" + (level ? " " + level : ""); }
+// Das System kennt genau einen Statuspunkt in zwei Zustaenden: Lime oder
+// idle. Die Bedeutung traegt das Wort daneben — was fuer eine Betriebsflaeche
+// ohnehin besser ist als Farbe allein.
+function chip(dotId, labelId, live, wort) {
+  q(dotId).className = "dot" + (live ? " live" : "");
+  q(labelId).textContent = wort;
+}
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, c =>
     ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -342,7 +426,7 @@ function verdict(s) {
 function renderOrders(s) {
   const box = q("orders");
   if (s.orders === null || s.orders === undefined) {
-    box.className = "scroll muted"; box.textContent = "no order data yet"; return;
+    box.className = "scroll muted"; box.textContent = "No order data yet."; return;
   }
   if (s.orders.length === 0) {
     box.className = "scroll"; box.textContent = "No orders of ours at IBKR right now."; return;
@@ -351,9 +435,9 @@ function renderOrders(s) {
   box.innerHTML = "<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Status</th>"
     + "<th>Reason</th></tr>" + s.orders.map(o =>
       "<tr><td>" + esc(o.symbol) + "</td><td>" + esc(o.action) + "</td><td>"
-      + esc(o.qty ?? "-") + "</td><td><span class='pill "
-      + (o.status === "Rejected" ? "bad" : o.status === "Filled" ? "ok" : "")
-      + "'>" + esc(o.status) + "</span></td><td class='reason'>"
+      + esc(o.qty ?? "-") + "</td><td class='state "
+      + (o.status === "Filled" ? "done" : o.status === "Rejected" ? "gone" : "")
+      + "'>" + esc(o.status) + "</td><td class='reason'>"
       + esc(o.reason ?? "") + "</td></tr>").join("") + "</table>";
 }
 
@@ -361,7 +445,7 @@ function renderPositions(s) {
   const box = q("positions");
   if (s.positions === null || s.positions === undefined) {
     // T1-99: NICHT dasselbe wie eine leere Tabelle.
-    box.className = "scroll muted"; box.textContent = "no position data yet"; return;
+    box.className = "scroll muted"; box.textContent = "No position data yet."; return;
   }
   if (s.positions.length === 0) {
     box.className = "scroll"; box.textContent = "The account holds no positions."; return;
@@ -425,20 +509,25 @@ function render() {
   }
   q("restart").hidden = !s.pending_restart;
 
-  const [text, level] = verdict(s);
-  q("verdict").textContent = text;
-  q("verdict").className = "verdict" + (level ? " " + level : "");
+  q("verdict").textContent = verdict(s)[0];
 
-  dot(q("d-tws"), s.tws_connected ? "ok" : "bad");
-  dot(q("d-ot"), !s.ordertune_ok || heartbeatStale(s) ? "warn" : "ok");
-  dot(q("d-acct"), s.account_known ? "ok" : "warn");
-  dot(q("d-write"), s.write_access === "writable" ? "ok"
-      : s.write_access === "unknown" ? "" : "bad");
+  chip("d-tws", "l-tws", s.tws_connected,
+       s.tws_connected ? "TWS connected" : "TWS not reachable");
+  const meldet = s.ordertune_ok && !heartbeatStale(s);
+  chip("d-ot", "l-ot", meldet,
+       meldet ? "Reporting to Ordertune" : "Not reporting");
+  chip("d-acct", "l-acct", s.account_known,
+       s.account_known ? "Account data in" : "No account data yet");
+  const schreibt = s.write_access === "writable";
+  chip("d-write", "l-write", schreibt,
+       schreibt ? "Orders allowed"
+       : s.write_access === "unknown" ? "Order access unknown"
+       : "Orders would be rejected");
 
   q("hb").textContent = s.last_heartbeat_at
     ? age(s.last_heartbeat_at) + (heartbeatStale(s) ? " - overdue" : "")
     : "waiting for the first one";
-  q("hb").style.color = heartbeatStale(s) ? "var(--warn)" : "";
+  q("hb").style.color = heartbeatStale(s) ? "var(--neg)" : "";
   q("poll").textContent = age(s.last_pending_poll_at);
   q("since").textContent = age(s.session_connected_at);
   q("ccy").textContent = s.currency || "-";

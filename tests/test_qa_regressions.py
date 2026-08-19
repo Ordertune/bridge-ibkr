@@ -172,3 +172,48 @@ def test_a_dropped_connection_does_not_print_a_traceback(capfd) -> None:
         assert "ConnectionAbortedError" not in ausgabe.err + ausgabe.out
     finally:
         srv.stop()
+
+
+# ── Die Gestaltung folgt dem Ordertune-Design-System ────────────────────────
+
+
+def test_the_page_obeys_the_brands_negative_list() -> None:
+    """Drei Regeln, jede ausdruecklich aufgeschrieben, jede zuerst verletzt.
+
+    Der erste Entwurf nahm die t1-Tokens und damit Ampelfarben. Der Owner hat
+    auf eine Sprache mit ordertune.com entschieden, und das System ist an
+    diesen Punkten unmissverstaendlich.
+    """
+    # Trader-Rot: "red is for losses we want to talk *with*, not panic about".
+    for rot in ("#dc2626", "#ef4444", "#e11d48", "red;"):
+        assert rot not in PAGE_HTML, f"Trader-Rot ist zurueck: {rot}"
+
+    # Karte mit farbigem linken Rand steht woertlich auf der Verbotsliste.
+    assert "border-left: 3px solid" not in PAGE_HTML
+
+    # Keine Emojis, keine Unicode-Piktogramme.
+    for glyph in ("★", "☑", "→", "✓", "✗", "●"):
+        assert glyph not in PAGE_HTML, f"Piktogramm gefunden: {glyph}"
+
+    # Der Akzent ist ein Textmarker, kein Anstrich: EIN Lime-Knopf je Ansicht.
+    # Zwei im Dokument — Assistent und Einstellungen sind nie gleichzeitig zu
+    # sehen.
+    assert PAGE_HTML.count("action primary") == 2
+
+
+def test_the_wordmark_is_never_typeset() -> None:
+    """Abang ist proprietaer, und „ORDERTUNE" in Inter zu setzen ist verboten.
+
+    Wo die Marke sichtbar sein soll, steht das App-Icon — laut System das
+    einzige erlaubte Glyph.
+    """
+    assert "ORDERTUNE" not in PAGE_HTML.replace("ORDERTUNE_API_BASE", "")\
+        .replace("ORDERTUNE_BRIDGE_TOKEN", "").replace("ORDERTUNE_BRIDGE_CONNECTION_ID", "")
+    assert PAGE_HTML.count("data:image/png;base64,") == 2, (
+        "Erwartet: Favicon und Kopf-Glyph, beide eingebettet."
+    )
+
+
+def test_figures_are_tabular() -> None:
+    """Ziffern springen sonst bei jedem Takt — bei einer mitlaufenden Uhr sichtbar."""
+    assert "tabular-nums" in PAGE_HTML

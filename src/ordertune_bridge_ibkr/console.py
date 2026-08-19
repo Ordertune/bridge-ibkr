@@ -114,6 +114,14 @@ def hold(argv: list[str] | None = None) -> None:
     """
     if not should_hold(sys.argv[1:] if argv is None else argv):
         return
+    if not is_interactive():
+        # Im Protokoll des Release-Builds stand „Press Enter to close this
+        # window." — an einer Stelle, an der niemand etwas druecken konnte.
+        # Eine Anweisung, die nicht stimmt, ist genau die Sorte Aussage,
+        # gegen die dieser Vorgang gebaut ist. Der Halt selbst war schon
+        # richtig aufgehoben (`input()` wirft dort), nur die Zeile davor
+        # wurde trotzdem ausgegeben.
+        return
     try:
         print(HOLD_PROMPT, flush=True)
         input()

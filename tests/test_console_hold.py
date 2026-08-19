@@ -70,6 +70,7 @@ def test_headless_never_waits(monkeypatch) -> None:
 
 def test_a_double_click_waits_and_says_so(monkeypatch, capsys) -> None:
     monkeypatch.setattr(console, "is_frozen", lambda: True)
+    monkeypatch.setattr(console, "is_interactive", lambda: True)
     seen: list[bool] = []
     monkeypatch.setattr(builtins, "input", lambda *_: seen.append(True))
 
@@ -79,12 +80,32 @@ def test_a_double_click_waits_and_says_so(monkeypatch, capsys) -> None:
     assert "Press Enter" in capsys.readouterr().out
 
 
+def test_without_a_console_not_even_the_prompt_is_printed(monkeypatch, capsys) -> None:
+    """Im Protokoll des Release-Builds stand „Press Enter to close this window."
+
+    An einer Stelle, an der niemand etwas druecken konnte. Der Halt selbst war
+    schon richtig aufgehoben — nur die Zeile davor wurde trotzdem ausgegeben,
+    und eine Anweisung, die nicht stimmt, ist genau die Sorte Aussage, gegen
+    die dieser Vorgang gebaut ist.
+    """
+    monkeypatch.setattr(console, "is_frozen", lambda: True)
+    monkeypatch.setattr(console, "is_interactive", lambda: False)
+    monkeypatch.setattr(
+        builtins, "input", lambda *_: pytest.fail("Es wurde gewartet.")
+    )
+
+    console.hold([])
+
+    assert "Press Enter" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("boom", [EOFError, KeyboardInterrupt, OSError])
 def test_a_missing_input_channel_ends_the_wait_quietly(
     monkeypatch, boom: type[BaseException]
 ) -> None:
     """Ein Fehler beim Anzeigen eines Fehlers darf den Ausgang nicht verdecken."""
     monkeypatch.setattr(console, "is_frozen", lambda: True)
+    monkeypatch.setattr(console, "is_interactive", lambda: True)
 
     def _raise(*_: object) -> None:
         raise boom()

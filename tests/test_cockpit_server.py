@@ -15,6 +15,7 @@ hinein.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import urllib.error
@@ -125,8 +126,23 @@ def test_the_page_pulls_nothing_from_the_network(server) -> None:
             f"Die Seite laedt eine externe Quelle: {muster}"
         )
 
-    # Und keine Schrift von aussen, auch nicht ueber eine relative Angabe.
-    assert "@font-face" not in body
+    # Schrift: `@font-face` ist nicht mehr verboten, sondern der richtige Weg.
+    # Das Design-System verlangt Inter **selbst gehostet** ("do not link Google
+    # Fonts"), und selbst gehostet heisst hier: als Base64 daneben, weil die
+    # Seite gar nichts nachladen darf. Der erste Anlauf verbot `@font-face`
+    # pauschal — das haette die richtige Loesung ausgeschlossen.
+    #
+    # Geprueft wird deshalb das, worauf es ankommt: JEDE Quelle in einem
+    # `@font-face` ist eine `data:`-Adresse.
+    quellen = re.findall(r"@font-face\{[^}]*?src:\s*url\(([^)]{1,12})", body)
+    assert quellen, "Keine eingebettete Schrift gefunden — faellt die Seite auf System-Sans zurueck?"
+    for quelle in quellen:
+        assert quelle.startswith("data:"), (
+            f"Eine Schrift wird nachgeladen statt eingebettet: {quelle}"
+        )
+
+    # Und das Marken-Glyph ebenso.
+    assert 'src="data:image/png;base64,' in body
 
 
 def test_the_state_is_served_as_json(server) -> None:
