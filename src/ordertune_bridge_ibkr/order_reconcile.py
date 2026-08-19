@@ -66,6 +66,14 @@ class ReconcileAction:
     status: str
     reason_code: str | None
     error_message: str | None
+    # T1-104 — die Zahlen einer nachgeholten Ausfuehrung.
+    #
+    # `None` heisst „keine Angabe" und wird auf der Leitung weggelassen; die
+    # Plattform laesst ein nicht gesendetes Feld seit T1-78 ausdruecklich in
+    # Ruhe, statt es zu nullen.
+    fill_qty: float | None = None
+    fill_price: float | None = None
+    commission_usd: float | None = None
 
 
 def reconcile_open_dispatches(
@@ -165,19 +173,71 @@ def _from_completed(d: UnresolvedDispatch, trade: Any) -> ReconcileAction:
         )
 
     grund = _reason_of(trade)
-    if status == "Filled":
-        # Eine Fuellung wird hier NICHT gemeldet. Sie gehoert in den
+    if status in ("Filled", "PartiallyFilled"):
+        # ── T1-104 — die Fuellung wird jetzt gemeldet, samt Zahlen ──────────
+        #
+        # ## Was hier stand
+        #
+        # „Eine Fuellung wird hier NICHT gemeldet. Sie gehoert in den
         # Ergebnisweg mit Preis, Menge und Gebuehr — und den bedient der
         # Ereignispfad. Hier stuende sie ohne Zahlen und wuerde einen
-        # vollstaendigen Bericht ueberschreiben.
+        # vollstaendigen Bericht ueberschreiben."
+        #
+        # Die Sorge war richtig, die Annahme falsch. Der Auftrag aus
+        # `reqCompletedOrders` TRAEGT die Zahlen: `orderStatus.filled`,
+        # `orderStatus.avgFillPrice`, und die Gebuehr an den Ausfuehrungen.
+        # Sie mussten nur gelesen werden.
+        #
+        # ## Was die alte Fassung gekostet hat
+        #
+        # Gemessen am 2026-08-19: INTC (zwei Auftraege) und ALAB wurden
+        # ausgefuehrt, waehrend die Bridge nicht verbunden war. Der Abgleich
+        # fand sie bei IBKR als `Filled` — und meldete `unknown`. Auf t1
+        # tauchten die Stuecke daraufhin unter „Held outside Ordertune" auf:
+        # der Broker meldet sie, aber kein Lot ordnet sie einer Strategie zu.
+        #
+        # Damit ist der Ereignispfad die EINZIGE Stelle, an der eine Fuellung
+        # je in die Buecher kam — und er laeuft nur, wenn die Bridge im Moment
+        # der Ausfuehrung verbunden ist. Ein Notebook, das zuklappt, kostete
+        # die Zuordnung endgueltig. Das ist keine Randlage, sondern der
+        # Normalfall einer Anwendung auf einem privaten Rechner.
+        #
+        # ## Warum das Ueberschreiben heute sicher ist
+        #
+        # Zwei Riegel, die es damals noch nicht gab:
+        #
+        #   - `should_report` fuehrt seit T1-98 eine Rangfolge. `filled` steht
+        #     mit Rang 3 an der Spitze und kann nur Schwaecheres ersetzen,
+        #     nie umgekehrt.
+        #   - Die Plattform bucht seit T1-103 nur den ZUWACHS gegenueber
+        #     `fill_booked_qty`. Eine zweite Meldung derselben Menge bewegt
+        #     den Bestand nicht mehr.
+        #
+        # ## Und wenn die Zahlen doch fehlen
+        #
+        # Dann bleibt es bei der ehrlichen Antwort. Eine Fuellung ohne Menge
+        # waere genau die Meldung, vor der der alte Kommentar gewarnt hat.
+        menge = _filled_qty(trade)
+        if menge is None or menge <= 0:
+            return ReconcileAction(
+                dispatch_id=d.dispatch_id,
+                status="unknown",
+                reason_code="not_known_at_broker",
+                error_message=(
+                    "IBKR reports this order as filled but gives no quantity. "
+                    "Ordertune will not book a position it cannot measure — "
+                    "check the trade in TWS."
+                ),
+            )
+
         return ReconcileAction(
             dispatch_id=d.dispatch_id,
-            status="unknown",
-            reason_code="not_known_at_broker",
-            error_message=(
-                "IBKR reports this order as filled, but Ordertune never "
-                "received the execution. Check the trade in TWS."
-            ),
+            status="filled" if status == "Filled" else "partial",
+            reason_code=None,
+            error_message=None,
+            fill_qty=menge,
+            fill_price=_avg_fill_price(trade),
+            commission_usd=_commission(trade),
         )
 
     if status in ("Cancelled", "ApiCancelled"):
@@ -217,3 +277,59 @@ def _reason_of(trade: Any) -> str | None:
             return f"{message} (IBKR {code})"
     advanced = getattr(trade, "advancedError", "") or ""
     return advanced or None
+
+
+# ── T1-104: die Zahlen einer nachgeholten Ausfuehrung ────────────────────────
+#
+# Alle drei lesen den Auftrag rein ueber `getattr`, wie `_status_of` und
+# `_reason_of` daneben: dieses Modul kommt bewusst ohne ib_insync aus, damit
+# die Zusicherungen es ohne TWS fahren koennen.
+#
+# Jede von ihnen antwortet `None` statt einer erfundenen Null. Eine 0 waere an
+# dieser Stelle keine fehlende Angabe, sondern eine Aussage — und zwar eine
+# ueber Geld.
+
+
+def _num(value: Any) -> float | None:
+    """Eine Zahl, oder nichts. NaN zaehlt als nichts."""
+    if value is None:
+        return None
+    try:
+        zahl = float(value)
+    except (TypeError, ValueError):
+        return None
+    if zahl != zahl:  # NaN
+        return None
+    return zahl
+
+
+def _filled_qty(trade: Any) -> float | None:
+    """Die kumulierte Fuellmenge, so wie der Ereignispfad sie auch meldet."""
+    return _num(getattr(getattr(trade, "orderStatus", None), "filled", None))
+
+
+def _avg_fill_price(trade: Any) -> float | None:
+    """Der Durchschnittskurs. Ohne Fuellung gibt es keinen."""
+    preis = _num(getattr(getattr(trade, "orderStatus", None), "avgFillPrice", None))
+    if preis is None or preis <= 0:
+        return None
+    return preis
+
+
+def _commission(trade: Any) -> float | None:
+    """Summe der Broker-Gebuehren, falls IBKR sie schon gemeldet hat.
+
+    Wortgleich zu `main._sum_commission`. Hier noch einmal, aus demselben
+    Grund wie `_LIVE_IBKR_STATES`: dieses Modul soll ohne den Rest laufen.
+    """
+    fills = getattr(trade, "fills", None) or []
+    summe = 0.0
+    gesehen = False
+    for f in fills:
+        report = getattr(f, "commissionReport", None)
+        wert = _num(getattr(report, "commission", None)) if report else None
+        if wert is None:
+            continue
+        summe += wert
+        gesehen = True
+    return summe if gesehen else None

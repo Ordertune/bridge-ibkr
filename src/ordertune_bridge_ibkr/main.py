@@ -742,18 +742,40 @@ def _handle_order_reconcile(
         if not should_report(action.dispatch_id, action.status):
             continue
         try:
+            # T1-104: die Zahlen einer nachgeholten Ausfuehrung reisen mit.
+            # Ohne sie war `filled` fuer die Plattform wertlos — der Bestand
+            # entsteht aus der Menge, nicht aus dem Wort.
             api.result_order(
                 action.dispatch_id,
                 status=action.status,
+                fill_qty=action.fill_qty,
+                fill_price=action.fill_price,
+                commission_usd=action.commission_usd,
+                filled_at=(
+                    datetime.now(timezone.utc).isoformat()
+                    if action.fill_qty
+                    else None
+                ),
                 reason_code=action.reason_code,
                 error_message=action.error_message,
             )
-            log.info(
-                "Reconciled dispatch %s -> %s (%s)",
-                action.dispatch_id,
-                action.status,
-                action.reason_code,
-            )
+            if action.fill_qty:
+                log.info(
+                    "Reconciled dispatch %s -> %s, %s shares at %s. This "
+                    "execution happened while the Bridge was not connected; "
+                    "Ordertune has it now.",
+                    action.dispatch_id,
+                    action.status,
+                    action.fill_qty,
+                    action.fill_price,
+                )
+            else:
+                log.info(
+                    "Reconciled dispatch %s -> %s (%s)",
+                    action.dispatch_id,
+                    action.status,
+                    action.reason_code,
+                )
         except Exception as exc:
             log.warning(
                 "Could not report reconciled dispatch %s: %s",
