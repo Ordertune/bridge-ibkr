@@ -118,7 +118,7 @@ def test_oca_group_from_intent():
     }
     o = translate_intent(intent)
     assert o.ocaGroup == "OCA_ALAB_2026-08-20_Peak_Reload"
-    assert o.ocaType == 1
+    assert o.ocaType == 3
 
 
 def test_oca_group_both_legs_share_the_name():
@@ -138,7 +138,7 @@ def test_oca_group_both_legs_share_the_name():
         for preis in (116.40, 111.61)
     ]
     assert {b.ocaGroup for b in beine} == {gemeinsam}
-    assert all(b.ocaType == 1 for b in beine)
+    assert all(b.ocaType == 3 for b in beine)
 
 
 def test_ohne_gruppe_bleibt_die_order_unveraendert():
@@ -165,8 +165,8 @@ def test_leere_gruppe_zaehlt_nicht_als_gruppe():
 
 
 def test_unbrauchbarer_oca_typ_faellt_auf_1_zurueck():
-    """Der Typ kommt von aussen. 2 und 3 aendern still die Menge — nur 1, 2, 3
-    sind ueberhaupt gueltig, alles andere ist ein Fehler und keine Absicht."""
+    """Der Typ kommt von aussen. Nur 1, 2, 3 sind gueltig; alles andere ist ein
+    Fehler und keine Absicht und faellt auf die Vorgabe zurueck."""
     for roh in (0, 4, "1", None, 1.0):
         o = translate_intent(
             {
@@ -179,4 +179,102 @@ def test_unbrauchbarer_oca_typ_faellt_auf_1_zurueck():
                 "ocaType": roh,
             }
         )
-        assert o.ocaType == 1
+        assert o.ocaType == 3
+
+
+# ── T1-106 Nachtrag: die Zeitfenster der Signalquelle ──────────────────────
+#
+# Ein OCA-Paar ist SEQUENZIELL gedacht — ein Bein untertags, das andere ab
+# 15:59 US/Eastern fuer die Schlussauktion. v0.11.0 hat die Felder nirgends
+# gelesen; beide Beine gingen sofort scharf hinaus, lagen damit gleichzeitig am
+# Markt, und IBKR hat auf dem Cash-Konto eines storniert (Warning 202,
+# Leerverkauf).
+
+
+def test_good_after_time_geht_unveraendert_durch():
+    """Der Wert traegt bereits IBKRs Format. Umrechnen hiesse, eine Zeitzone
+    zu riskieren, die schon richtig dasteht."""
+    roh = "20260820 15:59:00 US/Eastern"
+    o = translate_intent(
+        {
+            "symbol": "ALAB",
+            "side": "sell",
+            "orderType": "day_limit",
+            "qty": 1,
+            "lmtPrice": 303.44,
+            "goodAfterTime": roh,
+        }
+    )
+    assert o.goodAfterTime == roh
+    # Ohne Frist bleibt die Gueltigkeitsdauer, wie sie war.
+    assert o.tif == "DAY"
+
+
+def test_good_till_date_zieht_die_gueltigkeitsdauer_auf_gtd():
+    """IBKR ignoriert `goodTillDate` stillschweigend, solange `tif` DAY ist —
+    der Auftrag lebte dann bis zum Schluss statt bis zu seiner Frist."""
+    roh = "20260820 15:44:00 US/Eastern"
+    o = translate_intent(
+        {
+            "symbol": "TPR",
+            "side": "sell",
+            "orderType": "day_limit",
+            "qty": 1,
+            "lmtPrice": 139.33,
+            "goodTillDate": roh,
+        }
+    )
+    assert o.goodTillDate == roh
+    assert o.tif == "GTD"
+
+
+def test_ohne_zeitfenster_bleibt_alles_wie_bisher():
+    o = translate_intent(
+        {"symbol": "INTC", "side": "sell", "orderType": "moc", "qty": 1, "lmtPrice": None}
+    )
+    assert not o.goodAfterTime
+    assert not o.goodTillDate
+    assert o.tif == "DAY"
+
+
+def test_leere_zeitfenster_zaehlen_nicht():
+    """`""` und `None` sind keine Frist, sondern ihr Fehlen — insbesondere darf
+    daraus kein GTD werden."""
+    for leer in ("", None):
+        o = translate_intent(
+            {
+                "symbol": "INTC",
+                "side": "sell",
+                "orderType": "day_limit",
+                "qty": 1,
+                "lmtPrice": 90.0,
+                "goodAfterTime": leer,
+                "goodTillDate": leer,
+            }
+        )
+        assert not o.goodAfterTime
+        assert not o.goodTillDate
+        assert o.tif == "DAY"
+
+
+def test_das_sequenzielle_paar_wie_es_wirklich_aussieht():
+    """ALAB am 2026-08-20: ein Bein sofort, eines ab 15:59 ET, beide in
+    derselben Gruppe. Genau diese Konstellation hat v0.11.0 zerlegt."""
+    gruppe = "OCA_ALAB_2026-08-20_Peak_Reload"
+    untertags = translate_intent(
+        {
+            "symbol": "ALAB", "side": "sell", "orderType": "day_limit",
+            "qty": 1, "lmtPrice": 304.18, "ocaGroup": gruppe,
+        }
+    )
+    schluss = translate_intent(
+        {
+            "symbol": "ALAB", "side": "sell", "orderType": "day_limit",
+            "qty": 1, "lmtPrice": 303.44, "ocaGroup": gruppe,
+            "goodAfterTime": "20260820 15:59:00 US/Eastern",
+        }
+    )
+    assert untertags.ocaGroup == schluss.ocaGroup
+    assert untertags.ocaType == schluss.ocaType == 3
+    assert not untertags.goodAfterTime
+    assert schluss.goodAfterTime == "20260820 15:59:00 US/Eastern"
