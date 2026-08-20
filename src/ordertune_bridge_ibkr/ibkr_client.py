@@ -376,6 +376,20 @@ class IbkrClient:
                     "symbol": p.contract.symbol,
                     "qty": float(p.position),
                     "avg_cost": float(p.avgCost),
+                    # T1-107: an WELCHEM Konto diese Menge haengt.
+                    #
+                    # `Position` traegt das Konto als erstes Feld, und bis
+                    # hierher wurde es gelesen und weggeworfen. Ohne diese
+                    # Angabe ist eine Positionsliste nicht als die eines
+                    # bestimmten Depots erkennbar — und wer zwischen zwei
+                    # Konten wechselt, schickt zwei Listen, die sich nicht
+                    # auseinanderhalten lassen.
+                    #
+                    # Zusammen mit der Kennung im Snapshot macht sie auch den
+                    # Mehrkonten-Fall aus BUG-99-1 aufloesbar: statt Mengen
+                    # ueber Konten hinweg zu summieren, laesst sich je Zeile
+                    # zuordnen.
+                    "account": p.account,
                     "market_price": _opt(extra.marketPrice) if extra else None,
                     "market_value": _opt(extra.marketValue) if extra else None,
                     "unrealized_pnl": (

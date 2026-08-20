@@ -245,6 +245,38 @@ def test_several_managed_accounts_are_not_guessed() -> None:
     assert snap.positions is not None
     assert len(snap.positions) == 2
 
+    # T1-107: die Entscheidung dreht sich nicht um — geraten wird weiterhin
+    # nicht, und `account` am Snapshot bleibt leer. Neu ist, dass JEDE Zeile
+    # ihr eigenes Konto traegt. Damit kann die Plattform den Koerper als in
+    # sich widerspruechlich erkennen, statt wie bisher ueber Konten hinweg zu
+    # summieren und ein zu grosses Ausstiegsbudget freizugeben (BUG-99-1).
+    assert snap.account is None
+    konten = {p["account"] for p in snap.positions}
+    assert konten == {"U23076419", "U99999999"}, (
+        "Ohne die Zeilenkennung sieht ein Zwei-Konten-Koerper aus wie ein "
+        "vollstaendiges Depot — und ist keins."
+    )
+
+
+def test_every_position_row_carries_its_account() -> None:
+    """T1-107: das Konto haengt an der Zeile, nicht nur am Snapshot.
+
+    Eine Positionsliste ohne Kontokennung ist nicht als die eines bestimmten
+    Depots erkennbar. Wer zwischen zwei Konten wechselt, schickt damit zwei
+    Listen, die der Empfaenger nicht auseinanderhalten kann.
+    """
+    ib = FakeIB(
+        _positions=[
+            FakePosition(contract=MU, position=1.0, avgCost=955.0, account="U11111111")
+        ],
+        _accounts=["U11111111"],
+    )
+    snap = _client(ib).account_snapshot()
+
+    assert snap.account == "U11111111"
+    assert snap.positions is not None
+    assert snap.positions[0]["account"] == "U11111111"
+
 
 def test_enrichment_matches_on_contract_id_not_symbol() -> None:
     """Bei mehreren Boersen ist das Symbol nicht eindeutig, die Kennung schon."""
