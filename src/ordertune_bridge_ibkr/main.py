@@ -871,6 +871,11 @@ def _handle_heartbeat(
             positions=snap.positions,
             gateway_status=snap.gateway_status,
             capabilities=IBKR_CAPABILITIES,
+            # T1-107: die Kennung wurde seit T1-103 O erhoben und nie
+            # uebertragen. `None` bei mehreren verwalteten Konten — dann laesst
+            # `heartbeat` das Feld weg, und die Plattform behandelt den
+            # Snapshot als nicht identifiziert.
+            account=snap.account,
         )
         return snap, None
     except Exception as exc:

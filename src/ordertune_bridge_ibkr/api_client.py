@@ -156,13 +156,21 @@ def _wire_position(p: dict[str, Any]) -> dict[str, Any]:
     ist strict, jedes zusätzliche Feld wäre ein 422. `market_price` gehört
     absichtlich nicht dazu — die Plattform rechnet ihren Marktwert selbst.
     """
-    return {
+    row: dict[str, Any] = {
         "symbol": p["symbol"],
         "qty": float(p.get("qty") or 0.0),
         "avgEntryPriceUsd": _opt_float(p.get("avg_cost")),
         "marketValueUsd": _opt_float(p.get("market_value")),
         "unrealizedPlUsd": _opt_float(p.get("unrealized_pnl")),
     }
+    # T1-107: weglassen statt `null` senden, wenn IBKR ausnahmsweise kein
+    # Konto liefert. Dieselbe Entscheidung wie bei `positions` in T1-99 —
+    # Unwissen sagt man durch Weglassen, sonst gibt es zwei Nullwerte mit
+    # verschiedener Bedeutung. Das Serverschema fuehrt das Feld optional.
+    account = p.get("account")
+    if account:
+        row["accountId"] = str(account)
+    return row
 
 
 @dataclass
@@ -234,6 +242,7 @@ class OrdertuneApiClient:
         gateway_status: str,
         capabilities: dict[str, Any] | None = None,
         cpu_load: float | None = None,
+        account: str | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -262,6 +271,19 @@ class OrdertuneApiClient:
         # (t1 ab T1-99). Gegen eine aeltere gaebe es hier ein 422.
         if positions is not None:
             snapshot["positions"] = [_wire_position(p) for p in positions]
+        # T1-107: WER hier spricht.
+        #
+        # Nicht redundant zur Kennung je Position: ein leergeraeumtes Konto
+        # liefert `positions: []` und damit null Zeilenkennungen — ohne dieses
+        # Feld waere dieser Koerper von „alte Bridge" nicht unterscheidbar.
+        # Ausserdem stammen `cash`, `equity` und `currency` ohnehin aus einer
+        # Kontoabfrage ohne Kontoargument, sind also Aussagen ueber die
+        # Verbindung.
+        #
+        # Weggelassen, wenn `_trading_account()` nichts liefert — das ist der
+        # Mehrkonten-Fall, in dem die Bridge ausdruecklich nicht raet.
+        if account:
+            snapshot["accountId"] = account
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 

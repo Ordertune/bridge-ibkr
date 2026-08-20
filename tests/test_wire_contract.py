@@ -548,3 +548,82 @@ def test_no_snake_case_keys_on_the_wire(key: str) -> None:
         return found
 
     assert walk(FIXTURES[key]["body"]) == []
+
+
+# ─── T1-107: die Kontokennung auf der Leitung ────────────────────────────────
+
+
+def _heartbeat_snapshot(rec: "_Recorder") -> dict:
+    """Der `accountSnapshot` aus dem aufgezeichneten Heartbeat."""
+    return rec.body["accountSnapshot"]
+
+
+def test_account_id_travels_on_both_levels() -> None:
+    """T1-107: die Kennung steht am Snapshot UND an jeder Positionszeile.
+
+    Beide sind noetig und keine ist redundant: die Zeilenkennung sagt, wem
+    eine Menge gehoert, die Snapshot-Kennung sagt, wer ueberhaupt gesprochen
+    hat — und nur letztere kann ueber ein Konto sprechen, das NICHTS haelt.
+    """
+    rec = _Recorder()
+    _client(rec).heartbeat(
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
+        positions=[
+            {"symbol": "MU", "qty": 1.0, "avg_cost": 955.0, "account": "U23076419"}
+        ],
+        gateway_status="connected",
+        account="U23076419",
+    )
+
+    snap = _heartbeat_snapshot(rec)
+    assert snap["accountId"] == "U23076419"
+    assert snap["positions"][0]["accountId"] == "U23076419"
+
+
+def test_empty_but_identified_account_is_a_statement() -> None:
+    """Ein leergeraeumtes Konto traegt null Zeilenkennungen — und ist trotzdem
+    eine Aussage.
+
+    Genau deshalb gibt es die Snapshot-Ebene. Ohne sie waere dieser Koerper
+    von dem einer Bridge vor 0.10.0 nicht zu unterscheiden, und die Plattform
+    muesste raten: als „keine Identitaet" gelesen bliebe fremder Bestand
+    stehen, als „Identitaet vorhanden" wiederholte sich der 2026-08-19.
+    """
+    rec = _Recorder()
+    _client(rec).heartbeat(
+        cash=0.0,
+        equity=0.0,
+        currency="USD",
+        positions=[],
+        gateway_status="connected",
+        account="DU7654321",
+    )
+
+    snap = _heartbeat_snapshot(rec)
+    assert snap["positions"] == []
+    assert snap["accountId"] == "DU7654321"
+
+
+def test_no_determinable_account_omits_the_field() -> None:
+    """Unwissen sagt man durch WEGLASSEN, nicht durch einen Nullwert.
+
+    Dieselbe Entscheidung wie bei `positions` in T1-99. Ein `null` auf der
+    Leitung gaebe es zweimal mit verschiedener Bedeutung — „mehrere Konten,
+    wir raten nicht" und „alte Fassung" —, und das Serverschema fuehrt das
+    Feld deshalb als optional und ausdruecklich nicht als nullable.
+    """
+    rec = _Recorder()
+    _client(rec).heartbeat(
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
+        positions=[{"symbol": "MU", "qty": 1.0, "avg_cost": 955.0}],
+        gateway_status="connected",
+        account=None,
+    )
+
+    snap = _heartbeat_snapshot(rec)
+    assert "accountId" not in snap
+    assert "accountId" not in snap["positions"][0]
