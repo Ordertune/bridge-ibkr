@@ -49,7 +49,39 @@ def translate_intent(intent: dict[str, Any]) -> Order:
     # andere Dauer braucht, behaelt sie.
     order.tif = order.tif or DEFAULT_TIF
 
+    # T1-106 — die OCA-Verknuepfung, und zwar HIER statt beim Aufrufer.
+    #
+    # `apply_oca_group` liegt seit dem ersten Wurf in dieser Datei und hatte
+    # ausser einem Test nie einen Aufrufer: `main.py` uebersetzt Auftrag fuer
+    # Auftrag, und eine Funktion, die eine LISTE von Orders gruppiert, hat in
+    # einem Einzelweg keine Stelle. Damit gingen zwei Beine desselben Paars als
+    # zwei UNVERKNUEPFTE Auftraege hinaus — fuellen beide, ist die Position
+    # zweimal verkauft.
+    #
+    # Die Gruppe steht deshalb am Intent und wird je Auftrag gesetzt. Die
+    # Verknuepfung entsteht bei IBKR dadurch, dass zwei Auftraege denselben
+    # `ocaGroup`-Namen tragen; sie muessen dafuer weder zusammen noch in einem
+    # Aufruf abgesendet werden.
+    gruppe = intent.get("ocaGroup")
+    if isinstance(gruppe, str) and gruppe:
+        apply_oca_group([order], gruppe, _oca_type(intent))
+
     return order
+
+
+# OCA-Typ 1 = „cancel remaining on any fill", ohne Ueberfuellungsschutz.
+#
+# Bewusst nicht 2 oder 3: die stornieren zwar ebenfalls, reduzieren aber
+# zusaetzlich die Menge der verbleibenden Auftraege. Bei einem Ausstieg, dessen
+# Beine ohnehin dieselbe Stueckzahl tragen, ist das ohne Wirkung — bei einer
+# Teilfuellung waere es eine stille Mengenaenderung, die die Plattform nicht
+# mitbekommt.
+DEFAULT_OCA_TYPE = 1
+
+
+def _oca_type(intent: dict[str, Any]) -> int:
+    roh = intent.get("ocaType")
+    return roh if isinstance(roh, int) and roh in (1, 2, 3) else DEFAULT_OCA_TYPE
 
 
 def _build_order(

@@ -95,3 +95,88 @@ def test_every_order_type_carries_a_time_in_force(intent) -> None:
     order = translate_intent(intent)
     assert order.tif, f"{intent['orderType']} geht ohne Gueltigkeitsdauer raus"
     assert order.tif == DEFAULT_TIF
+
+
+# ── T1-106: die OCA-Gruppe reist am Intent ─────────────────────────────────
+#
+# `apply_oca_group` lag seit dem ersten Wurf in der Datei und hatte ausser dem
+# Test darueber nie einen Aufrufer. Zwei Beine desselben Paars gingen deshalb
+# als zwei UNVERKNUEPFTE Auftraege hinaus — fuellen beide, ist die Position
+# zweimal verkauft. Die Verknuepfung entsteht bei IBKR ueber den gemeinsamen
+# Gruppennamen; die Beine muessen dafuer weder zusammen noch in einem Aufruf
+# abgesendet werden.
+
+
+def test_oca_group_from_intent():
+    intent = {
+        "symbol": "ALAB",
+        "side": "sell",
+        "orderType": "day_limit",
+        "qty": 1,
+        "lmtPrice": 304.18,
+        "ocaGroup": "OCA_ALAB_2026-08-20_Peak_Reload",
+    }
+    o = translate_intent(intent)
+    assert o.ocaGroup == "OCA_ALAB_2026-08-20_Peak_Reload"
+    assert o.ocaType == 1
+
+
+def test_oca_group_both_legs_share_the_name():
+    """Zwei getrennte Uebersetzungen, eine Gruppe — so laeuft es in main.py."""
+    gemeinsam = "OCA_CSCO_2026-08-20_Peak_Reload"
+    beine = [
+        translate_intent(
+            {
+                "symbol": "CSCO",
+                "side": "sell",
+                "orderType": "day_limit",
+                "qty": 1,
+                "lmtPrice": preis,
+                "ocaGroup": gemeinsam,
+            }
+        )
+        for preis in (116.40, 111.61)
+    ]
+    assert {b.ocaGroup for b in beine} == {gemeinsam}
+    assert all(b.ocaType == 1 for b in beine)
+
+
+def test_ohne_gruppe_bleibt_die_order_unveraendert():
+    """Der Normalfall. Ein einzelner Ausstieg darf keine Gruppe bekommen."""
+    intent = {"symbol": "INTC", "side": "sell", "orderType": "moc", "qty": 1, "lmtPrice": None}
+    o = translate_intent(intent)
+    assert not o.ocaGroup
+
+
+def test_leere_gruppe_zaehlt_nicht_als_gruppe():
+    """`""` und `None` sind keine Verknuepfung, sondern ihr Fehlen."""
+    for leer in ("", None):
+        o = translate_intent(
+            {
+                "symbol": "INTC",
+                "side": "sell",
+                "orderType": "moc",
+                "qty": 1,
+                "lmtPrice": None,
+                "ocaGroup": leer,
+            }
+        )
+        assert not o.ocaGroup
+
+
+def test_unbrauchbarer_oca_typ_faellt_auf_1_zurueck():
+    """Der Typ kommt von aussen. 2 und 3 aendern still die Menge — nur 1, 2, 3
+    sind ueberhaupt gueltig, alles andere ist ein Fehler und keine Absicht."""
+    for roh in (0, 4, "1", None, 1.0):
+        o = translate_intent(
+            {
+                "symbol": "INTC",
+                "side": "sell",
+                "orderType": "moc",
+                "qty": 1,
+                "lmtPrice": None,
+                "ocaGroup": "g",
+                "ocaType": roh,
+            }
+        )
+        assert o.ocaType == 1
