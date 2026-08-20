@@ -66,17 +66,48 @@ def translate_intent(intent: dict[str, Any]) -> Order:
     if isinstance(gruppe, str) and gruppe:
         apply_oca_group([order], gruppe, _oca_type(intent))
 
+    # T1-106 Nachtrag — die Zeitfenster der Signalquelle.
+    #
+    # Ein OCA-Paar ist SEQUENZIELL gedacht: ein Bein gilt untertags, das andere
+    # erst ab 15:59 US/Eastern, also fuer die Schlussauktion. Gehen beide sofort
+    # scharf hinaus, liegen sie gleichzeitig am Markt — und auf einem Cash-Konto
+    # sind zwei Verkaeufe gegen eine gehaltene Position ein moeglicher
+    # Leerverkauf. Am 2026-08-20 hat IBKR daraufhin eines der Beine storniert.
+    #
+    # Die Werte gehen UNVERAENDERT durch. Sie stammen aus `signals.good_after`
+    # bzw. `good_until` und tragen dort bereits IBKRs Format
+    # (`20260820 15:59:00 US/Eastern`); die Plattform prueft die Deutbarkeit,
+    # bevor sie sie mitgibt.
+    nach = intent.get("goodAfterTime")
+    if isinstance(nach, str) and nach:
+        order.goodAfterTime = nach
+    bis = intent.get("goodTillDate")
+    if isinstance(bis, str) and bis:
+        order.goodTillDate = bis
+        # IBKR verlangt fuer eine Frist die Gueltigkeitsdauer GTD. Bleibt hier
+        # DAY stehen, wird `goodTillDate` stillschweigend ignoriert — und der
+        # Auftrag lebt bis zum Schluss statt bis zu seiner Frist.
+        order.tif = "GTD"
+
     return order
 
 
-# OCA-Typ 1 = „cancel remaining on any fill", ohne Ueberfuellungsschutz.
+# OCA-Typ 3 = „reduce, non-block".
 #
-# Bewusst nicht 2 oder 3: die stornieren zwar ebenfalls, reduzieren aber
-# zusaetzlich die Menge der verbleibenden Auftraege. Bei einem Ausstieg, dessen
-# Beine ohnehin dieselbe Stueckzahl tragen, ist das ohne Wirkung — bei einer
-# Teilfuellung waere es eine stille Mengenaenderung, die die Plattform nicht
-# mitbekommt.
-DEFAULT_OCA_TYPE = 1
+# v0.11.0 setzte hier 1 („cancel remaining on any fill") mit der Begruendung,
+# die Reduktion sei bei Beinen gleicher Stueckzahl ohne Wirkung. Die Produktion
+# hat das binnen acht Sekunden widerlegt:
+#
+#   Warning 202, reqId 148: Order storniert - Grund: Leerverkaufs-Aktien-
+#   positionen koennen ausschliesslich in einem Marginkonto gehalten werden
+#   (Sie haben ein Cash-Konto).
+#
+# Es geht nicht um Teilfuellungen, sondern um IBKRs VORAB-Risikopruefung: zwei
+# Verkaeufe ueber je 1 Stueck gegen 1 gehaltenes sind auf einem Cash-Konto ein
+# moeglicher Leerverkauf. Typ 1 laesst beide in voller Groesse stehen; 2 und 3
+# reduzieren die verbleibenden, und genau das ist der Ueberfuellungsschutz, den
+# die Pruefung sehen will.
+DEFAULT_OCA_TYPE = 3
 
 
 def _oca_type(intent: dict[str, Any]) -> int:
