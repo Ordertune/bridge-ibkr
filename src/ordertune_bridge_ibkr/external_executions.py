@@ -31,7 +31,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-ORDER_REF_PREFIX = "ot-"
+from .order_reference import ORDER_REF_PREFIX, is_ours  # noqa: F401
 
 # IBKRs Seitenkennung auf unser Vokabular. Was nicht darin steht, wird nicht
 # gemeldet — die Richtung eines Handels zu raten ist die eine Sache, die man
@@ -44,9 +44,6 @@ _SIDE_MAP = {"BOT": "buy", "SLD": "sell"}
 UNKNOWN_ORDER_TYPE = "UNKNOWN"
 
 
-def is_ours(order_ref: Any) -> bool:
-    """Traegt die Ausfuehrung unseren Auftragsvermerk?"""
-    return bool(order_ref) and str(order_ref).startswith(ORDER_REF_PREFIX)
 
 
 def order_types_by_perm_id(trades: list[Any]) -> dict[str, str]:
