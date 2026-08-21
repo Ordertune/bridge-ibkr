@@ -427,23 +427,23 @@ def _commission(trade: Any) -> float | None:
 # Entdopplung addierte sich die Menge ein zweites Mal — und aus einem
 # Buchungsdetail wuerde ein zu grosser Bestand und ein zu grosser Ausstieg.
 
-ORDER_REF_PREFIX = "ot-"
+from .order_reference import (  # noqa: F401
+    ORDER_REF_PREFIX,
+    dispatch_id_from_order_ref,
+)
 
 
 def dispatch_id_from_ref(order_ref: Any) -> str | None:
-    """`ot-<dispatchId>` → `<dispatchId>`, sonst nichts.
+    """`ot-...<dispatchId>` → `<dispatchId>`, sonst nichts.
 
-    Wortgleich zur Gegenprobe in `external_executions.is_ours`. Die beiden
-    beantworten dieselbe Frage aus entgegengesetzter Richtung, und genau
-    deshalb duerfen sie nicht auseinanderlaufen.
+    T1-109: liest jetzt dieselbe Regel wie `main`, statt eine eigene zweite zu
+    fuehren. Seit ein Etikett zwischen Praefix und Kennung stehen kann, ist
+    „alles nach dem Praefix" falsch — und diese Stelle entscheidet, welcher
+    Auftrag welche Fuellung bekommt.
     """
-    if not order_ref:
+    if order_ref is None:
         return None
-    text = str(order_ref).strip()
-    if not text.startswith(ORDER_REF_PREFIX):
-        return None
-    kennung = text[len(ORDER_REF_PREFIX) :]
-    return kennung or None
+    return dispatch_id_from_order_ref(str(order_ref))
 
 
 def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:

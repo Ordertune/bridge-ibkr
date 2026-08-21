@@ -118,20 +118,11 @@ _TRADES_BY_DISPATCH: dict[str, Any] = {}
 # (`orderRef = "ot-<dispatchId>"`). Bis T1-88c wurde er gesetzt und nie
 # gelesen — dabei ist er die einzige Angabe, die einen Neustart der Bridge
 # ueberlebt: `orderId` ist sitzungsgebunden, die Ablagen oben sind fluechtig.
-ORDER_REF_PREFIX = "ot-"
-
-
-def dispatch_id_from_order_ref(order_ref: str | None) -> str | None:
-    """Liest die dispatch_id aus dem Auftragsvermerk, oder `None`.
-
-    Fremde Auftraege im selben Konto — von Hand gestellt oder von einem
-    anderen Werkzeug — tragen den Vermerk nicht und werden hier
-    stillschweigend uebergangen. Sie gehoeren uns nicht.
-    """
-    if not order_ref or not order_ref.startswith(ORDER_REF_PREFIX):
-        return None
-    dispatch_id = order_ref[len(ORDER_REF_PREFIX) :].strip()
-    return dispatch_id or None
+from .order_reference import (  # noqa: F401  (Weiterverwendung durch Importeure)
+    ORDER_REF_PREFIX,
+    build_order_ref,
+    dispatch_id_from_order_ref,
+)
 
 
 def register_trade(
@@ -429,7 +420,11 @@ def _handle_pending(
         try:
             contract = make_contract(intent["symbol"])
             ib_order = translate_intent(intent)
-            ib_order.orderRef = f"ot-{order.dispatch_id}"
+            # T1-109 — mit sprechendem Etikett, wenn die Plattform eines mitgibt.
+            # Ohne Etikett entsteht exakt das Format von vorher.
+            ib_order.orderRef = build_order_ref(
+                order.dispatch_id, intent.get("orderRefLabel")
+            )
             # Der Vermerk steht VOR dem Absenden. Ein Vermerk ohne Auftrag
             # kostet eine ausgelassene Order — die der Nutzer erneut freigeben
             # kann. Ein Auftrag ohne Vermerk kostet einen zweiten Echtauftrag.

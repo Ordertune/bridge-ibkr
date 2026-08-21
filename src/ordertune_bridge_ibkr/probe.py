@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 
 PROBE_FLAG = "--probe-foreign"
 
-ORDER_REF_PREFIX = "ot-"
+from .order_reference import ORDER_REF_PREFIX, is_ours  # noqa: F401
 
 # Wie lange nach dem Abruf auf die Gebuehrenabrechnung gewartet wird. Gemessen
 # am 2026-08-17 traf sie im selben Sekundenbruchteil ein; zwei Sekunden sind
@@ -60,13 +60,6 @@ def probe_requested(argv: list[str]) -> bool:
     return PROBE_FLAG in argv
 
 
-def is_ours(order_ref: Any) -> bool:
-    """Traegt der Auftrag unseren Vermerk?
-
-    Dieselbe Regel wie `dispatch_id_from_order_ref` in `main`, hier ohne den
-    Umweg ueber die dispatch_id: fuer die Sonde zaehlt nur die Herkunft.
-    """
-    return bool(order_ref) and str(order_ref).startswith(ORDER_REF_PREFIX)
 
 
 def describe_trade(trade: Any) -> str:
