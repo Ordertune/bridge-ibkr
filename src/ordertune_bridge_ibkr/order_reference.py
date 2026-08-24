@@ -131,3 +131,96 @@ def is_ours(order_ref: object) -> bool:
     dann noch stimmen, wenn sich das Format dahinter aendert.
     """
     return bool(order_ref) and str(order_ref).startswith(ORDER_REF_PREFIX)
+
+
+# ── T1-114: der Rueckbericht ────────────────────────────────────────────────
+#
+# ## Warum es das gibt
+#
+# Die Flaeche auf t1 zeigte bis hierher, was ORDERTUNE GESENDET hat — nicht,
+# was der Broker haelt. Der Owner hat dieselbe Frage an drei Tagen in drei
+# Formen gestellt:
+#
+#   * „Wie kann ich pruefen, dass die OCA-Orders korrekt uebermittelt wurden?"
+#   * „Hat das in TWS geaenderte Limit Einfluss auf die Zuordnung?"
+#   * „Unklar ist, ob die Order als saubere OCA eingestellt wurde, bei der eine
+#      erst ab 15:59 gueltig ist."
+#
+# Jedes Mal lautete die ehrliche Antwort: sieh in TWS nach. Die Bridge fragt
+# IBKR bei jedem Herzschlag ohnehin nach den offenen Auftraegen
+# (`reqOpenOrders`, fuer die Schreibrechte-Erkennung) und wirft die Antwort
+# weg. Sie mitzuschicken kostet nichts und beantwortet alle drei Fragen.
+#
+# ## Es ist eine MESSUNG, keine Wiederholung unserer Absicht
+#
+# Jedes Feld hier stammt aus dem Auftrag, wie IBKR ihn fuehrt. Genau deshalb
+# ist er brauchbar: weicht er von dem ab, was wir gesendet haben, ist das der
+# Befund — ein in TWS geaendertes Limit, eine verschluckte OCA-Gruppe, eine
+# weggefallene Zeitbedingung.
+
+#: Wie viele Auftraege hoechstens mitgehen. Der Herzschlag ist ein
+#: Lebenszeichen und darf nicht an einer langen Liste haengen.
+MAX_OPEN_ORDERS_REPORTED = 50
+
+
+def _als_zahl(wert: object) -> float | None:
+    """Nur echte Zahlen. IBKR schreibt `0.0` fuer „kein Limit"."""
+    try:
+        zahl = float(wert)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if zahl != zahl:  # NaN
+        return None
+    return zahl
+
+
+def _text(wert: object) -> str | None:
+    """Leerstring heisst bei IBKR „nicht gesetzt" und darf nicht als Wert gelten."""
+    if wert is None:
+        return None
+    s = str(wert).strip()
+    return s or None
+
+
+def wire_open_orders(trades: object) -> list[dict[str, object]]:
+    """Die offenen Auftraege, die UNS gehoeren, im Drahtformat.
+
+    Fremde Auftraege im selben Konto bleiben draussen — sie gehen die
+    Plattform nichts an, und `is_ours` ist die Regel, die das ueberall sonst
+    schon entscheidet.
+
+    Der Vermerk reist als `dispatchId` mit, damit die Plattform ohne Rateweg
+    zuordnen kann. Ein Auftrag, dessen Vermerk sich nicht aufloesen laesst,
+    faellt weg: ohne Zuordnung ist die Zeile eine Behauptung ohne Adresse.
+    """
+    out: list[dict[str, object]] = []
+    for trade in list(trades or [])[:MAX_OPEN_ORDERS_REPORTED]:
+        order = getattr(trade, "order", None)
+        if order is None:
+            continue
+        dispatch_id = dispatch_id_from_order_ref(getattr(order, "orderRef", None))
+        if dispatch_id is None:
+            continue
+        status = getattr(getattr(trade, "orderStatus", None), "status", None)
+        out.append(
+            {
+                "dispatchId": dispatch_id,
+                "brokerOrderId": str(getattr(order, "orderId", "") or ""),
+                "status": _text(status) or "unknown",
+                # Die drei Felder, um die der Owner dreimal gefragt hat.
+                "ocaGroup": _text(getattr(order, "ocaGroup", None)),
+                "ocaType": (
+                    int(getattr(order, "ocaType", 0) or 0)
+                    if getattr(order, "ocaType", None)
+                    else None
+                ),
+                "goodAfterTime": _text(getattr(order, "goodAfterTime", None)),
+                "goodTillDate": _text(getattr(order, "goodTillDate", None)),
+                # Damit ein in TWS geaendertes Limit sichtbar wird.
+                "lmtPrice": _als_zahl(getattr(order, "lmtPrice", None)) or None,
+                "orderType": _text(getattr(order, "orderType", None)),
+                "tif": _text(getattr(order, "tif", None)),
+                "totalQuantity": _als_zahl(getattr(order, "totalQuantity", None)),
+            }
+        )
+    return out
