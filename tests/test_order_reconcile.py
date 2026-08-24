@@ -206,3 +206,96 @@ def test_the_measured_batch_reports_exactly_one() -> None:
     )
     assert [a.dispatch_id for a in actions] == ["ot-fb54f3c5-992b-46d0-81bb-16e8e92d968d"]
     assert actions[0].status == "unknown"
+
+
+# ── T1-119 — der Auftrag aus einem anderen Depot ────────────────────────────
+#
+# Owner am 2026-08-24, nach einem Wechsel von Echtgeld auf Papier in TWS: drei
+# Auftraege standen auf t1 als `unknown`. Sie lagen die ganze Zeit gesund im
+# Buch des anderen Kontos.
+
+# Zwei Kennungen mit den Praefixen, auf die es ankommt — `U…` fuer Echtgeld,
+# `DU…` fuer Papier. Bewusst KEINE echten Konten: dieses Repo ist oeffentlich,
+# und fuer diesen Test ist nur wichtig, dass sich die beiden unterscheiden.
+LIVE = "U10000001"
+PAPIER = "DU20000002"
+
+
+def _mit_konto(dispatch_id: str, konto: str | None):
+    return UnresolvedDispatch(
+        dispatch_id=dispatch_id,
+        symbol="SHOP",
+        submitted_at=VORHER,
+        account_id=konto,
+    )
+
+
+def test_fremdes_depot_wird_nicht_als_ungeklaert_gemeldet() -> None:
+    """Der gemessene Fall vom 2026-08-24.
+
+    Der Auftrag gehoert zum Echtgeldkonto, verbunden ist das Papierkonto. IBKR
+    kennt ihn in dieser Sitzung weder offen noch abgeschlossen — und das ist
+    keine Aussage ueber den Auftrag, sondern ueber die Sitzung.
+    """
+    actions = _run(
+        unresolved=[_mit_konto("ot-fremd", LIVE)],
+        connected_account=PAPIER,
+    )
+    assert actions == []
+
+
+def test_eigenes_depot_wird_weiterhin_gemeldet() -> None:
+    """Der Riegel darf den eigentlichen Zweck nicht aushebeln."""
+    actions = _run(
+        unresolved=[_mit_konto("ot-eigen", PAPIER)],
+        connected_account=PAPIER,
+    )
+    assert len(actions) == 1
+    assert actions[0].status == "unknown"
+
+
+def test_ohne_kennung_am_auftrag_wird_gemeldet() -> None:
+    """Auftrag von vor T1-116, oder Plattform vor T1-119.
+
+    Nichtwissen darf keinen verschollenen Auftrag verschlucken — das waere die
+    teurere Richtung des Irrtums.
+    """
+    actions = _run(
+        unresolved=[_mit_konto("ot-alt", None)],
+        connected_account=PAPIER,
+    )
+    assert len(actions) == 1
+
+
+def test_ohne_kennung_der_sitzung_wird_gemeldet() -> None:
+    """Login mit mehreren verwalteten Konten: `trading_account` entscheidet
+    nicht, und dann entscheidet auch dieser Riegel nicht."""
+    actions = _run(
+        unresolved=[_mit_konto("ot-mehrfach", LIVE)],
+        connected_account=None,
+    )
+    assert len(actions) == 1
+
+
+def test_fremdes_depot_schlaegt_den_beleg_aus_dem_buch() -> None:
+    """Der Riegel steht VOR den Belegen, und das ist der Zweck.
+
+    Eine Auftragsnummer ist je Konto vergeben. Ein zufaellig gleicher Vermerk
+    im verbundenen Depot wuerde dem fremden Auftrag sonst einen Endzustand
+    zuschreiben — aus einem Buch, das ihn gar nicht fuehrt.
+    """
+    actions = _run(
+        unresolved=[_mit_konto("ot-kollision", LIVE)],
+        connected_account=PAPIER,
+        completed_by_ref={
+            "ot-kollision": FakeTrade(orderStatus=FakeStatus(status="Cancelled"))
+        },
+    )
+    assert actions == []
+
+
+def test_die_voreinstellung_bleibt_das_verhalten_von_vorher() -> None:
+    """Ohne das neue Argument aendert sich nichts — eine alte Aufrufstelle
+    verhaelt sich wie vor T1-119."""
+    actions = _run(unresolved=[_mit_konto("ot-default", LIVE)])
+    assert len(actions) == 1

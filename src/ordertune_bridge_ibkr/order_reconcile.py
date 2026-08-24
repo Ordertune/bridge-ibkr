@@ -55,6 +55,11 @@ class UnresolvedDispatch:
     symbol: str
     #: ISO-Zeitpunkt des Absendens, oder None.
     submitted_at: datetime | None
+    #: T1-119 — in welchem Depot dieser Auftrag abgesetzt wurde, roh.
+    #:
+    #: `None` heisst „die Plattform sagt es nicht": eine Fassung vor T1-119,
+    #: oder ein Auftrag von vor T1-116. Dann gilt der Abgleich wie bisher.
+    account_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,7 @@ def reconcile_open_dispatches(
     session_connected_at: datetime,
     open_query_failed: bool = False,
     fills_by_ref: dict[str, DispatchFill] | None = None,
+    connected_account: str | None = None,
 ) -> list[ReconcileAction]:
     """Der Abgleich, als Entscheidung ohne Nebenwirkung.
 
@@ -135,6 +141,25 @@ def reconcile_open_dispatches(
 
     Wortgleich zu der Unterscheidung, die T1-99 fuer die Positionsmeldung
     zieht: kein Eintrag ist etwas anderes als keine Antwort.
+
+    ## T1-119 — Fall 5: der Auftrag gehoert zu einem anderen Depot
+
+    Owner am 2026-08-24, nach einem Wechsel von Echtgeld auf Papier in TWS:
+    drei Auftraege standen auf t1 als `unknown`. Sie lagen die ganze Zeit
+    gesund im Buch des anderen Kontos — diese Funktion konnte es nur nicht
+    wissen. Sie fragte IBKR nach Auftraegen, die in der laufenden Sitzung gar
+    nicht auffindbar sein KOENNEN, und las die Antwort „kenne ich nicht" als
+    Aussage ueber den Auftrag statt als Aussage ueber die Sitzung.
+
+    Der Vergleich braucht beide Kennungen. Fehlt eine, wird wie bisher
+    entschieden: eine Plattform vor T1-119 liefert `account_id` nicht, ein
+    Auftrag von vor T1-116 traegt keine, und ein Login mit mehreren
+    verwalteten Konten laesst `connected_account` offen. In allen drei Faellen
+    waere ein Ueberspringen die schlechtere Wahl — es hiesse, einen wirklich
+    verschollenen Auftrag nicht mehr zu melden.
+
+    Verglichen wird ROH. Die Plattform maskiert erst am Ausgang, und maskiert
+    verglichen fielen `U12345678` und `U99995678` zusammen (T1-107).
     """
     if open_query_failed:
         return []
@@ -144,6 +169,20 @@ def reconcile_open_dispatches(
 
     for d in unresolved:
         if d.dispatch_id in open_by_ref:
+            continue
+
+        # T1-119 — Fall 5, und er steht bewusst VOR den Belegen aus dem Buch.
+        #
+        # Nicht dahinter: was IBKR in DIESER Sitzung ueber einen Auftrag eines
+        # ANDEREN Depots meldet, ist keine Auskunft ueber ihn. Eine
+        # Auftragsnummer ist je Konto vergeben, und ein zufaellig gleicher
+        # Vermerk aus dem verbundenen Depot wuerde hier sonst dem fremden
+        # Auftrag zugeschrieben — mit einem Endzustand als Ergebnis.
+        if (
+            d.account_id is not None
+            and connected_account is not None
+            and d.account_id != connected_account
+        ):
             continue
 
         fill = fills.get(d.dispatch_id)

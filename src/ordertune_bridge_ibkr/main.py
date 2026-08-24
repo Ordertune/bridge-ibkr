@@ -697,6 +697,10 @@ def _handle_order_reconcile(
             dispatch_id=row["dispatchId"],
             symbol=row.get("symbol", ""),
             submitted_at=_parse_iso(row.get("submittedAt")),
+            # T1-119: wonach hier ueberhaupt gesucht wird. Eine Plattform vor
+            # T1-119 liefert das Feld nicht — dann bleibt es None und der
+            # Abgleich entscheidet wie bisher.
+            account_id=row.get("accountId") or None,
         )
         for row in rows
         if row.get("dispatchId")
@@ -740,6 +744,18 @@ def _handle_order_reconcile(
         # falsch.
         log.warning("Could not read executions for reconcile: %s", exc)
 
+    # T1-119 — mit welchem Depot diese Sitzung verbunden ist.
+    #
+    # `None` bei mehreren verwalteten Konten; dann wird nicht entschieden und
+    # der Abgleich laeuft wie vor T1-119. Faengt alles ab: ein Fehlschlag hier
+    # darf den Abgleich nicht mitreissen, und ohne Kennung ist er weiterhin
+    # gueltig, nur weniger genau.
+    try:
+        verbundenes_konto = ibkr.trading_account()
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Could not resolve the connected account: %s", exc)
+        verbundenes_konto = None
+
     actions = reconcile_open_dispatches(
         unresolved=unresolved,
         open_by_ref=open_by_ref,
@@ -747,6 +763,7 @@ def _handle_order_reconcile(
         session_connected_at=session_connected_at,
         open_query_failed=open_query_failed,
         fills_by_ref=fills_by_ref,
+        connected_account=verbundenes_konto,
     )
 
     for action in actions:
