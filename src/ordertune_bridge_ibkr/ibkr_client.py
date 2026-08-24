@@ -399,6 +399,16 @@ class IbkrClient:
             )
         return rows
 
+    def trading_account(self) -> str | None:
+        """T1-119 — die Kennung des Depots, mit dem diese Sitzung verbunden ist.
+
+        Duenner Aufsatz auf `_trading_account`, damit der Abgleich sie lesen
+        kann, ohne an einem privaten Namen zu haengen. Dieselbe Quelle wie im
+        Herzschlag: was die Plattform als `bridge_last_account_id` fuehrt, ist
+        genau dieser Wert.
+        """
+        return self._trading_account()
+
     def _trading_account(self) -> str | None:
         """Das eine Konto, auf dem gehandelt wird — oder `None` bei mehreren.
 
