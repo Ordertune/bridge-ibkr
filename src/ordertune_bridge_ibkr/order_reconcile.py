@@ -34,17 +34,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
 
-# Zustaende, die IBKR fuer einen lebenden Auftrag meldet. Wortgleich zur
-# Abbildung in `main._STATUS_MAP` — hier noch einmal, weil diese Datei ohne
-# ib_insync auskommen soll.
-_LIVE_IBKR_STATES = {
-    "PendingSubmit",
-    "ApiPending",
-    "PreSubmitted",
-    "Submitted",
-    "PendingCancel",
-    "Inactive",
-}
+from .order_vocabulary import (
+    IBKR_TO_WIRE_STATUS,
+    LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
+    LIVE_WIRE_STATES,
+)
 
 
 @dataclass(frozen=True)
@@ -168,16 +162,17 @@ def reconcile_open_dispatches(
     aktionen: list[ReconcileAction] = []
 
     for d in unresolved:
-        if d.dispatch_id in open_by_ref:
-            continue
-
-        # T1-119 — Fall 5, und er steht bewusst VOR den Belegen aus dem Buch.
+        # T1-119 — Fall 5, und er steht bewusst VOR jedem Beleg aus dem Buch.
         #
         # Nicht dahinter: was IBKR in DIESER Sitzung ueber einen Auftrag eines
         # ANDEREN Depots meldet, ist keine Auskunft ueber ihn. Eine
         # Auftragsnummer ist je Konto vergeben, und ein zufaellig gleicher
         # Vermerk aus dem verbundenen Depot wuerde hier sonst dem fremden
         # Auftrag zugeschrieben — mit einem Endzustand als Ergebnis.
+        #
+        # T1-120: das gilt auch fuer den OFFENEN Auftrag darunter. Ein `working`
+        # ueber ein Depot, in das wir nicht sehen, ist dieselbe Behauptung wie
+        # ein `cancelled` — nur mit freundlicherem Vorzeichen.
         if (
             d.account_id is not None
             and connected_account is not None
@@ -186,6 +181,41 @@ def reconcile_open_dispatches(
             continue
 
         fill = fills.get(d.dispatch_id)
+
+        # ── T1-120 — Fall 1 meldet jetzt, statt zu schweigen ────────────────
+        #
+        # Hier stand `if d.dispatch_id in open_by_ref: continue`, begruendet
+        # mit „Der Auftrag lebt, die Plattform weiss es bereits". Der zweite
+        # Halbsatz ist falsch, und zwar immer: eine Zeile steht ueberhaupt nur
+        # dann in dieser Liste, wenn die Plattform ihren Zustand als NICHT
+        # abgeschlossen fuehrt — und `unknown` gehoert dazu. Sie fragt, WEIL
+        # sie es nicht weiss.
+        #
+        # Owner-Protokoll vom 2026-08-24, 12:59, verbunden mit dem Echtgeldkonto:
+        #
+        #     Re-mapped 5 open orders via their order reference.
+        #     Reconciled dispatch 6e68f237… -> unknown (not_known_at_broker)
+        #
+        # Die Bridge sah alle fuenf Auftraege offen im Buch — `Submitted`,
+        # `account='U23076419'` — und meldete darueber nichts. Auf t1 standen
+        # sie weiter auf `unknown`, aus einem Kontowechsel Stunden zuvor.
+        #
+        # `unresolved-dispatches.ts` behauptet seit T1-103 B das Gegenteil:
+        # „nachdem der Owner zurueck auf das Live-Konto gewechselt hatte und
+        # IBKR sie wieder kannte — mit dem Eintrag hier heilt genau dieser Fall
+        # von selbst." Er heilte nie. Der Eintrag sorgte dafuer, dass weiter
+        # GEFRAGT wird; die Antwort wurde verworfen.
+        #
+        # Sichtbar wird der Fehler nur nach einem `unknown`. Sonst fuehrt die
+        # Plattform ohnehin einen lebenden Zustand, und die ausgelassene
+        # Meldung haette nichts geaendert — deshalb ist er ueber vier Specs
+        # hinweg niemandem aufgefallen.
+        offen = open_by_ref.get(d.dispatch_id)
+        if offen is not None:
+            aktion = _from_open(d, offen, fill)
+            if aktion is not None:
+                aktionen.append(aktion)
+            continue
 
         trade = completed_by_ref.get(d.dispatch_id)
         if trade is not None:
@@ -223,6 +253,64 @@ def reconcile_open_dispatches(
         )
 
     return aktionen
+
+
+def _from_open(
+    d: UnresolvedDispatch, trade: Any, fill: DispatchFill | None
+) -> ReconcileAction | None:
+    """T1-120 — der Auftrag lebt bei IBKR. Das ist die Auskunft.
+
+    ## Warum nicht pauschal `working`
+
+    IBKR unterscheidet „unterwegs" von „am Markt", und der Unterschied steht
+    im Auftrag. Ihn einzuebnen waere dieselbe Sorte Vergroeberung, die T1-91
+    fuer den Verfall zurueckgenommen hat.
+
+    ## Warum eine Teilfuellung mitgemeldet wird
+
+    Ein offener Auftrag kann bereits Stuecke bekommen haben. Meldeten wir hier
+    `working`, ueberschriebe das ein `partial` mit der schwaecheren Aussage —
+    `should_report` laesst das durch, weil beide nicht-terminal sind. Die
+    Menge steht im Auftrag; sie wegzulassen hiesse, sie zu verlieren.
+
+    Die Plattform bucht seit T1-103 J nur den ZUWACHS gegenueber
+    `fill_booked_qty`. Eine zweite Meldung derselben Menge bewegt den Bestand
+    nicht.
+
+    ## Warum ein Widerspruch schweigt
+
+    Steht der Auftrag in der Liste der OFFENEN und meldet trotzdem einen
+    Endzustand, ist eine der beiden Angaben falsch, und es ist nicht
+    entscheidbar welche. `None` heisst dann: dieser Durchgang sagt nichts, und
+    der naechste fragt erneut. Behaupten ist hier teurer als zugeben —
+    dieselbe Linie wie in `_from_completed`.
+    """
+    status = _status_of(trade)
+    wire = IBKR_TO_WIRE_STATUS.get(status or "")
+    if wire is None or wire not in LIVE_WIRE_STATES:
+        return None
+
+    menge = _filled_qty(trade)
+    if menge is not None and menge > 0:
+        return ReconcileAction(
+            dispatch_id=d.dispatch_id,
+            status="partial",
+            reason_code=None,
+            error_message=None,
+            fill_qty=menge,
+            fill_price=_avg_fill_price(trade)
+            or (fill.price if fill is not None else None),
+            commission_usd=_commission(trade)
+            if _commission(trade) is not None
+            else (fill.commission if fill is not None else None),
+        )
+
+    return ReconcileAction(
+        dispatch_id=d.dispatch_id,
+        status=wire,
+        reason_code=None,
+        error_message=None,
+    )
 
 
 def _from_fill(d: UnresolvedDispatch, fill: DispatchFill) -> ReconcileAction:

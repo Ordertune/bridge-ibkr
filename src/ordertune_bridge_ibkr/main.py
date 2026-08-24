@@ -65,6 +65,7 @@ from .order_reconcile import (
     reconcile_open_dispatches,
 )
 from .order_translator import make_contract, translate_intent
+from .order_vocabulary import IBKR_TO_WIRE_STATUS, LIVE_WIRE_STATES
 from .position_sizing import (
     SizingConfig,
     recompute_qty,
@@ -933,31 +934,17 @@ _LIMIT_ORDER_TYPES = {"LMT", "LOC", "MOC"}
 # Ein lebender Auftrag muss die Plattform als `working` erreichen. Dann haelt
 # ihr Riegel gegen Doppelauftraege von allein, ohne dass irgendwo eine zweite
 # Sonderregel noetig waere.
-_STATUS_MAP: dict[str, str] = {
-    # Unterwegs, noch nicht am Markt.
-    "PendingSubmit": "submitting",
-    "ApiPending": "submitting",
-    # Am Markt, lebendig.
-    "PreSubmitted": "working",
-    "Submitted": "working",
-    "PendingCancel": "working",
-    # T1-88b F4: `Inactive` steht NICHT in `OrderStatus.DoneStates` und ist
-    # mehrdeutig — IBKR benutzt es sowohl fuer abgelehnt als auch fuer
-    # "angenommen, aber nicht ausfuehrbar". Es als `rejected` zu melden hiesse,
-    # im Zweifel den Riegel zu oeffnen, und ein faelschlich geoeffneter Riegel
-    # kostet einen zweiten Echtauftrag. Ein faelschlich geschlossener kostet
-    # einen Klick. Deshalb nicht-terminal, und laut protokolliert.
-    "Inactive": "working",
-    # Endzustaende.
-    "Filled": "filled",
-    "PartiallyFilled": "partial",
-    "Cancelled": "cancelled",
-    "ApiCancelled": "cancelled",
-}
+# T1-120 — die Abbildung liegt jetzt in `order_vocabulary`.
+#
+# Sie stand hier, und `order_reconcile` fuehrte daneben eine Teilmenge mit dem
+# Vermerk „wortgleich zur Abbildung in main._STATUS_MAP". Der Abgleich braucht
+# seit T1-120 die volle Abbildung; eine dritte Kopie waere die Stelle gewesen,
+# an der die drei auseinanderlaufen.
+_STATUS_MAP = IBKR_TO_WIRE_STATUS
 
 # Zustaende, die einen lebenden Auftrag beschreiben. Nur informativ fuer die
 # Plattform — aber genau diese Information hat am 2026-08-13 gefehlt.
-_LIVE_STATES = {"submitting", "working"}
+_LIVE_STATES = LIVE_WIRE_STATES
 
 # ── T1-88b F2: welche Stornierung von IBKR kommt und welche erfunden ist ─────
 #
