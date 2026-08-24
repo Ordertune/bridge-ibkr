@@ -41,12 +41,12 @@
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.17.0",
+  "bridgeVersion": "0.18.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -59,7 +59,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -71,7 +71,9 @@
             "qty": 15.0,
             "avgEntryPriceUsd": 187.42,
             "marketValueUsd": 2900.25,
-            "unrealizedPlUsd": 88.95
+            "unrealizedPlUsd": 88.95,
+            "lastPrice": 193.35,
+            "lastPriceCurrency": "USD"
           }
         ],
         "capabilities": {
@@ -87,7 +89,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -99,7 +101,9 @@
             "qty": 15.0,
             "avgEntryPriceUsd": 187.42,
             "marketValueUsd": 2900.25,
-            "unrealizedPlUsd": 88.95
+            "unrealizedPlUsd": 88.95,
+            "lastPrice": 193.35,
+            "lastPriceCurrency": "USD"
           }
         ],
         "capabilities": {
@@ -132,7 +136,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -147,7 +151,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -161,7 +165,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.17.0",
+      "bridgeVersion": "0.18.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
