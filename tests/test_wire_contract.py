@@ -627,3 +627,73 @@ def test_no_determinable_account_omits_the_field() -> None:
     snap = _heartbeat_snapshot(rec)
     assert "accountId" not in snap
     assert "accountId" not in snap["positions"][0]
+
+
+def test_heartbeat_with_open_orders_matches_contract() -> None:
+    """T1-114 — der Rueckbericht steht im Vertrag.
+
+    Er beantwortet die Frage, die der Owner an drei Tagen gestellt hat: liegt
+    beim Broker wirklich das, was gesendet wurde? Genau deshalb ist die
+    Fixture bewusst der ECHTE Fall vom 2026-08-21 — ein OCA-Bein, dessen
+    Zeitbedingung verlorengegangen war.
+    """
+    expected = FIXTURES["heartbeatWithOpenOrders"]["body"]
+    snap = expected["accountSnapshot"]
+    pos = snap["positions"][0]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[
+            {
+                "symbol": pos["symbol"],
+                "qty": pos["qty"],
+                "avg_cost": pos["avgEntryPriceUsd"],
+                "market_price": 193.35,
+                "market_value": pos["marketValueUsd"],
+                "unrealized_pnl": pos["unrealizedPlUsd"],
+            }
+        ],
+        gateway_status="connected",
+        capabilities=snap["capabilities"],
+        open_orders=expected["openOrders"],
+    )
+
+    assert rec.body == expected, (
+        "Rueckbericht weicht vom Vertrag ab. Beide Repos fuehren diese Datei "
+        "byte-gleich — eine Abweichung hier heisst, dass eine Seite etwas "
+        "anderes sendet, als die andere liest."
+    )
+
+
+def test_heartbeat_omits_open_orders_when_not_collected() -> None:
+    """`None` heisst „nicht erhoben" und muss das Feld WEGLASSEN.
+
+    Dieselbe Unterscheidung wie bei `positions` seit T1-99: ein leeres Array
+    ist die Aussage „nichts offen", und die Plattform darf daraus schliessen.
+    Die beiden zu verwechseln hat dort zwei echte Positionen gekostet.
+    """
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=1.0,
+        equity=1.0,
+        currency="USD",
+        positions=None,
+        gateway_status="connected",
+    )
+    assert "openOrders" not in rec.body
+
+    rec2 = _Recorder()
+    _client(rec2).heartbeat(
+        cash=1.0,
+        equity=1.0,
+        currency="USD",
+        positions=None,
+        gateway_status="connected",
+        open_orders=[],
+    )
+    assert rec2.body["openOrders"] == []

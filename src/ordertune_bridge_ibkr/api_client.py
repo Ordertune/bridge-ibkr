@@ -243,6 +243,7 @@ class OrdertuneApiClient:
         capabilities: dict[str, Any] | None = None,
         cpu_load: float | None = None,
         account: str | None = None,
+        open_orders: list[dict[str, Any]] | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -294,6 +295,15 @@ class OrdertuneApiClient:
         }
         if cpu_load is not None:
             body["cpuLoad"] = float(cpu_load)
+        # T1-114 — der Rueckbericht: was IBKR gerade an EIGENEN Auftraegen
+        # fuehrt, mit OCA-Gruppe, Zeitbedingung und Limit.
+        #
+        # `None` heisst „nicht erhoben" und laesst das Feld weg; eine leere
+        # Liste heisst „keine offenen Auftraege" und ist eine Aussage. Dieselbe
+        # Unterscheidung wie bei `positions` seit T1-99 — sie zu verwechseln
+        # hat dort zwei echte Positionen aus den Buechern genommen.
+        if open_orders is not None:
+            body["openOrders"] = open_orders
 
         _request_with_retry(
             "PUT", self._client,

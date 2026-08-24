@@ -113,3 +113,113 @@ def test_besitz_haengt_nur_am_praefix():
     assert not is_ours("manual-123")
     assert not is_ours(None)
     assert not is_ours("")
+
+
+# ── T1-114: der Rueckbericht ────────────────────────────────────────────────
+
+
+class _Order:
+    def __init__(self, **kw):
+        self.orderId = kw.get("orderId", 0)
+        self.orderRef = kw.get("orderRef", "")
+        self.ocaGroup = kw.get("ocaGroup", "")
+        self.ocaType = kw.get("ocaType", 0)
+        self.goodAfterTime = kw.get("goodAfterTime", "")
+        self.goodTillDate = kw.get("goodTillDate", "")
+        self.lmtPrice = kw.get("lmtPrice", 0.0)
+        self.orderType = kw.get("orderType", "")
+        self.tif = kw.get("tif", "")
+        self.totalQuantity = kw.get("totalQuantity", 0.0)
+
+
+class _Status:
+    def __init__(self, status="Submitted"):
+        self.status = status
+
+
+class _Trade:
+    def __init__(self, order, status="Submitted"):
+        self.order = order
+        self.orderStatus = _Status(status)
+
+
+def _unser(**kw):
+    kw.setdefault("orderRef", f"ot-ALAB-7809-Peak_Reload-{UUID}")
+    return _Trade(_Order(**kw))
+
+
+def test_nur_eigene_auftraege_gehen_mit():
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    fremd = _Trade(_Order(orderRef="manual-123", orderId=99))
+    out = wire_open_orders([_unser(orderId=865), fremd])
+    assert len(out) == 1
+    assert out[0]["brokerOrderId"] == "865"
+    assert out[0]["dispatchId"] == UUID
+
+
+def test_der_fall_vom_2026_08_21():
+    """Die weggefallene Zeitbedingung wird als solche berichtet."""
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    out = wire_open_orders(
+        [
+            _unser(
+                orderId=865,
+                ocaGroup="OCA_ALAB_2026-08-21_Peak_Reload",
+                ocaType=3,
+                goodAfterTime="",  # genau das, was IBKR am Montag fuehrte
+                lmtPrice=290.52,
+                orderType="LMT",
+                tif="DAY",
+                totalQuantity=1.0,
+            )
+        ]
+    )
+    assert out[0]["ocaGroup"] == "OCA_ALAB_2026-08-21_Peak_Reload"
+    assert out[0]["ocaType"] == 3
+    # Der Befund: der Leerstring wird NICHT als Wert gemeldet.
+    assert out[0]["goodAfterTime"] is None
+    assert out[0]["lmtPrice"] == 290.52
+
+
+def test_ein_in_tws_geaendertes_limit_wird_sichtbar():
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    out = wire_open_orders([_unser(lmtPrice=90.67)])
+    assert out[0]["lmtPrice"] == 90.67
+
+
+def test_ohne_aufloesbaren_vermerk_faellt_der_auftrag_weg():
+    """Ohne Zuordnung ist die Zeile eine Behauptung ohne Adresse."""
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    assert wire_open_orders([_Trade(_Order(orderRef=""))]) == []
+    assert wire_open_orders([_Trade(_Order(orderRef="ot-"))]) == []
+
+
+def test_kein_limit_bleibt_null_statt_null_komma_null():
+    """IBKR schreibt 0.0 fuer „kein Limit" — das ist kein Preis."""
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    out = wire_open_orders([_unser(orderType="MOC", lmtPrice=0.0)])
+    assert out[0]["lmtPrice"] is None
+    assert out[0]["orderType"] == "MOC"
+
+
+def test_die_liste_ist_gedeckelt():
+    from ordertune_bridge_ibkr.order_reference import (
+        MAX_OPEN_ORDERS_REPORTED,
+        wire_open_orders,
+    )
+
+    viele = [_unser(orderId=i) for i in range(MAX_OPEN_ORDERS_REPORTED + 20)]
+    assert len(wire_open_orders(viele)) == MAX_OPEN_ORDERS_REPORTED
+
+
+def test_leere_und_kaputte_eingaben():
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    assert wire_open_orders([]) == []
+    assert wire_open_orders(None) == []
+    assert wire_open_orders([object()]) == []

@@ -122,6 +122,7 @@ from .order_reference import (  # noqa: F401  (Weiterverwendung durch Importeure
     ORDER_REF_PREFIX,
     build_order_ref,
     dispatch_id_from_order_ref,
+    wire_open_orders,
 )
 
 
@@ -829,6 +830,21 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed
 
 
+def _open_orders_fuer_bericht(ibkr: IbkrClient) -> list[dict[str, Any]] | None:
+    """Die eigenen offenen Auftraege fuer den Rueckbericht, oder `None`.
+
+    `None` heisst „nicht erhoben" und laesst das Feld auf der Leitung weg. Das
+    ist wichtig: eine leere Liste ist die Aussage „nichts offen", und die
+    Plattform darf daraus schliessen duerfen. Scheitert die Abfrage, sagen wir
+    lieber nichts als etwas Falsches.
+    """
+    try:
+        return wire_open_orders(ibkr.open_trades())
+    except Exception as exc:  # pragma: no cover — Verbindungsfehler
+        log.debug("open-order report skipped: %s", exc)
+        return None
+
+
 def _handle_heartbeat(
     api: OrdertuneApiClient, ibkr: IbkrClient
 ) -> tuple[Any | None, Exception | None]:
@@ -871,6 +887,12 @@ def _handle_heartbeat(
             # `heartbeat` das Feld weg, und die Plattform behandelt den
             # Snapshot als nicht identifiziert.
             account=snap.account,
+            # T1-114: die Antwort auf `reqOpenOrders`, die bis hierher nur als
+            # Ja/Nein fuer die Schreibrechte ausgewertet und dann verworfen
+            # wurde. Sie beantwortet die Frage, die der Owner an drei Tagen in
+            # drei Formen gestellt hat: liegt beim Broker wirklich das, was wir
+            # gesendet haben?
+            open_orders=_open_orders_fuer_bericht(ibkr),
         )
         return snap, None
     except Exception as exc:

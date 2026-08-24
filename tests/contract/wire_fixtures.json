@@ -41,12 +41,12 @@
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.13.0",
+  "bridgeVersion": "0.14.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.13.0",
+      "bridgeVersion": "0.14.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -59,7 +59,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.13.0",
+      "bridgeVersion": "0.14.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -83,12 +83,56 @@
       }
     }
   },
+  "heartbeatWithOpenOrders": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.14.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [
+          {
+            "symbol": "AAPL",
+            "qty": 15.0,
+            "avgEntryPriceUsd": 187.42,
+            "marketValueUsd": 2900.25,
+            "unrealizedPlUsd": 88.95
+          }
+        ],
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        }
+      },
+      "openOrders": [
+        {
+          "dispatchId": "ad23c4db-5feb-4b8e-8e41-d3602ca492aa",
+          "brokerOrderId": "865",
+          "status": "Submitted",
+          "ocaGroup": "OCA_ALAB_2026-08-21_Peak_Reload",
+          "ocaType": 3,
+          "goodAfterTime": null,
+          "goodTillDate": null,
+          "lmtPrice": 290.52,
+          "orderType": "LMT",
+          "tif": "DAY",
+          "totalQuantity": 1.0
+        }
+      ]
+    },
+    "_comment": "T1-114 — der Rueckbericht. `openOrders` ist die Antwort auf reqOpenOrders, gefiltert auf die eigenen Auftraege. Beantwortet, ob beim Broker wirklich das liegt, was gesendet wurde: OCA-Gruppe, Zeitbedingung, Limit. Feld FEHLT = nicht erhoben; leeres Array = keine offenen Auftraege."
+  },
   "heartbeatForeignCurrency": {
     "_comment": "T1-85 — der Fall, der den Spec ausgeloest hat: ein EUR-gefuehrtes Konto. Der Depotwert ist echt und wird auch so gemeldet; die Plattform blockiert daraus die Mengenrechnung, statt die Zahl als USD zu verbuchen. Bis 0.2.x kam hier equityUsd 0 an und alles sah gesund aus.",
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.13.0",
+      "bridgeVersion": "0.14.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -103,7 +147,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.13.0",
+      "bridgeVersion": "0.14.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -117,7 +161,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.13.0",
+      "bridgeVersion": "0.14.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
