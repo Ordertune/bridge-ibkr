@@ -390,6 +390,12 @@ class IbkrClient:
                     # ueber Konten hinweg zu summieren, laesst sich je Zeile
                     # zuordnen.
                     "account": p.account,
+                    # T1-122: die Waehrung des Kontrakts, nicht die des Kontos.
+                    # Sie entscheidet auf der Plattform, ob der Kurs neben einer
+                    # Dollar-Spalte stehen darf — und sie kommt aus `positions()`
+                    # und nicht aus der Anreicherung, damit sie auch dann da ist,
+                    # wenn das Konto-Abo schweigt.
+                    "currency": getattr(p.contract, "currency", None) or None,
                     "market_price": _opt(extra.marketPrice) if extra else None,
                     "market_value": _opt(extra.marketValue) if extra else None,
                     "unrealized_pnl": (

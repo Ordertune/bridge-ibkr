@@ -153,8 +153,24 @@ def _wire_position(p: dict[str, Any]) -> dict[str, Any]:
     """IBKR-Portfoliozeile → positionSchema der Plattform.
 
     Bewusst explizit statt einer Schleife über die Schlüssel: das Serverschema
-    ist strict, jedes zusätzliche Feld wäre ein 422. `market_price` gehört
-    absichtlich nicht dazu — die Plattform rechnet ihren Marktwert selbst.
+    ist strict, jedes zusätzliche Feld wäre ein 422.
+
+    T1-122 — `market_price` gehört jetzt dazu. Bis 0.17.x stand hier
+
+        „`market_price` gehört absichtlich nicht dazu — die Plattform rechnet
+        ihren Marktwert selbst."
+
+    Der Satz war richtig, solange die Plattform einen aktuellen Kurs hatte. Sie
+    hatte keinen: ihre Kurstabelle wird von einem Cron gefüllt, der nur Symbole
+    aktualisiert, die er schon kennt, und ein am selben Morgen gekauftes Papier
+    stand dort mit dem Kurs seiner letzten Haltezeit. Am 2026-08-24 war das für
+    TER ein Kurs vom 22. Juni — 63 Tage alt, 457,00 gegen 355,30 in TWS —
+    während diese Zeile hier den echten Kurs las und wegwarf.
+
+    Die Währung reist mit, ohne `Usd` im Feldnamen. `marketValueUsd` und
+    `avgEntryPriceUsd` tragen die Einheit im Namen und sind bei einem
+    Nicht-Dollar-Kontrakt schlicht falsch; das ist die Falle aus T1-85
+    (`cashUsd`/`equityUsd`), und sie wird hier nicht ein drittes Mal gebaut.
     """
     row: dict[str, Any] = {
         "symbol": p["symbol"],
@@ -162,7 +178,21 @@ def _wire_position(p: dict[str, Any]) -> dict[str, Any]:
         "avgEntryPriceUsd": _opt_float(p.get("avg_cost")),
         "marketValueUsd": _opt_float(p.get("market_value")),
         "unrealizedPlUsd": _opt_float(p.get("unrealized_pnl")),
+        # `None` heisst „IBKR liefert dazu keinen Kurs" — nicht abonniertes
+        # Instrument, `_opt` hat aus `nan` bereits `None` gemacht. Eine
+        # erfundene 0 waere ein Kurs, den niemand kennt. Anders als beim Konto
+        # wird das Feld NICHT weggelassen: die Plattform unterscheidet
+        # „weggelassen" (Bridge vor 0.18.0) von `null` (kein Kurs verfuegbar),
+        # und diese Bridge kann die zweite Aussage machen.
+        "lastPrice": _opt_float(p.get("market_price")),
     }
+    # Die Waehrung nur, wenn IBKR eine nennt. Sie kommt aus dem Kontrakt und
+    # fehlt praktisch nie — aber „praktisch nie" ist kein Grund, einen
+    # Leerstring auf die Leitung zu legen, den das Serverschema als
+    # ISO-4217-Code ablehnt.
+    currency = p.get("currency")
+    if currency:
+        row["lastPriceCurrency"] = str(currency).strip().upper()
     # T1-107: weglassen statt `null` senden, wenn IBKR ausnahmsweise kein
     # Konto liefert. Dieselbe Entscheidung wie bei `positions` in T1-99 —
     # Unwissen sagt man durch Weglassen, sonst gibt es zwei Nullwerte mit

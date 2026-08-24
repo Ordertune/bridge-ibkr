@@ -184,6 +184,13 @@ def test_heartbeat_body_matches_contract() -> None:
     # Bewusst im IBKR-Format hereingereicht (snake_case, avg_cost,
     # market_price) — die Uebersetzung ins Drahtformat ist genau das,
     # was hier geprueft wird.
+    #
+    # T1-122: bis 0.17.x stand hinter `market_price` der Kommentar
+    # „darf NICHT auf der Leitung landen". Er hielt das Verhalten fest, das
+    # den Befund vom 2026-08-24 verursacht hat: die Bridge las den Kurs und
+    # warf ihn weg, waehrend die Plattform fuer dasselbe Papier einen 63 Tage
+    # alten Schlusskurs anzeigte. Er landet jetzt als `lastPrice` auf der
+    # Leitung, mit seiner Waehrung daneben.
     api.heartbeat(
         cash=snap["cash"],
         equity=snap["equity"],
@@ -193,7 +200,8 @@ def test_heartbeat_body_matches_contract() -> None:
                 "symbol": pos["symbol"],
                 "qty": pos["qty"],
                 "avg_cost": pos["avgEntryPriceUsd"],
-                "market_price": 193.35,  # darf NICHT auf der Leitung landen
+                "market_price": pos["lastPrice"],
+                "currency": pos["lastPriceCurrency"],
                 "market_value": pos["marketValueUsd"],
                 "unrealized_pnl": pos["unrealizedPlUsd"],
             }
@@ -260,6 +268,100 @@ def test_heartbeat_sends_an_empty_list_for_an_empty_account() -> None:
         gateway_status="connected",
     )
     assert rec.body["accountSnapshot"]["positions"] == []
+
+
+def test_position_without_market_data_sends_a_null_price_not_a_zero() -> None:
+    """T1-122 — ein nicht abonniertes Instrument hat keinen Kurs, nicht null.
+
+    IBKR liefert fuer nicht abonnierte Marktdaten `nan`; `_opt` macht daraus
+    bereits `None`. Ab hier gilt: `None` reist als `null` auf die Leitung und
+    wird NICHT weggelassen. Der Unterschied traegt eine Aussage — weggelassen
+    heisst „Bridge vor 0.18.0", `null` heisst „diese Bridge kennt das Feld,
+    IBKR liefert aber keinen Kurs". Eine erfundene 0 waere ein Marktwert, den
+    niemand kennt; genau diese Verwechslung hat in T1-99 zwei echte Positionen
+    aus den Buechern genommen.
+    """
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=0.0,
+        equity=0.0,
+        currency="USD",
+        positions=[
+            {
+                "symbol": "AAPL",
+                "qty": 1.0,
+                "avg_cost": 187.42,
+                "market_price": None,
+                "currency": "USD",
+                "market_value": None,
+                "unrealized_pnl": None,
+            }
+        ],
+        gateway_status="connected",
+    )
+    row = rec.body["accountSnapshot"]["positions"][0]
+    assert "lastPrice" in row, "Das Feld muss da sein, sonst ist es keine Aussage."
+    assert row["lastPrice"] is None
+    assert row["lastPriceCurrency"] == "USD"
+
+
+def test_position_without_a_contract_currency_omits_the_currency_field() -> None:
+    """T1-122 — kein Leerstring auf die Leitung.
+
+    Die Waehrung kommt aus dem Kontrakt und fehlt praktisch nie. „Praktisch
+    nie" ist aber kein Grund, einen Leerstring zu schicken: das Serverschema
+    verlangt einen ISO-4217-Code und wuerde den ganzen Heartbeat mit 422
+    abweisen — 60 Sekunden lang, endlos, wie schon einmal bei v0.1.0.
+    """
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=0.0,
+        equity=0.0,
+        currency="USD",
+        positions=[
+            {
+                "symbol": "AAPL",
+                "qty": 1.0,
+                "avg_cost": 187.42,
+                "market_price": 193.35,
+                "currency": None,
+                "market_value": 193.35,
+                "unrealized_pnl": 5.93,
+            }
+        ],
+        gateway_status="connected",
+    )
+    row = rec.body["accountSnapshot"]["positions"][0]
+    assert "lastPriceCurrency" not in row
+    assert row["lastPrice"] == 193.35
+
+
+def test_contract_currency_reaches_the_wire_uppercased() -> None:
+    """Die Plattform prueft auf `^[A-Z]{3}$`. Ein kleingeschriebenes `usd`
+    waere ein 422 — und der Unterschied faellt nirgends auf, bis der erste
+    Heartbeat abgewiesen wird."""
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=0.0,
+        equity=0.0,
+        currency="USD",
+        positions=[
+            {
+                "symbol": "AAPL",
+                "qty": 1.0,
+                "avg_cost": 187.42,
+                "market_price": 193.35,
+                "currency": " usd ",
+                "market_value": 193.35,
+                "unrealized_pnl": 5.93,
+            }
+        ],
+        gateway_status="connected",
+    )
+    assert rec.body["accountSnapshot"]["positions"][0]["lastPriceCurrency"] == "USD"
 
 
 @pytest.mark.parametrize(
@@ -336,12 +438,16 @@ def test_heartbeat_omits_unknown_broker_fields() -> None:
         ],
         gateway_status="connected",
     )
+    # T1-122: `lastPrice` ist neu dabei, `lastPriceCurrency` fehlt — die Zeile
+    # oben nennt keine Waehrung, und ein Leerwert waere ein 422. Genau der
+    # Unterschied, den dieser Test bewacht.
     assert set(rec.body["accountSnapshot"]["positions"][0].keys()) == {
         "symbol",
         "qty",
         "avgEntryPriceUsd",
         "marketValueUsd",
         "unrealizedPlUsd",
+        "lastPrice",
     }
 
 
@@ -652,7 +758,8 @@ def test_heartbeat_with_open_orders_matches_contract() -> None:
                 "symbol": pos["symbol"],
                 "qty": pos["qty"],
                 "avg_cost": pos["avgEntryPriceUsd"],
-                "market_price": 193.35,
+                "market_price": pos["lastPrice"],
+                "currency": pos["lastPriceCurrency"],
                 "market_value": pos["marketValueUsd"],
                 "unrealized_pnl": pos["unrealizedPlUsd"],
             }
