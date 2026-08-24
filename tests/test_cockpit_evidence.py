@@ -43,7 +43,7 @@ def _leere_ablage():
 
 
 def test_the_order_list_speaks_the_t1_vocabulary() -> None:
-    m._TRADES_BY_DISPATCH["d1"] = _trade("MU", "Submitted")
+    m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = _trade("MU", "Submitted")
 
     zeile = m.orders_for_cockpit()[0]
 
@@ -62,7 +62,7 @@ def test_a_rejection_carries_ibkrs_own_words() -> None:
         "Order abgewiesen - Grund:Verfuegbare Mittel in Basiswaehrung: 1037.11 "
         "USD Barmittel fuer diese und weitere offene Orders benoetigt: 1418.40 USD"
     )
-    m._TRADES_BY_DISPATCH["d1"] = _trade(
+    m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = _trade(
         "CRWD", "Inactive",
         log_entries=[SimpleNamespace(errorCode=201, message=grund)],
     )
@@ -77,7 +77,7 @@ def test_a_rejection_carries_ibkrs_own_words() -> None:
 
 
 def test_an_unknown_ibkr_state_never_leaks_as_jargon() -> None:
-    m._TRADES_BY_DISPATCH["d1"] = _trade("AVGO", "IrgendwasNeues")
+    m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = _trade("AVGO", "IrgendwasNeues")
     assert m.orders_for_cockpit()[0]["status"] == "Unknown"
 
 

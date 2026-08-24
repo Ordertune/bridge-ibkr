@@ -256,7 +256,7 @@ def test_the_port_check_does_not_claim_more_than_it_knows(monkeypatch) -> None:
 
 def test_orders_in_flight_sees_a_live_order() -> None:
     m._TRADES_BY_DISPATCH.clear()
-    m._TRADES_BY_DISPATCH["d1"] = SimpleNamespace(
+    m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = SimpleNamespace(
         order=SimpleNamespace(orderId=1),
         orderStatus=SimpleNamespace(status="Submitted"),
     )
@@ -268,7 +268,7 @@ def test_orders_in_flight_sees_a_live_order() -> None:
 
 def test_orders_in_flight_ignores_settled_ones() -> None:
     m._TRADES_BY_DISPATCH.clear()
-    m._TRADES_BY_DISPATCH["d1"] = SimpleNamespace(
+    m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = SimpleNamespace(
         order=SimpleNamespace(orderId=1),
         orderStatus=SimpleNamespace(status="Filled"),
     )

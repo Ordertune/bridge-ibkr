@@ -74,7 +74,7 @@ class FakeIbkr:
 
 
 def test_the_order_ref_carries_the_dispatch_id() -> None:
-    assert m.dispatch_id_from_order_ref("ot-abc-123") == "abc-123"
+    assert m.dispatch_id_from_order_ref("ot-6351623c-8cef-46fe-8abf-a7da046fc619") == "6351623c-8cef-46fe-8abf-a7da046fc619"
 
 
 @pytest.mark.parametrize("ref", [None, "", "abc-123", "ot-", "ot-   ", "xy-abc"])
@@ -98,19 +98,19 @@ def test_the_mapping_survives_a_restart() -> None:
     weder stornierbar noch meldbar.
     """
     dispatch_id_map: dict[int, str] = {}
-    ibkr = FakeIbkr([make_trade("disp-1", 3), make_trade("disp-2", 4)])
+    ibkr = FakeIbkr([make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3), make_trade("edf40f88-85ec-4106-803d-71d67c07afa1", 4)])
 
     anzahl = m.rebuild_dispatch_map(ibkr, dispatch_id_map)
 
     assert anzahl == 2
-    assert dispatch_id_map == {3: "disp-1", 4: "disp-2"}
-    assert m.trade_for_dispatch("disp-1") is not None
-    assert m.trade_for_dispatch("disp-2") is not None
+    assert dispatch_id_map == {3: "657be283-ed36-426e-8d9f-f0bf708f3881", 4: "edf40f88-85ec-4106-803d-71d67c07afa1"}
+    assert m.trade_for_dispatch("657be283-ed36-426e-8d9f-f0bf708f3881") is not None
+    assert m.trade_for_dispatch("edf40f88-85ec-4106-803d-71d67c07afa1") is not None
 
 
 def test_foreign_orders_are_skipped_during_rebuild() -> None:
     dispatch_id_map: dict[int, str] = {}
-    ibkr = FakeIbkr([make_trade("disp-1", 3), make_trade(None, 99)])
+    ibkr = FakeIbkr([make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3), make_trade(None, 99)])
 
     assert m.rebuild_dispatch_map(ibkr, dispatch_id_map) == 1
     assert 99 not in dispatch_id_map
@@ -142,11 +142,11 @@ def test_the_cancel_goes_out_and_reports_nothing() -> None:
     der Oberflaeche „storniert", waehrend der Auftrag weiter im Buch liegt.
     """
     dispatch_id_map: dict[int, str] = {}
-    trade = make_trade("disp-1", 3)
-    m.register_trade(dispatch_id_map, "disp-1", trade)
+    trade = make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3)
+    m.register_trade(dispatch_id_map, "657be283-ed36-426e-8d9f-f0bf708f3881", trade)
     ibkr = FakeIbkr()
 
-    m._handle_cancel(ibkr, "disp-1")
+    m._handle_cancel(ibkr, "657be283-ed36-426e-8d9f-f0bf708f3881")
 
     assert ibkr.cancelled == [3]
 
@@ -156,11 +156,11 @@ def test_a_cancel_is_sent_only_once() -> None:
     Broker bestaetigt hat. Ohne diese Merkung ginge alle fuenf Sekunden ein
     weiterer raus."""
     dispatch_id_map: dict[int, str] = {}
-    m.register_trade(dispatch_id_map, "disp-1", make_trade("disp-1", 3))
+    m.register_trade(dispatch_id_map, "657be283-ed36-426e-8d9f-f0bf708f3881", make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3))
     ibkr = FakeIbkr()
 
     for _ in range(5):
-        m._handle_cancel(ibkr, "disp-1")
+        m._handle_cancel(ibkr, "657be283-ed36-426e-8d9f-f0bf708f3881")
 
     assert ibkr.cancelled == [3]
 
@@ -169,13 +169,13 @@ def test_a_failed_cancel_is_retried() -> None:
     """Gescheitert ist nicht erledigt — sonst bliebe der Auftrag stehen und
     niemand versuchte es noch einmal."""
     dispatch_id_map: dict[int, str] = {}
-    m.register_trade(dispatch_id_map, "disp-1", make_trade("disp-1", 3))
+    m.register_trade(dispatch_id_map, "657be283-ed36-426e-8d9f-f0bf708f3881", make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3))
 
-    m._handle_cancel(FakeIbkr(fail=True), "disp-1")
-    assert "disp-1" not in m._CANCEL_SENT
+    m._handle_cancel(FakeIbkr(fail=True), "657be283-ed36-426e-8d9f-f0bf708f3881")
+    assert "657be283-ed36-426e-8d9f-f0bf708f3881" not in m._CANCEL_SENT
 
     ibkr = FakeIbkr()
-    m._handle_cancel(ibkr, "disp-1")
+    m._handle_cancel(ibkr, "657be283-ed36-426e-8d9f-f0bf708f3881")
     assert ibkr.cancelled == [3]
 
 

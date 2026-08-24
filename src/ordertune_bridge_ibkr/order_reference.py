@@ -116,21 +116,70 @@ def dispatch_id_from_order_ref(order_ref: str | None) -> str | None:
     if treffer:
         return treffer.group(1)
 
-    # Rueckfall fuer alles, was wie das alte Format aussieht, ohne eine UUID zu
-    # sein — etwa in Tests oder aus einer Zeit vor der UUID-Vergabe. Die alte
-    # Regel Wort fuer Wort.
-    rest = text[len(ORDER_REF_PREFIX) :].strip()
-    return rest or None
+    # T1-115 — KEIN Rueckfall mehr auf „alles nach dem Praefix".
+    #
+    # Bis hierher gab es einen, gedacht fuer Tests und eine Zeit vor der
+    # UUID-Vergabe. In der Produktion existiert dieser Fall nicht:
+    # `bridge_order_dispatch.id` ist eine uuid-Spalte, und jeder Auftrag, den
+    # Ordertune je gestellt hat, traegt eine.
+    #
+    # Der Rueckfall hatte aber eine Wirkung, die er nicht haben sollte: er
+    # loeste einen VON HAND getippten Vermerk wie `ot-INTC-7690-Day_Ripper` zu
+    # einer Kennung auf, die es nicht gibt. Zusammen mit `is_ours`, das nur das
+    # Praefix prueft, fiel die Fuellung damit durch beide Buchungswege.
+    #
+    # Die Zusicherung `test_die_beiden_haelften_der_orderref_regel_stimmen_
+    # ueberein` sagt genau das seit T1-94: „Laufen sie auseinander, faellt eine
+    # Ausfuehrung entweder durch beide Raster — dann fehlt sie ueberall — oder
+    # durch keines, und dann steht sie zweimal."
+    #
+    # Beide Haelften verlangen deshalb jetzt denselben Nachweis.
+    return None
 
 
 def is_ours(order_ref: object) -> bool:
-    """Traegt dieser Vermerk unsere Handschrift?
+    """Traegt dieser Vermerk unsere Handschrift — mit Nachweis?
 
-    Bewusst NUR das Praefix. Diese Frage entscheidet, ob eine Fuellung als
-    eigener Auftrag oder als fremde Ausfuehrung gebucht wird — sie muss auch
-    dann noch stimmen, wenn sich das Format dahinter aendert.
+    ## Warum das Praefix allein nicht genuegt
+
+    Bis T1-115 stand hier nur `startswith("ot-")`. Das war ein
+    **Besitzanspruch ohne Nachweis**: jeder kann ihn in TWS eintippen, und die
+    Bridge glaubte ihn.
+
+    Der Owner hat das am 2026-08-21 versehentlich vorgefuehrt. Er stellte zwei
+    MOC-Orders von Hand und trug `ot-INTC-7690-Day_Ripper` als Vermerk ein, um
+    die Zuordnung zu erleichtern. Wirkung:
+
+      * `is_ours` sagte „gehoert uns"  → die Fuellung wurde NICHT als fremde
+        Ausfuehrung gemeldet (`external_executions` ueberspringt eigene);
+      * eine aufloesbare Vorgangskennung gab es nicht → auch der eigene Weg
+        ueber `/orders/{id}/result` fand nichts.
+
+    Die Fuellung fiel durch BEIDE Wege und tauchte nirgends auf. Ohne den
+    Vermerk waere sie sauber als fremde Ausfuehrung im Buch gelandet — der
+    gutgemeinte Zusatz machte die Buchfuehrung schlechter.
+
+    ## Der Nachweis
+
+    Ein Auftrag gehoert uns, wenn hinter dem Praefix eine **UUID** steht. Das
+    ist keine Formalie: `bridge_order_dispatch.id` ist eine uuid-Spalte, und
+    jeder Auftrag, den Ordertune je gestellt hat, traegt eine. Wer den Vermerk
+    von Hand tippt, trifft sie nicht.
+
+    ## Die Richtung des Irrtums ist gewaehlt
+
+    Im Zweifel „nicht unserer". Ein fremder Auftrag, den wir faelschlich fuer
+    eigen halten, faellt aus beiden Buchungswegen — genau der Fall oben. Ein
+    eigener, den wir faelschlich fuer fremd halten, wird als externe
+    Ausfuehrung gebucht: sichtbar, mit Menge und Preis, nur ohne
+    Signalzuordnung. Ein sichtbarer Fehler ist besser als ein unsichtbarer.
     """
-    return bool(order_ref) and str(order_ref).startswith(ORDER_REF_PREFIX)
+    if not order_ref:
+        return False
+    text = str(order_ref).strip()
+    if not text.startswith(ORDER_REF_PREFIX):
+        return False
+    return dispatch_id_from_order_ref(text) is not None
 
 
 # ── T1-114: der Rueckbericht ────────────────────────────────────────────────
@@ -198,6 +247,8 @@ def wire_open_orders(trades: object) -> list[dict[str, object]]:
         order = getattr(trade, "order", None)
         if order is None:
             continue
+        # T1-115: dieselbe Regel wie ueberall. Ein von Hand getippter Vermerk
+        # ist kein eigener Auftrag und gehoert nicht in den Bericht.
         dispatch_id = dispatch_id_from_order_ref(getattr(order, "orderRef", None))
         if dispatch_id is None:
             continue

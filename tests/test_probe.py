@@ -81,7 +81,7 @@ def test_a_foreign_order_is_marked_as_foreign() -> None:
 
 def test_one_of_ours_is_marked_as_ours() -> None:
     auftrag = _fremder_auftrag()
-    auftrag.order.orderRef = "ot-8f1d2c3e"
+    auftrag.order.orderRef = "ot-5b394724-9b7c-4928-8fc3-16850bd06534"
     assert "[OURS" in probe.describe_trade(auftrag)
 
 

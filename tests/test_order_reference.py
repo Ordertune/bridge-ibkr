@@ -75,7 +75,7 @@ def test_hin_und_zurueck_fuer_beide_formen():
 
 def test_leerraum_um_den_vermerk_stoert_nicht():
     assert dispatch_id_from_order_ref(f"  ot-{UUID}  ") == UUID
-    assert dispatch_id_from_order_ref("  ot-abc123  ") == "abc123"
+    assert dispatch_id_from_order_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ") == "e99a18c4-28cb-48d5-8260-853678922e03"
 
 
 def test_fremde_auftraege_werden_uebergangen():
@@ -90,7 +90,7 @@ def test_praefix_allein_ist_keine_kennung():
 
 def test_ein_etikett_ohne_uuid_faellt_auf_die_alte_regel_zurueck():
     # Was nicht wie eine UUID endet, wird wie frueher als Ganzes gelesen.
-    assert dispatch_id_from_order_ref("ot-abc123") == "abc123"
+    assert dispatch_id_from_order_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03") == "e99a18c4-28cb-48d5-8260-853678922e03"
 
 
 def test_eine_uuid_mitten_im_etikett_wird_nicht_verwechselt():
@@ -109,7 +109,7 @@ def test_besitz_haengt_nur_am_praefix():
     # sich das Format dahinter aendert — sonst stuende der Bestand doppelt.
     assert is_ours(f"ot-{UUID}")
     assert is_ours(f"ot-ALAB-7808-Peak_Reload-{UUID}")
-    assert is_ours("ot-was-auch-immer")
+    assert is_ours("ot-a2b6fc51-c807-4075-8df7-5ee6f067c3e4")
     assert not is_ours("manual-123")
     assert not is_ours(None)
     assert not is_ours("")
@@ -223,3 +223,39 @@ def test_leere_und_kaputte_eingaben():
     assert wire_open_orders([]) == []
     assert wire_open_orders(None) == []
     assert wire_open_orders([object()]) == []
+
+
+# ── T1-115: der Besitzanspruch braucht einen Nachweis ───────────────────────
+
+
+def test_ein_von_hand_getippter_vermerk_gehoert_uns_NICHT():
+    """Der Fall vom 2026-08-21, den der Owner versehentlich vorgefuehrt hat.
+
+    Er trug `ot-INTC-7690-Day_Ripper` von Hand in TWS ein. Unter der alten
+    Regel galt das als „unserer" — die Fuellung wurde weder als fremde
+    Ausfuehrung gemeldet noch ueber den eigenen Weg gefunden. Sie fiel durch
+    beide Wege.
+    """
+    assert not is_ours("ot-INTC-7690-Day_Ripper")
+    assert not is_ours("ot-INTC-7835-Day_Ripper")
+    assert not is_ours("ot-abc123")
+    assert not is_ours("ot-")
+
+
+def test_echte_vermerke_gehoeren_weiterhin_uns():
+    assert is_ours(f"ot-{UUID}")
+    assert is_ours(f"ot-ALAB-7809-Peak_Reload-{UUID}")
+    assert is_ours(f"  ot-{UUID}  ")
+
+
+def test_fremde_bleiben_fremd():
+    for fremd in [None, "", "   ", "manual_INTC-7690", "IB-4711", "OT-GROSS"]:
+        assert not is_ours(fremd)
+
+
+def test_der_rueckbericht_folgt_derselben_regel():
+    """Was nicht uns gehoert, gehoert auch nicht in den Bericht."""
+    from ordertune_bridge_ibkr.order_reference import wire_open_orders
+
+    getippt = _Trade(_Order(orderRef="ot-INTC-7690-Day_Ripper", orderId=1))
+    assert wire_open_orders([getippt]) == []

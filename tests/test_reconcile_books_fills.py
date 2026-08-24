@@ -222,8 +222,8 @@ def _fill(
 
 
 def test_der_vermerk_wird_zum_dispatch() -> None:
-    assert dispatch_id_from_ref("ot-abc123") == "abc123"
-    assert dispatch_id_from_ref("  ot-abc123  ") == "abc123"
+    assert dispatch_id_from_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03") == "e99a18c4-28cb-48d5-8260-853678922e03"
+    assert dispatch_id_from_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ") == "e99a18c4-28cb-48d5-8260-853678922e03"
     assert dispatch_id_from_ref("abc123") is None, "fremde Ausfuehrung"
     assert dispatch_id_from_ref("") is None
     assert dispatch_id_from_ref(None) is None
@@ -238,11 +238,11 @@ def test_fremde_ausfuehrungen_bleiben_draussen() -> None:
 def test_teilausfuehrungen_werden_zusammengefasst() -> None:
     ergebnis = fills_by_dispatch(
         [
-            _fill("ot-d1", exec_id="a", shares=1.0, price=100.0, commission=0.5),
-            _fill("ot-d1", exec_id="b", shares=3.0, price=104.0, commission=0.7),
+            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=1.0, price=100.0, commission=0.5),
+            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="b", shares=3.0, price=104.0, commission=0.7),
         ]
     )
-    f = ergebnis["d1"]
+    f = ergebnis["9948c645-c094-4477-84f4-c7acdbeb2bb6"]
     assert f.qty == 4.0
     # Mengengewichtet: (1*100 + 3*104) / 4 = 103.0
     assert f.price == pytest.approx(103.0)
@@ -256,26 +256,26 @@ def test_dieselbe_ausfuehrung_zaehlt_einmal() -> None:
     Buchungsdetail wuerde ein zu grosser Bestand und ein zu grosser Ausstieg.
     """
     ergebnis = fills_by_dispatch(
-        [_fill("ot-d1", exec_id="a", shares=2.0), _fill("ot-d1", exec_id="a", shares=2.0)]
+        [_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0), _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0)]
     )
-    assert ergebnis["d1"].qty == 2.0
+    assert ergebnis["9948c645-c094-4477-84f4-c7acdbeb2bb6"].qty == 2.0
 
 
 def test_ohne_echten_gebuehrenbericht_wird_keine_gebuehr_gebucht() -> None:
     """ib_insync legt das Feld mit 0.0 an, bevor IBKR es fuellt."""
     ergebnis = fills_by_dispatch(
-        [_fill("ot-d1", commission=0.0, commission_exec_id="")]
+        [_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", commission=0.0, commission_exec_id="")]
     )
-    assert ergebnis["d1"].commission is None
+    assert ergebnis["9948c645-c094-4477-84f4-c7acdbeb2bb6"].commission is None
 
 
 def test_unbrauchbare_mengen_fallen_heraus() -> None:
     for menge in (0.0, -1.0, None, "abc"):
-        assert fills_by_dispatch([_fill("ot-d1", shares=menge)]) == {}
+        assert fills_by_dispatch([_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=menge)]) == {}
 
 
 def test_ohne_kurs_bleibt_die_menge_erhalten() -> None:
-    f = fills_by_dispatch([_fill("ot-d1", shares=2.0, price=0.0)])["d1"]
+    f = fills_by_dispatch([_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=2.0, price=0.0)])["9948c645-c094-4477-84f4-c7acdbeb2bb6"]
     assert f.qty == 2.0
     assert f.price is None
 
@@ -359,7 +359,7 @@ def test_ohne_ausfuehrung_bleibt_es_bei_der_ehrlichen_antwort() -> None:
 
 @pytest.mark.parametrize(
     "ref",
-    ["ot-abc", "ot-6eca593e-9792-451f-8601-0e2f8bfb92d7", "manuell", "", None, "ot-"],
+    ["ot-90015098-3cd2-4fb0-8696-3f7d28e17f72", "ot-6eca593e-9792-451f-8601-0e2f8bfb92d7", "manuell", "", None, "ot-"],
 )
 def test_die_beiden_haelften_der_orderref_regel_stimmen_ueberein(ref) -> None:
     """`is_ours` und `dispatch_id_from_ref` beantworten dieselbe Frage.
