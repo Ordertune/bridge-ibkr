@@ -79,9 +79,59 @@ def test_the_measured_case_is_reported() -> None:
     assert actions[0].error_message
 
 
-def test_a_live_order_is_left_alone() -> None:
-    """Der wichtigste Nein-Fall: was offen ist, wird nicht angefasst."""
-    assert _run(open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))}) == []
+def test_a_live_order_is_reported_as_live() -> None:
+    """T1-120 — was offen ist, wird als offen GEMELDET.
+
+    Hier stand bis T1-120 `== []`, unter dem Namen „der wichtigste Nein-Fall".
+    Die Entscheidung war falsch, und der Testname hat sie zementiert: eine
+    Zeile steht ueberhaupt nur dann in der Frageliste, wenn die Plattform
+    ihren Zustand als NICHT abgeschlossen fuehrt. Sie fragt, WEIL sie es nicht
+    weiss — und bekam auf die Frage „lebt der noch?" keine Antwort.
+
+    Gemessen am 2026-08-24: fuenf Auftraege lagen offen im Buch des
+    verbundenen Kontos, auf t1 standen sie auf `unknown`, und der Abgleich
+    schwieg bei jedem Durchgang erneut.
+    """
+    aktionen = _run(
+        open_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))
+        }
+    )
+    assert len(aktionen) == 1
+    assert aktionen[0].status == "working"
+    assert aktionen[0].fill_qty is None
+
+
+def test_a_pending_order_keeps_its_own_word() -> None:
+    """`PreSubmitted` ist nicht dasselbe wie `Submitted`.
+
+    IBKR unterscheidet „unterwegs" von „am Markt". Beides auf ein Wort zu
+    ziehen waere dieselbe Vergroeberung, die T1-91 fuer den Verfall
+    zurueckgenommen hat.
+    """
+    aktionen = _run(
+        open_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("PendingSubmit"))
+        }
+    )
+    assert aktionen[0].status == "submitting"
+
+
+def test_an_open_order_that_claims_a_final_state_says_nothing() -> None:
+    """Ein Widerspruch wird nicht aufgeloest, sondern ausgesessen.
+
+    Steht der Auftrag in der Liste der OFFENEN und meldet trotzdem einen
+    Endzustand, ist eine der beiden Angaben falsch — und es ist nicht
+    entscheidbar welche. Der naechste Durchgang fragt erneut.
+    """
+    assert (
+        _run(
+            open_by_ref={
+                "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Filled"))
+            }
+        )
+        == []
+    )
 
 
 def test_an_order_submitted_after_connecting_is_never_declared_missing() -> None:
@@ -179,17 +229,24 @@ def test_open_wins_over_completed() -> None:
 
     Der teure Fehler ist, einen lebenden Auftrag fuer beendet zu erklaeren.
     """
-    assert (
-        _run(
-            open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))},
-            completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))},
-        )
-        == []
+    aktionen = _run(
+        open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))},
+        completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))},
     )
+    # T1-120: die Regel ist dieselbe geblieben, ihre Antwort ist staerker
+    # geworden. Vorher schwieg der Abgleich und ueberliess der Plattform ihren
+    # alten Stand; jetzt widerspricht er der Stornierung ausdruecklich.
+    assert len(aktionen) == 1
+    assert aktionen[0].status == "working"
 
 
-def test_the_measured_batch_reports_exactly_one() -> None:
-    """Die Lage vom 2026-08-18: vier leben, einer ist weg."""
+def test_the_measured_batch_finds_the_missing_one() -> None:
+    """Die Lage vom 2026-08-18: vier leben, einer ist weg.
+
+    T1-98 hat hier „genau eine Meldung" gepruefte — die vier Lebenden waren
+    stumm. Seit T1-120 melden sie ihren Zustand, und der Kern des Falls bleibt
+    unveraendert: der fuenfte wird als ungeklaert gefunden, und nur er.
+    """
     lebend = {
         ref: FakeTrade(FakeStatus("Submitted"))
         for ref in ("ot-2d8fb88c-fc1e-4ab6-8dc7-0f522dc82fe4", "ot-2b923591-22a2-4225-89f3-10ca847829ad", "ot-1e9f1d12-d00f-4aea-8f10-588f8387e5a1", "ot-16b48de9-a2e5-4ef7-86ca-751d23107568")
@@ -204,8 +261,10 @@ def test_the_measured_batch_reports_exactly_one() -> None:
         ],
         open_by_ref=lebend,
     )
-    assert [a.dispatch_id for a in actions] == ["ot-fb54f3c5-992b-46d0-81bb-16e8e92d968d"]
-    assert actions[0].status == "unknown"
+    ungeklaert = [a for a in actions if a.status == "unknown"]
+    assert [a.dispatch_id for a in ungeklaert] == ["ot-fb54f3c5-992b-46d0-81bb-16e8e92d968d"]
+    # Die vier Lebenden werden als lebend gemeldet, nicht verschwiegen.
+    assert sorted(a.status for a in actions) == ["unknown"] + ["working"] * 4
 
 
 # ── T1-119 — der Auftrag aus einem anderen Depot ────────────────────────────
@@ -299,3 +358,52 @@ def test_die_voreinstellung_bleibt_das_verhalten_von_vorher() -> None:
     verhaelt sich wie vor T1-119."""
     actions = _run(unresolved=[_mit_konto("ot-default", LIVE)])
     assert len(actions) == 1
+
+
+# ── T1-120 — der Fall aus dem Owner-Protokoll vom 2026-08-24, 12:59 ─────────
+
+
+def test_der_gemeldete_fall_vom_2026_08_24() -> None:
+    """Fuenf Auftraege offen im Buch, auf t1 stehen sie auf `unknown`.
+
+    Aus dem Protokoll:
+
+        12:59:19  Re-mapped 5 open orders via their order reference.
+        12:59:22  Reconciled dispatch 6e68f237… -> unknown (not_known_at_broker)
+
+    Die Bridge sah alle fuenf — `orderStatus='Submitted'`,
+    `account='U23076419'` — und meldete darueber nichts. Der sechste, wirklich
+    verschollene, war die einzige Zeile, die ueberhaupt eine Meldung ausloeste.
+
+    Nach T1-120 melden alle sechs: fuenf leben, einer ist weg.
+    """
+    lebend = {
+        f"ot-live-{i}": FakeTrade(FakeStatus("Submitted")) for i in range(5)
+    }
+    aktionen = _run(
+        unresolved=[d(f"ot-live-{i}") for i in range(5)] + [d("ot-6e68f237")],
+        open_by_ref=lebend,
+    )
+    nach_id = {a.dispatch_id: a.status for a in aktionen}
+    assert nach_id["ot-6e68f237"] == "unknown"
+    for i in range(5):
+        assert nach_id[f"ot-live-{i}"] == "working", (
+            "ein Auftrag, den IBKR offen fuehrt, muss die Plattform aus dem "
+            "Zustand `unknown` holen — genau das unterblieb"
+        )
+
+
+def test_ein_fremdes_depot_wird_auch_dann_nicht_gemeldet_wenn_es_offen_scheint() -> None:
+    """Der T1-119-Riegel steht VOR Fall 1, und das muss so bleiben.
+
+    Eine Auftragsnummer ist je Konto vergeben. Ein zufaellig gleicher Vermerk
+    im verbundenen Depot duerfte dem fremden Auftrag sonst ein `working`
+    zuschreiben — dieselbe Behauptung wie ein `cancelled`, nur mit
+    freundlicherem Vorzeichen.
+    """
+    aktionen = _run(
+        unresolved=[_mit_konto("ot-fremd", LIVE)],
+        connected_account=PAPIER,
+        open_by_ref={"ot-fremd": FakeTrade(FakeStatus("Submitted"))},
+    )
+    assert aktionen == []

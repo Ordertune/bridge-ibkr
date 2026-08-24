@@ -136,14 +136,22 @@ def test_ohne_durchschnittskurs_wird_die_menge_trotzdem_gebucht() -> None:
 # ── Was unveraendert bleibt ──────────────────────────────────────────────────
 
 
-def test_ein_offener_auftrag_wird_weiterhin_nicht_angefasst() -> None:
+def test_ein_offener_auftrag_wird_als_offen_gemeldet() -> None:
+    """T1-120 — was T1-104 hier absichtlich NICHT tat, tut es jetzt.
+
+    Der Abschnitt hiess „Was unveraendert bleibt", und das war er auch: der
+    offene Auftrag blieb stumm. Sichtbar wurde der Schaden erst, als eine
+    Zeile aus einem anderen Grund auf `unknown` stand — dann heilte sie nie,
+    obwohl der Auftrag jeden Durchgang lang offen im Buch lag.
+    """
     aktionen = reconcile_open_dispatches(
         unresolved=[_dispatch()],
         open_by_ref={"disp-intc": _trade("Submitted")},
         completed_by_ref={},
         session_connected_at=VERBUNDEN,
     )
-    assert aktionen == []
+    assert len(aktionen) == 1
+    assert aktionen[0].status == "working"
 
 
 def test_eine_stornierung_bleibt_eine_stornierung() -> None:
@@ -330,8 +338,19 @@ def test_ohne_auftrag_aber_mit_ausfuehrung_wird_trotzdem_gebucht() -> None:
     assert a.commission_usd is None
 
 
-def test_ein_lebender_auftrag_wird_auch_mit_ausfuehrung_nicht_angefasst() -> None:
-    """Solange er offen ist, gehoert er dem Ereignispfad."""
+def test_ein_lebender_auftrag_meldet_seinen_zustand_ohne_fremde_menge() -> None:
+    """T1-120 — der Zustand wird gemeldet, die Menge kommt aus dem AUFTRAG.
+
+    Hier stand `== []` unter „solange er offen ist, gehoert er dem
+    Ereignispfad". Der Ereignispfad laeuft aber nur, wenn die Bridge im
+    Augenblick der Aenderung verbunden war — und der Abgleich existiert
+    ausschliesslich fuer den Fall, dass sie es nicht war.
+
+    Die Menge bleibt trotzdem `None`: IBKR fuehrt fuer diesen Auftrag
+    `filled=0`. Ein Ausfuehrungsbericht, der etwas anderes sagt, gehoert zu
+    einem anderen Vorgang — ihn hier zu buchen hiesse, dem Auftrag eine Menge
+    zuzuschreiben, die der Broker ihm nicht gibt.
+    """
     aktionen = reconcile_open_dispatches(
         unresolved=[_dispatch()],
         open_by_ref={"disp-intc": _trade("Submitted")},
@@ -339,7 +358,27 @@ def test_ein_lebender_auftrag_wird_auch_mit_ausfuehrung_nicht_angefasst() -> Non
         session_connected_at=VERBUNDEN,
         fills_by_ref={"disp-intc": DispatchFill(qty=1.0, price=95.0, commission=None)},
     )
-    assert aktionen == []
+    assert len(aktionen) == 1
+    assert aktionen[0].status == "working"
+    assert aktionen[0].fill_qty is None
+
+
+def test_ein_teilgefuellter_offener_auftrag_meldet_seine_menge() -> None:
+    """T1-120 — sonst ueberschriebe `working` ein `partial`.
+
+    Beide sind nicht-terminal, `should_report` laesst den Wechsel also durch —
+    und aus „zwei von fuenf sind da" wuerde „unterwegs". Die Menge steht im
+    Auftrag; sie wegzulassen hiesse, sie zu verlieren.
+    """
+    aktionen = reconcile_open_dispatches(
+        unresolved=[_dispatch()],
+        open_by_ref={"disp-intc": _trade("Submitted", filled=2.0)},
+        completed_by_ref={},
+        session_connected_at=VERBUNDEN,
+        fills_by_ref={},
+    )
+    assert aktionen[0].status == "partial"
+    assert aktionen[0].fill_qty == 2.0
 
 
 def test_ohne_ausfuehrung_bleibt_es_bei_der_ehrlichen_antwort() -> None:
