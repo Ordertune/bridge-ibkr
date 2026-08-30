@@ -28,6 +28,19 @@ def make_contract(symbol: str) -> Contract:
 DEFAULT_TIF = "DAY"
 
 
+def _text_or_none(roh: Any) -> str | None:
+    """Eine nicht-leere Zeichenkette, oder nichts.
+
+    T1-135. Ein leerer String ist keine Gueltigkeitsdauer — er wuerde die
+    `or`-Kette unterbrechen und den Rueckfall auf DAY erzwingen, ohne dass
+    irgendwo eine Absicht dahinterstuende.
+    """
+    if not isinstance(roh, str):
+        return None
+    wert = roh.strip().upper()
+    return wert or None
+
+
 def translate_intent(intent: dict[str, Any]) -> Order:
     """OrderIntent → ib_insync.Order (single-leg)."""
     side = intent["side"].upper()  # 'BUY' | 'SELL'
@@ -47,7 +60,21 @@ def translate_intent(intent: dict[str, Any]) -> Order:
     #
     # `or` und nicht bedingungsloses Setzen: ein Zweig, der bewusst eine
     # andere Dauer braucht, behaelt sie.
-    order.tif = order.tif or DEFAULT_TIF
+    #
+    # T1-135 — die Gueltigkeitsdauer der Signalquelle kommt VOR dem Rueckfall.
+    #
+    # Bis 0.19.0 stand hier nur `or DEFAULT_TIF`, und `signals.time_in_force`
+    # erreichte diese Datei nie: die Plattform las die Spalte ausschliesslich
+    # fuer den Korb-Export. Jede Order ging damit als `DAY` hinaus. Bei `DAY`
+    # faellt das nicht auf; bei `OPG` wird aus einem Eroeffnungsauftrag ein
+    # Tageslimit, das bis zum Schluss lebt — eine andere Order als die, fuer
+    # die das Modell entschieden hat.
+    #
+    # Die Plattform prueft den Wert bereits gegen ihre Erlaubnisliste (`DAY`,
+    # `OPG`, `GTD`; `GTC` ausdruecklich nicht). Hier wird deshalb nicht ein
+    # zweites Mal geprueft, sondern nur uebernommen, was ankommt — zwei
+    # Fassungen derselben Liste liefen beim naechsten Wert auseinander.
+    order.tif = _text_or_none(intent.get("timeInForce")) or order.tif or DEFAULT_TIF
 
     # T1-106 — die OCA-Verknuepfung, und zwar HIER statt beim Aufrufer.
     #
@@ -123,8 +150,18 @@ def _build_order(
         return MarketOrder(action, qty)
 
     if order_type == "day_limit":
-        lmt = float(intent["lmtPrice"])
-        return LimitOrder(action, qty, lmt)
+        # T1-135: ausdruecklich statt `float(None)`.
+        #
+        # Seit `LOO` auf diesen Zweig abbildet, kann ein Auftrag hier ohne
+        # Limitpreis ankommen, wenn die Signalquelle einmal keinen mitgibt
+        # (heute tut sie es bei allen 11 LOO-Zeilen). `float(None)` wirft einen
+        # TypeError ohne Bezug zum Auftrag; `main.py` protokolliert ihn dann als
+        # nackten Fehlschlag. Ein limitierter Auftrag ohne Limit darf nicht als
+        # Marktauftrag hinausgehen — das war der Fehler, den dieser Spec behebt.
+        roh = intent.get("lmtPrice")
+        if roh is None:
+            raise ValueError("day_limit ohne lmtPrice")
+        return LimitOrder(action, qty, float(roh))
 
     if order_type == "loc":
         o = Order()
