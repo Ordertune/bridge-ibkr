@@ -278,3 +278,60 @@ def test_das_sequenzielle_paar_wie_es_wirklich_aussieht():
     assert untertags.ocaType == schluss.ocaType == 3
     assert not untertags.goodAfterTime
     assert schluss.goodAfterTime == "20260820 15:59:00 US/Eastern"
+
+
+# ── T1-135: die Gueltigkeitsdauer erreicht den Draht ─────────────────────────
+
+
+def test_tif_from_intent_wins_over_default():
+    """OPG darf nicht mehr still zu DAY werden — das war der ganze Befund."""
+    intent = {
+        "symbol": "PANW", "side": "buy", "orderType": "day_limit",
+        "qty": 2, "lmtPrice": 400.0, "timeInForce": "OPG",
+    }
+    o = translate_intent(intent)
+    assert o.orderType == "LMT"
+    assert o.tif == "OPG"
+
+
+def test_tif_absent_falls_back_to_day():
+    """Kein Feld = Verhalten vor T1-135. Eine aeltere Plattform bricht nichts."""
+    intent = {"symbol": "AAPL", "side": "buy", "orderType": "market", "qty": 1, "lmtPrice": None}
+    assert translate_intent(intent).tif == "DAY"
+
+
+def test_tif_empty_string_falls_back_to_day():
+    intent = {
+        "symbol": "AAPL", "side": "buy", "orderType": "market",
+        "qty": 1, "lmtPrice": None, "timeInForce": "   ",
+    }
+    assert translate_intent(intent).tif == "DAY"
+
+
+def test_tif_is_normalised_to_upper_case():
+    intent = {
+        "symbol": "AAPL", "side": "buy", "orderType": "market",
+        "qty": 1, "lmtPrice": None, "timeInForce": "opg",
+    }
+    assert translate_intent(intent).tif == "OPG"
+
+
+def test_good_till_date_still_outranks_the_intent_tif():
+    """AC-6: eine Frist ohne GTD wird von IBKR still ignoriert."""
+    intent = {
+        "symbol": "AMD", "side": "buy", "orderType": "day_limit",
+        "qty": 1, "lmtPrice": 438.6, "timeInForce": "DAY",
+        "goodTillDate": "20260825 15:00:00 US/Eastern",
+    }
+    o = translate_intent(intent)
+    assert o.tif == "GTD"
+    assert o.goodTillDate == "20260825 15:00:00 US/Eastern"
+
+
+def test_day_limit_without_limit_price_is_refused():
+    """Ein limitierter Auftrag ohne Limit darf nicht als Markt hinausgehen."""
+    import pytest
+
+    intent = {"symbol": "AAPL", "side": "buy", "orderType": "day_limit", "qty": 1, "lmtPrice": None}
+    with pytest.raises(ValueError, match="lmtPrice"):
+        translate_intent(intent)
