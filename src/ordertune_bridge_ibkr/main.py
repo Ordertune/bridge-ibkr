@@ -64,7 +64,11 @@ from .order_reconcile import (
     UnresolvedDispatch,
     reconcile_open_dispatches,
 )
-from .order_translator import make_contract, translate_intent
+from .order_translator import (
+    apply_bracket_transmit_flags,
+    make_contract,
+    translate_intent,
+)
 from .order_vocabulary import IBKR_TO_WIRE_STATUS, LIVE_WIRE_STATES
 from .position_sizing import (
     SizingConfig,
@@ -419,6 +423,10 @@ def _handle_pending(
         # Scheitert nur die Bestaetigung, liegt der Auftrag da und die Bridge
         # sagt darueber gar nichts — der naechste Abruf holt die Bestaetigung
         # nach, und der Vermerk oben verhindert das zweite Absenden.
+        # T1-136 — das angehaengte Ausstiegsbein, sofern die Plattform eines
+        # mitgibt. `None` heisst: gewoehnlicher Einzelauftrag wie bisher.
+        kind = _attached_exit(intent)
+
         try:
             contract = make_contract(intent["symbol"])
             ib_order = translate_intent(intent)
@@ -427,30 +435,105 @@ def _handle_pending(
             ib_order.orderRef = build_order_ref(
                 order.dispatch_id, intent.get("orderRefLabel")
             )
+
+            kind_order = None
+            if kind is not None:
+                # Das Symbol steht nur am Elternteil — beide Beine handeln
+                # denselben Wert, und es zweimal ueber die Leitung zu schicken
+                # hiesse, zwei Quellen fuer dieselbe Aussage zu haben.
+                kind_order = translate_intent({**kind, "symbol": intent["symbol"]})
+                kind_order.orderRef = build_order_ref(
+                    kind["dispatchId"], kind.get("orderRefLabel")
+                )
+                # IBKRs Bracket-Muster: der Parent geht ungesendet hinaus, das
+                # Kind zuletzt und mit `transmit=True`. Erst dann uebertraegt
+                # TWS beide zusammen.
+                #
+                # Die Reihenfolge ist kein Stilfrage. Ginge der Parent sofort
+                # scharf hinaus und fuellte, bevor das Kind bei IBKR ist, lehnte
+                # IBKR das Kind ab — der Auftrag, an den es sich haengen soll,
+                # ist dann schon abgeschlossen. Bei einem Limit, das im Geld
+                # liegt, sind das Millisekunden.
+                apply_bracket_transmit_flags([ib_order, kind_order])
+
             # Der Vermerk steht VOR dem Absenden. Ein Vermerk ohne Auftrag
             # kostet eine ausgelassene Order — die der Nutzer erneut freigeben
             # kann. Ein Auftrag ohne Vermerk kostet einen zweiten Echtauftrag.
             submitted.vermerken(order.dispatch_id)
+            if kind is not None:
+                submitted.vermerken(kind["dispatchId"])
             trade = ibkr.place_order(contract, ib_order)
+
+            if kind_order is not None and kind is not None:
+                kind_order.parentId = int(getattr(trade.order, "orderId", 0))
+                try:
+                    kind_trade = ibkr.place_order(contract, kind_order)
+                except Exception as kind_exc:
+                    # Der Parent liegt bei TWS und ist NICHT uebertragen — ohne
+                    # das Kind wird er es auch nie. Ein Auftrag, den die
+                    # Plattform fuer lebend haelt und der nie an den Markt geht,
+                    # ist der schlimmste der moeglichen Ausgaenge: er ist
+                    # unsichtbar. Also beide zuruecknehmen und beide melden.
+                    log.error(
+                        "attached exit failed for dispatch %s (parent %s): %s — "
+                        "cancelling the staged parent",
+                        kind["dispatchId"],
+                        order.dispatch_id,
+                        kind_exc,
+                    )
+                    try:
+                        ibkr.cancel_order(trade.order)
+                    except Exception as storno_exc:
+                        log.error(
+                            "could not cancel the staged parent %s: %s",
+                            order.dispatch_id,
+                            storno_exc,
+                        )
+                    submitted.vergessen(order.dispatch_id)
+                    submitted.vergessen(kind["dispatchId"])
+                    _report_rejected(
+                        api,
+                        order.dispatch_id,
+                        f"attached_exit_failed: {kind_exc}",
+                    )
+                    # Das Kind MUSS als abgeschlossen gemeldet werden. Bleibt
+                    # seine Zeile auf `submitting`, liest `describeLotExit` sie
+                    # als `in_flight` und der Roundtrip fasst das Lot nie wieder
+                    # an — die Position haette dauerhaft keinen Ausstieg. Genau
+                    # der Schaden, gegen den dieses Spec gebaut ist.
+                    _report_rejected(
+                        api,
+                        kind["dispatchId"],
+                        f"attached_exit_failed: {kind_exc}",
+                    )
+                    continue
+
+                kind_ib_order_id = int(getattr(kind_trade.order, "orderId", 0))
+                register_trade(dispatch_id_map, kind["dispatchId"], kind_trade)
+                _acknowledge(api, kind["dispatchId"], kind_ib_order_id)
+                log.info(
+                    "Attached exit for dispatch %s: %s %s x%s — ib_order_id=%s, "
+                    "parentId=%s",
+                    kind["dispatchId"],
+                    intent["symbol"],
+                    kind["side"],
+                    kind["qty"],
+                    kind_ib_order_id,
+                    kind_order.parentId,
+                )
         except Exception as exc:
             # Nichts ist hinausgegangen: der Vermerk faellt wieder weg, damit
             # ein spaeterer Versuch moeglich bleibt.
             submitted.vergessen(order.dispatch_id)
             log.error("submit failed for dispatch %s: %s", order.dispatch_id, exc)
-            try:
-                api.result_order(
-                    order.dispatch_id,
-                    status="rejected",
-                    reason_code="rejected_by_broker",
-                    error_message=f"submit_error: {exc}",
-                )
-            except Exception as melde_fehler:
-                log.error(
-                    "Could not report the failed submit for dispatch %s: %s. "
-                    "Ordertune will keep this row open until the reconcile "
-                    "round resolves it.",
-                    order.dispatch_id,
-                    melde_fehler,
+            _report_rejected(api, order.dispatch_id, f"submit_error: {exc}")
+            # T1-136: das Kind faellt mit. Es ist nie hinausgegangen, und seine
+            # Zeile darf nicht auf `submitting` stehen bleiben — sonst haelt sie
+            # den Roundtrip fuer dieses Lot dauerhaft zurueck.
+            if kind is not None:
+                submitted.vergessen(kind["dispatchId"])
+                _report_rejected(
+                    api, kind["dispatchId"], f"parent_submit_error: {exc}"
                 )
             continue
 
@@ -483,6 +566,51 @@ _CANCEL_SENT: set[str] = set()
 # Dispatches, zu denen kein Auftrag auffindbar war. Nur damit die Warnung
 # einmal erscheint statt im Fuenf-Sekunden-Takt.
 _CANCEL_UNRESOLVED: set[str] = set()
+
+
+def _attached_exit(intent: dict[str, Any]) -> dict[str, Any] | None:
+    """T1-136 — das angehaengte Ausstiegsbein aus dem Intent, oder nichts.
+
+    Eng geprueft statt wahrheitswertig: `order_intent` ist ungetyptes `jsonb`,
+    und ein halb gefuelltes Feld waere hier schlimmer als ein fehlendes. Ohne
+    `dispatchId` liesse sich das Bein weder bestaetigen noch melden — es ginge
+    an den Markt und niemand koennte es zuordnen.
+    """
+    roh = intent.get("attachedExit")
+    if not isinstance(roh, dict):
+        return None
+    if not isinstance(roh.get("dispatchId"), str) or not roh["dispatchId"]:
+        return None
+    if not isinstance(roh.get("orderType"), str) or not roh.get("side"):
+        return None
+    return roh
+
+
+def _report_rejected(
+    api: OrdertuneApiClient, dispatch_id: str, error_message: str
+) -> None:
+    """Meldet einen Auftrag als abgelehnt und ueberlebt das Scheitern dabei.
+
+    Herausgezogen fuer T1-136: der Fall gibt es jetzt an drei Stellen (Parent
+    gescheitert, Kind gescheitert, Kind mit dem Parent gefallen), und drei
+    Abschriften desselben try/except waeren die Stelle, an der sie
+    auseinanderlaufen.
+    """
+    try:
+        api.result_order(
+            dispatch_id,
+            status="rejected",
+            reason_code="rejected_by_broker",
+            error_message=error_message,
+        )
+    except Exception as melde_fehler:
+        log.error(
+            "Could not report the failed submit for dispatch %s: %s. "
+            "Ordertune will keep this row open until the reconcile "
+            "round resolves it.",
+            dispatch_id,
+            melde_fehler,
+        )
 
 
 def _acknowledge(
