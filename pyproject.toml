@@ -1,6 +1,6 @@
 [project]
 name = "ordertune-bridge-ibkr"
-version = "0.19.0"
+version = "0.20.0"
 description = "Ordertune Bridge — Windows-Native Client für IBKR TWS/Gateway. Holt confirmed Signale aus t1.ordertune.com, führt Orders auf privatem IBKR-Depot aus, meldet Depot-State und Order-Results zurück."
 readme = "README.md"
 license = { file = "LICENSE" }
