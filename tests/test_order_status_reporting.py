@@ -271,6 +271,97 @@ def test_reason_code_without_a_trade_keeps_the_old_behaviour() -> None:
     assert m._derive_reason_code("cancelled", 0.0, "LMT") == "limit_not_reached"
 
 
+# ── T1-137 — eine Ablehnung ist keine Stornierung ───────────────────────────
+
+
+def _rejected_trade(text: str = "Order abgewiesen - Grund: 2335.24 USD") -> SimpleNamespace:
+    """Der Auftrag vom 2026-08-31: abgelehnt, von ib_insync als storniert."""
+    return SimpleNamespace(
+        order=SimpleNamespace(orderId=3, orderType="LMT"),
+        orderStatus=SimpleNamespace(status="Cancelled", filled=0.0, avgFillPrice=0.0),
+        log=[
+            SimpleNamespace(status="PreSubmitted", errorCode=0, message=""),
+            SimpleNamespace(status="Cancelled", errorCode=201, message=text),
+        ],
+        fills=[],
+    )
+
+
+def test_a_rejected_limit_is_not_reported_as_limit_not_reached() -> None:
+    """Beide alten Zweige waren falsch, und zwar unterschiedlich falsch.
+
+    Der Auftrag ist eine Limit-Order und war laut Protokoll am Markt
+    (`PreSubmitted`) — die alte Heuristik lieferte deshalb
+    `limit_not_reached`. Das Limit hatte aber nie eine Chance: IBKR hat den
+    Auftrag wegen fehlender Deckung gar nicht erst angenommen.
+    """
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", _rejected_trade()) == (
+        "rejected_by_broker"
+    )
+
+
+def test_a_rejection_outranks_a_phantom_cancel() -> None:
+    trade = _rejected_trade()
+    assert m.rejection_outranks_cancel(trade, "cancelled") == "rejected"
+
+
+def test_a_filled_order_is_never_reinterpreted_as_a_rejection() -> None:
+    """Eine Ausfuehrung ist am Konto passiert und bleibt es.
+
+    Kein Protokolleintrag darf sie nachtraeglich zu einer Ablehnung machen.
+    """
+    trade = _rejected_trade()
+    trade.orderStatus.filled = 10.0
+    assert m.rejection_outranks_cancel(trade, "cancelled") == "cancelled"
+
+
+def test_a_genuine_cancel_stays_a_cancel() -> None:
+    """Der Riegel greift nur bei einer belegten Ablehnung."""
+    trade = make_trade("Cancelled", error_code=202, history=["Submitted"])
+    assert m.rejection_outranks_cancel(trade, "cancelled") == "cancelled"
+
+
+def test_the_rejection_reaches_the_platform_with_its_words() -> None:
+    """Der ganze Weg: was IBKR gesagt hat, steht in der Meldung.
+
+    Am 2026-08-31 war `error_message` leer, und damit fehlte die einzige
+    handlungsrelevante Auskunft — dass der Saldo nicht reichte.
+    """
+    api = FakeApi()
+    m._report_status(api, "disp-1", _rejected_trade(), "cancelled")
+
+    assert api.statuses == ["rejected"]
+    meldung = api.calls[0]
+    assert meldung["reason_code"] == "rejected_by_broker"
+    assert "2335.24" in (meldung["error_message"] or "")
+    # Eine Ablehnung ist ein belegtes Ende — nichts ist hinausgegangen.
+    assert meldung["broker_confirmed_end"] is True
+
+
+def test_a_rejection_may_correct_an_already_reported_cancel() -> None:
+    """Ohne diesen Rang kaeme die Reparatur nie an.
+
+    `cancelled` und `rejected` standen beide auf Rang 1, und `should_report`
+    verwirft alles, was nicht ECHT hoeher steht. Am 2026-08-31 hatte der
+    Abgleichslauf `cancelled` bereits gemeldet — eine spaetere, richtige
+    Meldung waere an dieser Stelle verworfen worden.
+    """
+    assert m.should_report("disp-1", "cancelled") is True
+    assert m.should_report("disp-1", "rejected") is True
+
+
+def test_a_cancel_may_not_overwrite_a_reported_rejection() -> None:
+    """Die Gegenrichtung bleibt gesperrt — sonst ginge Information verloren."""
+    assert m.should_report("disp-1", "rejected") is True
+    assert m.should_report("disp-1", "cancelled") is False
+
+
+def test_a_fill_still_outranks_a_rejection() -> None:
+    """Die Rangfolge nach oben bleibt unangetastet."""
+    assert m.should_report("disp-1", "rejected") is True
+    assert m.should_report("disp-1", "filled") is True
+
+
 # ── Der Riegel im Abholpfad ──────────────────────────────────────────────────
 
 

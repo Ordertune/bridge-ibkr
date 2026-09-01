@@ -167,14 +167,28 @@ def test_a_failed_open_query_stops_everything() -> None:
 
 
 def test_a_cancelled_order_is_reported_as_cancelled_with_its_reason() -> None:
+    """T1-137 — der Wortlaut reist mit, die Handlung wird nicht behauptet.
+
+    Bis T1-137 stand hier `cancelled_by_user`, fest verdrahtet. Code 202 ist
+    IBKRs regulaere Stornobestaetigung und sagt „storniert" — er sagt NICHT,
+    wer storniert hat. T1-96 hat genau das gemessen: ein Verfall zum
+    Boersenschluss und ein Storno in TWS tragen beide die 202, beide mit
+    leerer Begruendung, und sind an dieser Stelle ununterscheidbar.
+
+    Der Abgleichslauf hat damit keinen Beleg fuer eine Nutzerhandlung — also
+    behauptet er auch keine. `None` heisst „storniert, Grund unbekannt"; die
+    Plattform faellt dafuer auf den Wortlaut des Zustands zurueck.
+    """
     trade = FakeTrade(
         FakeStatus("Cancelled"),
         log=[FakeLogEntry(errorCode=202, message="Order Canceled")],
     )
     actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": trade})
     assert actions[0].status == "cancelled"
-    assert actions[0].reason_code == "cancelled_by_user"
+    assert actions[0].reason_code is None
     assert "202" in (actions[0].error_message or "")
+    # Kein belegtes Ende: `cancelled` allein oeffnet den Riegel nicht.
+    assert actions[0].broker_confirmed_end is None
 
 
 def test_a_rejected_order_carries_the_brokers_words() -> None:
@@ -202,6 +216,60 @@ def test_no_reason_is_invented() -> None:
     actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))})
     assert actions[0].status == "cancelled"
     assert actions[0].error_message is None
+
+
+# ── T1-137 — eine Ablehnung ist keine Stornierung ───────────────────────────
+
+
+def test_a_rejection_reported_as_cancelled_is_not_a_user_cancel() -> None:
+    """Der Befund vom 2026-08-31, auf dem Weg des Abgleichslaufs.
+
+    IBKR wies vier Auftraege wegen fehlender Deckung ab (Error 201).
+    ib_insync setzt daraufhin `orderStatus.status = 'Cancelled'`, ohne dass je
+    ein `cancelOrder` ueber die Leitung geht — der Zustand sieht also aus wie
+    ein Storno. Dieser Weg machte daraus `cancelled_by_user` und behauptete
+    damit eine Handlung des Nutzers, die es nie gab.
+    """
+    trade = FakeTrade(
+        FakeStatus("Cancelled"),
+        log=[
+            FakeLogEntry(errorCode=0, message="Submitted"),
+            FakeLogEntry(
+                errorCode=201,
+                message=(
+                    "Order abgewiesen - Grund: Verfuegbare Mittel in "
+                    "Basiswaehrung: 2335.24 USD Barmittel fuer diese und "
+                    "weitere offene Orders benoetigt: 2554.04 USD"
+                ),
+            ),
+        ],
+    )
+    actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": trade})
+
+    assert actions[0].status == "rejected"
+    assert actions[0].reason_code == "rejected_by_broker"
+    # Die einzige handlungsrelevante Auskunft. Sie fehlte am 2026-08-31 ganz.
+    assert "2335.24" in (actions[0].error_message or "")
+    assert "2554.04" in (actions[0].error_message or "")
+    # Eine Ablehnung ist ein belegtes Ende: nichts ist hinausgegangen.
+    assert actions[0].broker_confirmed_end is True
+
+
+def test_without_a_log_the_reconcile_path_claims_nothing() -> None:
+    """Die Grenze dieses Weges, ausdruecklich festgehalten.
+
+    Ein Auftrag aus `reqCompletedOrders` traegt kein Protokoll — ib_insync baut
+    es nur fuer Auftraege, die diese Sitzung selbst platziert hat. Dieser Weg
+    kann eine Ablehnung dann gar nicht sehen. Genau dort ist Schweigen die
+    richtige Antwort: keine Ablehnung behaupten, aber eben auch keinen
+    Nutzer-Storno.
+    """
+    trade = FakeTrade(FakeStatus("Cancelled"), log=[])
+    actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": trade})
+
+    assert actions[0].status == "cancelled"
+    assert actions[0].reason_code is None
+    assert actions[0].broker_confirmed_end is None
 
 
 def test_a_completed_order_that_still_looks_alive_is_not_interpreted() -> None:

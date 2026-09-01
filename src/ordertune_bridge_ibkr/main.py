@@ -69,7 +69,17 @@ from .order_translator import (
     make_contract,
     translate_intent,
 )
-from .order_vocabulary import IBKR_TO_WIRE_STATUS, LIVE_WIRE_STATES
+from .order_vocabulary import (
+    GENUINE_CANCEL_CODES,
+    IBKR_TO_WIRE_STATUS,
+    KNOWN_WARNING_CODES,
+    LIVE_WIRE_STATES,
+    REJECTION_CODES,
+    WARNING_CODE_MAX,
+    WARNING_CODE_MIN,
+    is_warning_code,
+    rejection_reason_of,
+)
 from .position_sizing import (
     SizingConfig,
     recompute_qty,
@@ -227,13 +237,32 @@ _ACK_LOCK = threading.Lock()
 #
 # Umgekehrt gilt weiter: eine spaetere Ausfuehrung darf ein `unknown`
 # ueberschreiben. Sie ist am Konto passiert.
+# ── T1-137: `rejected` steht UEBER `cancelled`, nicht daneben ────────────────
+#
+# Beide standen auf Rang 1, und die Regel darunter verwirft alles, was nicht
+# ECHT hoeher steht (`<=`). Eine Korrektur von `cancelled` auf `rejected` kam
+# damit nie an — sie war dieselbe Stufe und galt als „keine neue Aussage".
+#
+# Am 2026-08-31 war genau das der zweite Riegel vor der richtigen Auskunft: der
+# Abgleichslauf hatte `cancelled` bereits gemeldet, und selbst ein Weg, der die
+# Ablehnung danach korrekt erkannt haette, waere hier verworfen worden.
+#
+# Die Richtung ist asymmetrisch und soll es sein. `rejected` ist die genauere
+# Aussage ueber dasselbe Ereignis: beide sagen „nicht ausgefuehrt", aber nur
+# `rejected` sagt, dass der Broker abgelehnt hat. Umgekehrt bleibt es gesperrt
+# — ein `cancelled` darf eine belegte Ablehnung nicht ueberschreiben, das waere
+# Verlust von Information. Vor T1-137 war das ebenfalls gesperrt (1 <= 1), die
+# Aenderung nimmt also nichts zurueck.
+#
+# Die Abstaende zu `partial` und `filled` bleiben erhalten; sie sind nur
+# hochgerueckt, damit `rejected` dazwischenpasst.
 _TERMINAL_RANK = {
     "unknown": 0,
     "expired": 1,
     "cancelled": 1,
-    "rejected": 1,
-    "partial": 2,
-    "filled": 3,
+    "rejected": 2,
+    "partial": 3,
+    "filled": 4,
 }
 
 
@@ -915,6 +944,10 @@ def _handle_order_reconcile(
                 ),
                 reason_code=action.reason_code,
                 error_message=action.error_message,
+                # T1-137: der Nachweis reist auch auf diesem Weg mit. Ohne ihn
+                # belegten Ereignispfad und Abgleichslauf dasselbe Ende
+                # verschieden.
+                broker_confirmed_end=action.broker_confirmed_end,
             )
             if action.fill_qty:
                 log.info(
@@ -927,8 +960,12 @@ def _handle_order_reconcile(
                     action.fill_price,
                 )
             else:
+                # T1-137: „reconcile" benennt den Weg. Bei der Diagnose des
+                # Befundes vom 2026-08-31 liess sich aus den Protokollen nicht
+                # ablesen, WELCHER der beiden Wege gemeldet hatte — der Grund
+                # war nur aus dem Abstand von 54 Sekunden zu erschliessen.
                 log.info(
-                    "Reconciled dispatch %s -> %s (%s)",
+                    "Reconciled dispatch %s -> %s (%s) [path=reconcile]",
                     action.dispatch_id,
                     action.status,
                     action.reason_code,
@@ -1094,7 +1131,11 @@ _LIVE_STATES = LIVE_WIRE_STATES
 #   202   Order cancelled — die regulaere Stornobestaetigung
 #   10148 Auftrag konnte nicht storniert werden, weil bereits storniert
 #   0     kein Fehler, also eine Zustandsmeldung von IBKR selbst
-_GENUINE_CANCEL_CODES = {0, 202, 10148}
+#
+# T1-137: Liste und Begruendung stehen jetzt in `order_vocabulary`, weil der
+# Abgleichslauf sie ebenfalls braucht. Hier nur noch der Name, unter dem der
+# Rest dieses Moduls sie kennt.
+_GENUINE_CANCEL_CODES = GENUINE_CANCEL_CODES
 
 # ── T1-102 A: eine Ablehnung ist keine Warnung ───────────────────────────────
 #
@@ -1114,13 +1155,10 @@ _GENUINE_CANCEL_CODES = {0, 202, 10148}
 # ab, und CRWD stand auf t1 als "AT BROKER" ueber einem Auftrag, den IBKR nie
 # angenommen hat.
 #
-# Bewusst eine ENGE, belegte Liste und keine Heuristik ueber Zahlenbereiche:
-# was hier falsch geraten wird, kostet entweder einen Echtauftrag oder ein
-# verlorenes Signal. Neue Codes kommen dazu, wenn sie beobachtet wurden — nicht
-# vorher.
-#
-#   201  Order rejected — IBKR weist den Auftrag ab, mit Begruendung im Text
-_REJECTION_CODES = {201}
+# T1-137: auch diese Liste steht jetzt in `order_vocabulary` — am 2026-08-31
+# hat derselbe Code 201 vier Auftraege getroffen, und der zweite Meldeweg
+# konnte ihn nicht sehen.
+_REJECTION_CODES = REJECTION_CODES
 
 # ── T1-103 G: die Liste war der Fehler, nicht ihre Laenge ────────────────────
 #
@@ -1148,79 +1186,18 @@ _REJECTION_CODES = {201}
 # faellt auf `rejected` statt auf `cancelled`, und `rejected` ist der Zustand,
 # der NICHTS beim Broker behauptet — er kann keinen zweiten Echtauftrag
 # ausloesen, er gibt nur die Wiederfreigabe frei.
-_WARNING_CODE_MIN = 2100
-_WARNING_CODE_MAX = 2200
-
-# Warnungen ausserhalb des 2100er-Blocks, die uns nachweislich begegnet sind.
-# 10349 ist der Ausloeser von T1-88b: „Gueltigkeitsdauer auf DAY gesetzt" —
-# eine Anpassung, keine Ablehnung, und ib_insync macht daraus trotzdem ein
-# erfundenes `Cancelled`. Die Liste ist bewusst kurz und waechst nur mit
-# gemessenen Faellen.
-_KNOWN_WARNING_CODES = {10349}
+# T1-137: die Schwellen und die Liste stehen in `order_vocabulary`; hier nur
+# die Namen, unter denen dieses Modul sie kennt.
+_WARNING_CODE_MIN = WARNING_CODE_MIN
+_WARNING_CODE_MAX = WARNING_CODE_MAX
+_KNOWN_WARNING_CODES = KNOWN_WARNING_CODES
+_is_warning_code = is_warning_code
 
 
-def _is_warning_code(code: int) -> bool:
-    """Ist das eine Warnung von IBKR und damit kein Ende des Auftrags?"""
-    if code in _KNOWN_WARNING_CODES:
-        return True
-    return _WARNING_CODE_MIN <= code < _WARNING_CODE_MAX
-
-
-def rejection_reason(trade: Any) -> str | None:
-    """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
-
-    Zwei Wege zur selben Antwort:
-
-    1. Ein Code aus `_REJECTION_CODES` irgendwo im Protokoll. Das ist der
-       belegte Fall und bleibt unveraendert.
-    2. Der allgemeine Fall (T1-103 G): der LETZTE Protokolleintrag traegt einen
-       Fehlercode, der weder eine Stornobestaetigung noch eine Warnung ist.
-       Der letzte Eintrag ist der, der den aktuellen Zustand ausgeloest hat —
-       dieselbe Stelle, an der `cancel_is_genuine` seit T1-88b nachsieht.
-
-    Der zweite Weg wird nur beschritten, wenn nichts gefuellt wurde. Eine
-    Ausfuehrung ist am Konto passiert; was danach im Protokoll steht, kann sie
-    nicht mehr zu einer Ablehnung machen.
-
-    `None` heisst „keine Ablehnung gefunden" — und dann bleibt es bei der
-    Vorsicht aus T1-88b.
-    """
-    entries = list(getattr(trade, "log", None) or [])
-
-    for entry in reversed(entries):
-        if getattr(entry, "errorCode", 0) in _REJECTION_CODES:
-            message = (getattr(entry, "message", "") or "").strip()
-            return message or "Rejected by IBKR."
-
-    if not entries:
-        return None
-
-    # Der allgemeine Weg deutet einen als storniert gemeldeten Auftrag um. Er
-    # gilt deshalb NUR dort, wo genau das vorliegt: der Auftrag steht jetzt auf
-    # `Cancelled`. Lebt er noch — und das ist der Verlauf des Vorfalls vom
-    # 2026-08-13, wo eine Sekunde spaeter `Submitted` kam —, ist hier nichts zu
-    # entscheiden. Ohne Zustandsangabe wird ebenfalls nichts behauptet.
-    status = getattr(getattr(trade, "orderStatus", None), "status", "")
-    if _STATUS_MAP.get(str(status)) != "cancelled":
-        return None
-
-    filled = float(getattr(getattr(trade, "orderStatus", None), "filled", 0) or 0)
-    if filled != 0:
-        return None
-
-    letzter = entries[-1]
-    code = getattr(letzter, "errorCode", None)
-    if code is None:
-        return None
-    # Code 0 steckt bereits in `_GENUINE_CANCEL_CODES` — ein Eintrag ohne
-    # Fehlercode ist ein Zustandswechsel und sagt nichts ueber eine Ablehnung.
-    if code in _GENUINE_CANCEL_CODES:
-        return None
-    if _is_warning_code(code):
-        return None
-
-    message = (getattr(letzter, "message", "") or "").strip()
-    return message or "Rejected by IBKR."
+# T1-137: der Rumpf steht in `order_vocabulary.rejection_reason_of`, weil der
+# Abgleichslauf dieselbe Frage stellen muss. Der Name bleibt hier, weil beide
+# Aufrufstellen dieses Moduls und die Zusicherungen ihn kennen.
+rejection_reason = rejection_reason_of
 
 # Wie lange eine verdaechtige Stornierung nachbeobachtet wird, bevor sie als
 # echt gilt. Im Vorfall lag zwischen erfundenem `Cancelled` und echtem
@@ -1251,10 +1228,31 @@ def _derive_reason_code(
     Boersenoeffnung storniert wurde — ein Limit, das nie eine Chance hatte,
     erreicht zu werden. Der Grund gilt jetzt nur noch, wenn der Auftrag
     ueberhaupt einmal am Markt war.
+
+    ## T1-137 — das Protokoll schlaegt die Heuristik
+
+    Am 2026-08-31 hat IBKR vier Auftraege wegen fehlender Deckung abgewiesen
+    (Error 201). Beide Zweige darunter waren fuer sie falsch, und zwar
+    unterschiedlich falsch: `cancelled_by_user` behauptet eine Handlung des
+    Nutzers, die es nie gab, und `limit_not_reached` behauptet ein Limit, das
+    nie eine Chance hatte — die Auftraege waren nie am Markt.
+
+    ib_insync setzt bei jedem Fehlercode ausserhalb seiner Warnliste
+    `orderStatus.status = 'Cancelled'` (wrapper.py:1122-1134), ohne dass je ein
+    `cancelOrder` ueber die Leitung geht. `mapped` ist danach `cancelled`, und
+    aus `mapped` allein laesst sich eine Ablehnung nicht mehr erkennen.
+
+    Der Protokolleintrag traegt den Code, der den Zustand ausgeloest hat — die
+    Frage ist also beantwortbar, sie wurde nur nicht gestellt. Sie steht
+    deshalb VOR beiden Heuristiken: was IBKR gesagt hat, schlaegt, was sich aus
+    Zustand und Ordertyp erraten laesst.
     """
     if mapped == "rejected":
         return "rejected_by_broker"
     if mapped in ("cancelled", "expired") and filled == 0:
+        # T1-137 — zuerst das Protokoll fragen, dann erst raten.
+        if trade is not None and rejection_reason(trade) is not None:
+            return "rejected_by_broker"
         if order_type in _LIMIT_ORDER_TYPES and _was_ever_live(trade):
             return "limit_not_reached"
         return "expired" if mapped == "expired" else "cancelled_by_user"
@@ -1468,10 +1466,41 @@ def handle_deferred_cancels(
         _report_status(api, dispatch_id, trade, mapped)
 
 
+def rejection_outranks_cancel(trade: Any, mapped: str) -> str:
+    """T1-137 — ein als storniert gemeldeter Auftrag, den IBKR abgelehnt hat.
+
+    ib_insync macht aus jedem Fehlercode ausserhalb seiner Warnliste ein
+    `Cancelled`. Steht im Protokoll eine Ablehnung, ist `cancelled` die
+    schwaechere und falsche Aussage: der Nutzer hat nichts storniert.
+
+    Nur bei `cancelled` und nur ohne Fuellung. Eine Ausfuehrung ist am Konto
+    passiert und laesst sich durch keinen Protokolleintrag mehr zu einer
+    Ablehnung machen.
+
+    ## Warum das die sichere Richtung ist
+
+    `rejected` behauptet NICHTS beim Broker — es ist der Zustand, bei dem
+    feststeht, dass nichts hinausgegangen ist. Er kann keinen zweiten
+    Echtauftrag ausloesen; er gibt die Wiederfreigabe frei, und das ist bei
+    einer Ablehnung die vorgesehene Handlung. Dieselbe Begruendung steht seit
+    T1-103 G im Kopf der Ablehnungserkennung.
+    """
+    if mapped != "cancelled":
+        return mapped
+    filled = float(getattr(getattr(trade, "orderStatus", None), "filled", 0) or 0)
+    if filled != 0:
+        return mapped
+    return "rejected" if rejection_reason(trade) is not None else mapped
+
+
 def _report_status(
     api: OrdertuneApiClient, dispatch_id: str, trade: Any, mapped: str
 ) -> None:
     """Meldet einen Zustand an die Plattform, wenn er eine neue Aussage ist."""
+    # T1-137: die Umdeutung steht VOR der Rangfrage. Danach waere sie wirkungs-
+    # los — `cancelled` gilt dann bereits als gemeldet, und die Rangfolge laesst
+    # keinen zweiten Endzustand desselben Rangs mehr durch.
+    mapped = rejection_outranks_cancel(trade, mapped)
     if not should_report(dispatch_id, mapped):
         return
 
@@ -1494,7 +1523,26 @@ def _report_status(
     # nicht gemacht, und ein Feld, das mehr behauptet als es geprueft hat,
     # waere derselbe Fehler in Gruen. Nichts gesendet heisst auf der Plattform
     # „keine Aussage", und keine Aussage laesst den Riegel zu.
-    confirmed_end = cancel_is_genuine(trade) if mapped == "cancelled" else None
+    #
+    # T1-137: `rejected` ist die eine Ausnahme, und sie ist geprueft. Es
+    # entsteht auf diesem Weg nur ueber `rejection_outranks_cancel`, also nur
+    # mit einer Ablehnung im Protokoll — und eine Ablehnung IST ein belegtes
+    # Ende. Der Nachbeobachtungspfad sendet an derselben Stelle seit T1-102 A
+    # `broker_confirmed_end=True`; ohne diesen Zweig haetten zwei Wege
+    # denselben Sachverhalt verschieden belegt.
+    if mapped == "cancelled":
+        confirmed_end = cancel_is_genuine(trade)
+    elif mapped == "rejected":
+        confirmed_end = True
+    else:
+        confirmed_end = None
+
+    reason_code = _derive_reason_code(mapped, filled, order_type, trade)
+    # T1-137: eine Ablehnung bringt ihren Wortlaut mit. Bei den vier Zeilen vom
+    # 2026-08-31 war `error_message` leer — die einzige handlungsrelevante
+    # Auskunft (welcher Betrag fehlte) stand nur im Protokoll der Bridge und
+    # erreichte die Plattform nie.
+    fehlertext = rejection_reason(trade) if mapped == "rejected" else None
 
     try:
         api.result_order(
@@ -1509,16 +1557,22 @@ def _report_status(
             fill_price=avg_price if filled > 0 else None,
             commission_usd=_sum_commission(trade),
             filled_at=datetime.now(timezone.utc).isoformat(),
-            reason_code=_derive_reason_code(mapped, filled, order_type, trade),
+            reason_code=reason_code,
+            error_message=fehlertext[:500] if fehlertext else None,
             broker_order_id=order_id or None,
             broker_confirmed_end=confirmed_end,
         )
+        # T1-137: `path=event` benennt den unmittelbaren Zustandsbericht. Die
+        # beiden Wege waren im Protokoll nicht auseinanderzuhalten, und genau
+        # das hat die Diagnose des Befundes vom 2026-08-31 aufgehalten.
         log.info(
-            "Result reported for dispatch %s: %s (filled=%s, confirmed_end=%s)",
+            "Result reported for dispatch %s: %s (filled=%s, confirmed_end=%s, "
+            "reason=%s) [path=event]",
             dispatch_id,
             mapped,
             filled,
             confirmed_end,
+            reason_code,
         )
     except Exception as exc:
         log.error("result_order failed for %s: %s", dispatch_id, exc)
