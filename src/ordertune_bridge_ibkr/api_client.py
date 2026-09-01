@@ -455,11 +455,21 @@ class OrdertuneApiClient:
         gehören, und ein späterer Exit verkauft die falsche Menge.
 
         `broker_confirmed_end` (T1-96, ab 0.4.0): hat IBKR das Ende dieses
-        Auftrags bestätigt? Nur bei `cancelled` eine Aussage, sonst None und
-        dann nicht im Körper. Die Plattform hängt daran ihren Riegel gegen
+        Auftrags bestätigt? Die Plattform hängt daran ihren Riegel gegen
         Doppelaufträge: ohne Aussage bleibt gesperrt. Weggelassen heisst
         deshalb „weiss ich nicht", nicht „nein" — genau so verhält sich auch
         eine ältere Bridge, die das Feld gar nicht kennt.
+
+        Eine Aussage gibt es bei genau zwei Zuständen: `cancelled` (dort
+        entscheidet `cancel_is_genuine`, ob IBKR den Storno bestätigt hat) und
+        seit T1-137 `rejected` — eine Ablehnung IST ein belegtes Ende, es ist
+        nichts hinausgegangen. Bei allen anderen bleibt es None; ein Feld, das
+        mehr behauptet als geprüft wurde, wäre derselbe Fehler in Grün.
+
+        `reason_code` (T1-137): kommt aus dem Protokoll des Auftrags, nicht aus
+        Zustand und Ordertyp. `cancelled_by_user` darf nur stehen, wo eine
+        Handlung des Nutzers belegt ist — am 2026-08-31 stand es an vier
+        Aufträgen, die IBKR wegen fehlender Deckung abgewiesen hatte.
         """
         body: dict[str, Any] = {"status": status}
         if broker_order_id is not None:

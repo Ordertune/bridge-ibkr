@@ -38,6 +38,7 @@ from .order_vocabulary import (
     IBKR_TO_WIRE_STATUS,
     LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
     LIVE_WIRE_STATES,
+    rejection_reason_of,
 )
 
 
@@ -89,6 +90,13 @@ class ReconcileAction:
     fill_qty: float | None = None
     fill_price: float | None = None
     commission_usd: float | None = None
+    # T1-137 — steht das Ende dieses Auftrags beim Broker fest?
+    #
+    # `None` heisst „keine Aussage" und laesst den Riegel der Plattform zu.
+    # Gesetzt wird es nur dort, wo IBKR das Ende ausgesprochen hat: bei einer
+    # Ablehnung. Der Ereignispfad sendet dasselbe Feld seit T1-96 B-2; ohne es
+    # haetten zwei Wege denselben Sachverhalt verschieden belegt.
+    broker_confirmed_end: bool | None = None
 
 
 def reconcile_open_dispatches(
@@ -436,10 +444,40 @@ def _from_completed(
         )
 
     if status in ("Cancelled", "ApiCancelled"):
+        # ── T1-137 — der Grund kommt aus dem Protokoll, nicht aus dem Code ──
+        #
+        # Hier stand `reason_code="cancelled_by_user"`, fest verdrahtet und
+        # unabhaengig davon, was IBKR gesagt hatte. Am 2026-08-31 hat IBKR vier
+        # Auftraege wegen fehlender Deckung abgewiesen (Error 201); ib_insync
+        # macht daraus ein `Cancelled`, und dieser Zweig machte daraus eine
+        # Handlung des Nutzers, die es nie gab. Die einzige handlungsrelevante
+        # Auskunft — 2.335 USD reichen nicht fuer 2.554 USD — ging dabei
+        # verloren.
+        ablehnung = rejection_reason_of(trade)
+        if ablehnung is not None:
+            return ReconcileAction(
+                dispatch_id=d.dispatch_id,
+                status="rejected",
+                reason_code="rejected_by_broker",
+                error_message=ablehnung,
+                broker_confirmed_end=True,
+            )
+
+        # Kein Beleg fuer eine Ablehnung — dann wird auch keine Handlung
+        # behauptet. `None` heisst „storniert, Grund unbekannt"; die Plattform
+        # faellt dafuer seit T1-131 auf den Wortlaut des Zustands zurueck und
+        # erfindet keinen Grund (81 Zeilen im Bestand tragen genau das).
+        #
+        # Das ist hier der Normalfall und keine Notloesung: ein Auftrag aus
+        # `reqCompletedOrders` traegt kein Protokoll — ib_insync baut es nur
+        # fuer Auftraege, die diese Sitzung selbst platziert hat. Dieser Weg
+        # KANN eine Ablehnung meist gar nicht sehen, und dann ist Schweigen die
+        # richtige Antwort. `cancelled_by_user` war eine Aussage ueber den
+        # Nutzer, die aus dem Nichts kam.
         return ReconcileAction(
             dispatch_id=d.dispatch_id,
             status="cancelled",
-            reason_code="cancelled_by_user",
+            reason_code=None,
             error_message=grund,
         )
 
@@ -448,6 +486,9 @@ def _from_completed(
         status="rejected",
         reason_code="rejected_by_broker",
         error_message=grund,
+        # T1-137: IBKR fuehrt ihn als abgeschlossen und nicht als storniert —
+        # das Ende steht fest.
+        broker_confirmed_end=True,
     )
 
 

@@ -93,3 +93,125 @@ LIVE_WIRE_STATES = frozenset({"submitting", "working"})
 LIVE_IBKR_STATES = frozenset(
     ibkr for ibkr, wire in IBKR_TO_WIRE_STATUS.items() if wire in LIVE_WIRE_STATES
 )
+
+
+# ── T1-137 — die Ablehnungserkennung, jetzt fuer BEIDE Meldewege ─────────────
+#
+# ## Warum sie hierher gewandert ist
+#
+# Sie stand vollstaendig in `main.py` und wurde dort von genau einem Weg
+# gefragt: der Nachbeobachtung einer verdaechtigen Stornierung. Der zweite Weg
+# — der Abgleichslauf in `order_reconcile.py` — hatte den Grund stattdessen
+# fest verdrahtet:
+#
+#     if status in ("Cancelled", "ApiCancelled"):
+#         reason_code="cancelled_by_user"   # unabhaengig vom Protokoll
+#
+# Am 2026-08-31 hat IBKR vier Auftraege wegen fehlender Deckung abgewiesen
+# (Error 201). Auf t1 standen sie als `cancelled_by_user` — eine Behauptung
+# ueber eine Handlung des Nutzers, die es nie gab, und die einzige
+# handlungsrelevante Auskunft (2.335 USD reichen nicht fuer 2.554 USD) fehlte.
+#
+# Der Grund-Code sagte damit nicht, WAS passiert ist, sondern welcher Codepfad
+# zuerst hingesehen hat. Das ist die Wurzel, und sie verschwindet nur, wenn
+# beide Wege dieselbe Frage an dieselbe Stelle richten.
+#
+# Sie steht hier und nicht in `main.py`, weil `order_reconcile` bewusst ohne
+# ib_insync auskommt: die Trade-OBJEKTE sind das Problem, nicht die Vokabeln.
+# Alles unten liest ausschliesslich ueber `getattr` — dieselbe Grenze, die
+# T1-120 fuer `IBKR_TO_WIRE_STATUS` gezogen hat, als daraus sonst die dritte
+# Kopie geworden waere.
+
+#   201  Order rejected — IBKR weist den Auftrag ab, mit Begruendung im Text
+#
+# Bewusst eine ENGE, belegte Liste und keine Heuristik ueber Zahlenbereiche:
+# was hier falsch geraten wird, kostet entweder einen Echtauftrag oder ein
+# verlorenes Signal. Neue Codes kommen dazu, wenn sie beobachtet wurden.
+REJECTION_CODES = frozenset({201})
+
+# Die echten Stornobestaetigungen. Code 0 gehoert dazu: ein Protokolleintrag
+# ohne Fehlercode ist ein blosser Zustandswechsel und keine Ablehnung.
+GENUINE_CANCEL_CODES = frozenset({0, 202, 10148})
+
+# IBKR dokumentiert den Block 2100–2199 als „Warning Message"; Warnungen
+# beenden keinen Auftrag. Aus dieser Klasse stammt der Vorfall vom 2026-08-13.
+WARNING_CODE_MIN = 2100
+WARNING_CODE_MAX = 2200
+
+# Warnungen ausserhalb des 2100er-Blocks, die uns nachweislich begegnet sind.
+# 10349 ist der Ausloeser von T1-88b: „Gueltigkeitsdauer auf DAY gesetzt" —
+# eine Anpassung, keine Ablehnung, und ib_insync macht daraus trotzdem ein
+# erfundenes `Cancelled`. Waechst nur mit gemessenen Faellen.
+KNOWN_WARNING_CODES = frozenset({10349})
+
+
+def is_warning_code(code: int) -> bool:
+    """Ist das eine Warnung von IBKR und damit kein Ende des Auftrags?"""
+    if code in KNOWN_WARNING_CODES:
+        return True
+    return WARNING_CODE_MIN <= code < WARNING_CODE_MAX
+
+
+def rejection_reason_of(trade: object) -> str | None:
+    """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
+
+    Zwei Wege zur selben Antwort:
+
+    1. Ein Code aus `REJECTION_CODES` irgendwo im Protokoll. Das ist der
+       belegte Fall und bleibt unveraendert.
+    2. Der allgemeine Fall (T1-103 G): der LETZTE Protokolleintrag traegt einen
+       Fehlercode, der weder eine Stornobestaetigung noch eine Warnung ist.
+       Der letzte Eintrag ist der, der den aktuellen Zustand ausgeloest hat —
+       dieselbe Stelle, an der `cancel_is_genuine` seit T1-88b nachsieht.
+
+    Der zweite Weg wird nur beschritten, wenn nichts gefuellt wurde. Eine
+    Ausfuehrung ist am Konto passiert; was danach im Protokoll steht, kann sie
+    nicht mehr zu einer Ablehnung machen.
+
+    `None` heisst „keine Ablehnung gefunden" — und dann bleibt es bei der
+    Vorsicht aus T1-88b.
+
+    ## Die Grenze, die dem Abgleichslauf gilt
+
+    Ein Auftrag aus `reqCompletedOrders` traegt KEIN Protokoll — ib_insync baut
+    es nur fuer Auftraege, die diese Sitzung selbst platziert hat. Dann liefern
+    beide Wege hier `None`, und das ist die richtige Antwort: ohne Protokoll
+    gibt es keinen Beleg fuer eine Ablehnung. Der Aufrufer darf daraus keine
+    Nutzerhandlung machen — genau das war der Fehler vom 2026-08-31.
+    """
+    entries = list(getattr(trade, "log", None) or [])
+
+    for entry in reversed(entries):
+        if getattr(entry, "errorCode", 0) in REJECTION_CODES:
+            message = (getattr(entry, "message", "") or "").strip()
+            return message or "Rejected by IBKR."
+
+    if not entries:
+        return None
+
+    # Der allgemeine Weg deutet einen als storniert gemeldeten Auftrag um. Er
+    # gilt deshalb NUR dort, wo genau das vorliegt: der Auftrag steht jetzt auf
+    # `Cancelled`. Lebt er noch — und das ist der Verlauf des Vorfalls vom
+    # 2026-08-13, wo eine Sekunde spaeter `Submitted` kam —, ist hier nichts zu
+    # entscheiden. Ohne Zustandsangabe wird ebenfalls nichts behauptet.
+    status = getattr(getattr(trade, "orderStatus", None), "status", "")
+    if IBKR_TO_WIRE_STATUS.get(str(status)) != "cancelled":
+        return None
+
+    filled = float(getattr(getattr(trade, "orderStatus", None), "filled", 0) or 0)
+    if filled != 0:
+        return None
+
+    letzter = entries[-1]
+    code = getattr(letzter, "errorCode", None)
+    if code is None:
+        return None
+    # Code 0 steckt bereits in `GENUINE_CANCEL_CODES` — ein Eintrag ohne
+    # Fehlercode ist ein Zustandswechsel und sagt nichts ueber eine Ablehnung.
+    if code in GENUINE_CANCEL_CODES:
+        return None
+    if is_warning_code(code):
+        return None
+
+    message = (getattr(letzter, "message", "") or "").strip()
+    return message or "Rejected by IBKR."
