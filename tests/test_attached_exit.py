@@ -107,3 +107,54 @@ def test_child_carries_the_parent_id():
     kind = translate_intent({**_kind(), "symbol": "AMD"})
     kind.parentId = 4711
     assert kind.parentId == 4711
+
+
+# ── T1-136 Nachtrag: die eigene Frist des Kindes ─────────────────────────────
+
+
+def test_child_deadline_forces_gtd_without_any_client_change():
+    """Der Riegel gegen das Waisenkind — und er kostet den Client nichts.
+
+    Am 2026-08-31 stand ein angehaengtes Kind mit `tif=DAY` nach dem
+    Sitzungsschluss noch da, waehrend sein Parent verfallen war. `DAY` bindet
+    einen Auftrag an die Sitzung, in der er ARBEITET; ein zurueckgehaltenes Kind
+    arbeitet nicht.
+
+    Die Plattform gibt dem Kind deshalb eine eigene Frist mit. `translate_intent`
+    schaltet bei gesetztem `goodTillDate` seit T1-106 von sich aus auf GTD — es
+    braucht hier also KEINE Client-Aenderung, nur diese Zusicherung, dass es so
+    bleibt.
+    """
+    kind = translate_intent(
+        {**_kind(), "symbol": "MRVL", "goodTillDate": "20260831 16:15:00 US/Eastern"}
+    )
+    assert kind.orderType == "MOC"
+    assert kind.tif == "GTD"
+    assert kind.goodTillDate == "20260831 16:15:00 US/Eastern"
+
+
+def test_child_without_deadline_stays_on_day():
+    """Ohne Frist bleibt es beim alten Verhalten — kein stiller Zwang zu GTD."""
+    kind = translate_intent({**_kind(), "symbol": "MRVL"})
+    assert kind.tif == "DAY"
+    assert not getattr(kind, "goodTillDate", "")
+
+
+def test_the_deadline_survives_the_bracket_pairing():
+    """Das Anhaengen darf die Frist nicht ueberschreiben.
+
+    `apply_bracket_transmit_flags` fasst nur `transmit` an — aber genau solche
+    Annahmen sind in diesem Repo schon zweimal stillschweigend gebrochen worden.
+    """
+    eltern = translate_intent(
+        {"symbol": "MRVL", "side": "buy", "orderType": "day_limit",
+         "qty": 2, "lmtPrice": 196.0}
+    )
+    kind = translate_intent(
+        {**_kind(), "symbol": "MRVL", "goodTillDate": "20260831 16:15:00 US/Eastern"}
+    )
+    apply_bracket_transmit_flags([eltern, kind])
+    assert kind.tif == "GTD"
+    assert kind.goodTillDate == "20260831 16:15:00 US/Eastern"
+    assert eltern.transmit is False
+    assert kind.transmit is True
