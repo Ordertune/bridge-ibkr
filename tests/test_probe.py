@@ -255,7 +255,7 @@ def test_a_foreign_order_status_is_reported_to_nobody() -> None:
     ist.
     """
     api = FakeApi()
-    on_status = m._make_on_order_status(api, None, {59: "d-eigen"})
+    on_status = m._make_on_order_status(api, {59: "d-eigen"})
 
     on_status(_fremder_trade_wie_gemessen())
 

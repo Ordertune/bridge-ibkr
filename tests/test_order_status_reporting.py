@@ -91,7 +91,7 @@ def test_a_cancel_without_a_cancel_reason_is_not_reported_yet() -> None:
     zurueckgehalten, statt einen lebenden Auftrag totzuschreiben.
     """
     api = FakeApi()
-    on_status = m._make_on_order_status(api, None, {3: "disp-1"})
+    on_status = m._make_on_order_status(api, {3: "disp-1"})
 
     on_status(make_trade("Cancelled", error_code=10349))
 
@@ -106,7 +106,7 @@ def test_the_deferred_check_reports_working_when_the_order_lives() -> None:
     """Eine Sekunde spaeter meldet IBKR den wahren Zustand — der wird gelesen."""
     api = FakeApi()
     trade = make_trade("Cancelled", error_code=10349)
-    on_status = m._make_on_order_status(api, None, {3: "disp-1"})
+    on_status = m._make_on_order_status(api, {3: "disp-1"})
     on_status(trade)
 
     # ib_insync schreibt denselben Gegenstand fort.
@@ -123,7 +123,7 @@ def test_the_deferred_check_reports_working_when_the_order_lives() -> None:
 def test_a_genuine_cancellation_is_reported_immediately() -> None:
     """Code 202 ist IBKRs Stornobestaetigung. Die wird nicht verzoegert."""
     api = FakeApi()
-    on_status = m._make_on_order_status(api, None, {3: "disp-1"})
+    on_status = m._make_on_order_status(api, {3: "disp-1"})
 
     on_status(make_trade("Cancelled", error_code=202, history=["Submitted"]))
 
@@ -134,7 +134,7 @@ def test_a_genuine_cancellation_is_reported_immediately() -> None:
 def test_a_still_cancelled_order_is_reported_after_the_wait() -> None:
     api = FakeApi()
     trade = make_trade("Cancelled", error_code=10349)
-    m._make_on_order_status(api, None, {3: "disp-1"})(trade)
+    m._make_on_order_status(api, {3: "disp-1"})(trade)
 
     m.handle_deferred_cancels(api, monotonic=lambda: 1e9)
 
@@ -147,7 +147,7 @@ def test_a_still_cancelled_order_is_reported_after_the_wait() -> None:
 def test_the_wait_is_not_cut_short() -> None:
     """Vor Ablauf der Frist wird nichts aufgeloest."""
     api = FakeApi()
-    m._make_on_order_status(api, None, {3: "disp-1"})(
+    m._make_on_order_status(api, {3: "disp-1"})(
         make_trade("Cancelled", error_code=10349)
     )
     m.handle_deferred_cancels(api, monotonic=lambda: 0.0)
@@ -158,7 +158,7 @@ def test_the_wait_is_not_cut_short() -> None:
 def test_a_fill_cancels_the_pending_cancel_check() -> None:
     """Fuellt der Auftrag, ist die Storno-Frage beantwortet."""
     api = FakeApi()
-    on_status = m._make_on_order_status(api, None, {3: "disp-1"})
+    on_status = m._make_on_order_status(api, {3: "disp-1"})
     on_status(make_trade("Cancelled", error_code=10349))
     on_status(make_trade("Filled", filled=2.0, history=["Submitted"]))
 
@@ -245,7 +245,7 @@ def test_inactive_is_not_reported_as_rejected() -> None:
 
 def test_an_unknown_state_is_not_reported() -> None:
     api = FakeApi()
-    m._make_on_order_status(api, None, {3: "disp-1"})(make_trade("Voellig Neu"))
+    m._make_on_order_status(api, {3: "disp-1"})(make_trade("Voellig Neu"))
     assert api.calls == []
 
 
