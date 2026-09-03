@@ -90,7 +90,7 @@ def test_a_fill_no_longer_writes_a_traceback(
     client, fake = _client_with_fake_ib()
     api = FakeApi()
     client.subscribe_order_status_callback(
-        m._make_on_order_status(api, None, {42: "d-1"})
+        m._make_on_order_status(api, {42: "d-1"})
     )
 
     trade = SimpleNamespace(
