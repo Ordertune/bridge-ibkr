@@ -28,6 +28,38 @@ def make_contract(symbol: str) -> Contract:
 DEFAULT_TIF = "DAY"
 
 
+# T1-144 — Ordertypen, die keine Frist tragen koennen.
+#
+# Eine Auktionsorder ist an EIN Ereignis gebunden — die Eroeffnungs- oder die
+# Schlussauktion ihrer Sitzung. Eine Frist beschreibt einen Zeitraum, und ein
+# Zeitraum an einem Zeitpunkt ergibt keine Aussage. IBKR lehnt das ab, fuer
+# `MOC` am 2026-09-03 gemessen (Fehler 201).
+#
+# ## Warum hier eine Sperrliste steht und auf der Plattform eine Erlaubnisliste
+#
+# Es sind zwei verschiedene Fragen, und deshalb duerfen es nicht zwei Fassungen
+# derselben Liste sein:
+#
+#   Plattform: welche Ordertypen wollen WIR mit einer Frist versehen?
+#              Eine Richtlinie. Erlaubnisliste, damit ein neuer Typ nicht durch
+#              Unterlassen durchkommt.
+#   Hier:      welche Ordertypen kann IBKR mit einer Frist gar nicht annehmen?
+#              Eine Tatsache ueber den Broker. Sperrliste, damit ein neuer Typ
+#              nicht faelschlich abgelehnt wird, nur weil diese Datei ihn noch
+#              nicht kennt.
+#
+# Waeren beide Erlaubnislisten, muesste Stufe 1 (`STP`) sie im Gleichschritt
+# aendern — und ein vergessener Gleichschritt ist in diesem Repo schon mehrfach
+# die Ursache gewesen.
+#
+# `loc` steht mit drin, obwohl es nicht gemessen ist: es ist dieselbe Bauform
+# wie `moc`, an dieselbe eine Auktion gebunden. Gemessen ist etwas anderes, und
+# es macht den Einschluss folgenlos — ueber alle `signals` traegt keine einzige
+# LOC-Zeile ein `good_until` (0 von 736, Stand 2026-09-03). Faellt der Riegel
+# hier je, ist das eine Auskunft ueber eine neue Signalform und kein Ausfall.
+FRIST_UNMOEGLICH = frozenset({"moc", "loc"})
+
+
 def _text_or_none(roh: Any) -> str | None:
     """Eine nicht-leere Zeichenkette, oder nichts.
 
@@ -110,6 +142,29 @@ def translate_intent(intent: dict[str, Any]) -> Order:
         order.goodAfterTime = nach
     bis = intent.get("goodTillDate")
     if isinstance(bis, str) and bis:
+        # T1-144 — der letzte Riegel, bevor die Frist an den Draht geht.
+        #
+        # Am 2026-09-03 gingen beide Breakout-Hunter-Auftraege sofort wieder
+        # zurueck, Einstieg wie Ausstieg. IBKR im Protokoll:
+        #
+        #   Error 201, reqId 624: Order abgewiesen - Grund: Unzulaessige
+        #   Gueltigkeitsdauer fuer eine At-the-Closing-Order.
+        #
+        # Das angehaengte Ausstiegsbein war ein `MOC` und trug trotzdem `GTD`,
+        # weil die Zeile darunter die Dauer BEDINGUNGSLOS gesetzt hat — ohne den
+        # Ordertyp anzusehen. Die Plattform schickt seit T1-144 keine Frist mehr
+        # an einen Auftrag, der sie nicht tragen kann; hier steht der Riegel ein
+        # zweites Mal, damit die naechste Fassung derselben Frage nicht wieder
+        # an genau dieser Zeile auseinanderlaeuft.
+        # Kleingeschrieben verglichen: die Plattform schickt `moc`, aber ein
+        # Vergleich, der an der Schreibweise haengt, ist ein Riegel, der beim
+        # ersten `MOC` still aufgeht.
+        if str(order_type or "").strip().lower() in FRIST_UNMOEGLICH:
+            raise ValueError(
+                f"{order_type} vertraegt keine Frist "
+                f"(goodTillDate={bis!r}) — IBKR fuehrt fuer eine "
+                f"Auktionsorder ausschliesslich DAY"
+            )
         order.goodTillDate = bis
         # IBKR verlangt fuer eine Frist die Gueltigkeitsdauer GTD. Bleibt hier
         # DAY stehen, wird `goodTillDate` stillschweigend ignoriert — und der
