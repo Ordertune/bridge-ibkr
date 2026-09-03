@@ -157,6 +157,62 @@ def trade_for_dispatch(dispatch_id: str) -> Any | None:
         return _TRADES_BY_DISPATCH.get(dispatch_id)
 
 
+# T1-144 — welches Kind haengt an welchem Einstieg.
+#
+# Der Ersatz fuer die Frist, die das angehaengte Ausstiegsbein bis T1-144 trug
+# und als `MOC` nicht tragen konnte. Endet der Einstieg ohne ein einziges
+# Stueck, hat das Kind nichts mehr zu verkaufen und wird aktiv zurueckgenommen.
+#
+# Warum eine eigene Ablage und nicht `parentId` allein: der Rueckruf laeuft im
+# Ereignisfaden von ib_insync und darf dort keine Abfrage an IBKR stellen. Die
+# Zuordnung muss ohne Rueckfrage bereitstehen.
+#
+# Warum sie trotzdem aus dem Draht wiederherstellbar sein muss: diese Ablage
+# lebt im Arbeitsspeicher, und die Bridge startet taeglich neu, weil TWS gegen
+# 05:00 MEZ abmeldet. Ohne den Wiederaufbau griffe der Riegel nur, solange
+# niemand neu startet — also genau dann nicht, wenn ein Kind ueber Nacht
+# stehengeblieben ist. TWS liefert `parentId` an jedem Kind mit; am 2026-09-03
+# stand im Protokoll `parentId=623`.
+_BRACKET_CHILDREN: dict[int, Any] = {}
+
+
+def register_bracket_pair(parent_trade: Any, child_trade: Any) -> None:
+    """Haelt fest, dass dieses Kind an diesem Einstieg haengt."""
+    parent_id = int(getattr(getattr(parent_trade, "order", None), "orderId", 0) or 0)
+    if not parent_id:
+        return
+    with _DISPATCH_MAP_LOCK:
+        _BRACKET_CHILDREN[parent_id] = child_trade
+
+
+def bracket_child_of(parent_order_id: int) -> Any | None:
+    with _DISPATCH_MAP_LOCK:
+        return _BRACKET_CHILDREN.get(parent_order_id)
+
+
+def forget_bracket_pair(parent_order_id: int) -> None:
+    with _DISPATCH_MAP_LOCK:
+        _BRACKET_CHILDREN.pop(parent_order_id, None)
+
+
+def rebuild_bracket_pairs(trades: list[Any]) -> int:
+    """T1-144 — die Paare aus den offenen Auftraegen zurueckholen.
+
+    `parentId` steht am Kind und kommt von TWS. Nur Auftraege mit einem
+    `parentId != 0` sind Kinder; alles andere geht diese Ablage nichts an.
+    """
+    wiederhergestellt = 0
+    for trade in trades:
+        order = getattr(trade, "order", None)
+        parent_id = int(getattr(order, "parentId", 0) or 0)
+        if not parent_id:
+            continue
+        with _DISPATCH_MAP_LOCK:
+            _BRACKET_CHILDREN[parent_id] = trade
+        wiederhergestellt += 1
+    return wiederhergestellt
+
+
 def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
     """T1-88c — die Zuordnung nach einem Neustart wiederherstellen.
 
@@ -191,6 +247,14 @@ def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
             continue
         register_trade(dispatch_id_map, dispatch_id, trade)
         wiederhergestellt += 1
+
+    # T1-144 — dieselben Auftraege, andere Frage: welches Kind haengt woran.
+    # Bewusst ueber ALLE `trades` und nicht nur ueber die mit einem lesbaren
+    # Vermerk: ein Kind ist auch dann zurueckzunehmen, wenn sein Vermerk
+    # unlesbar ist, und `parentId` steht unabhaengig davon da.
+    paare = rebuild_bracket_pairs(trades)
+    if paare:
+        log.info("Re-mapped %d attached exits to their entry.", paare)
 
     if wiederhergestellt:
         log.info(
@@ -539,6 +603,11 @@ def _handle_pending(
 
                 kind_ib_order_id = int(getattr(kind_trade.order, "orderId", 0))
                 register_trade(dispatch_id_map, kind["dispatchId"], kind_trade)
+                # T1-144 — die Zuordnung fuer die Ruecknahme, sofort und nicht
+                # erst beim naechsten Wiederaufbau. Endet der Einstieg noch in
+                # dieser Sitzung unerfuellt, muss der Riegel greifen koennen,
+                # ohne auf einen Neustart zu warten.
+                register_bracket_pair(trade, kind_trade)
                 _acknowledge(api, kind["dispatchId"], kind_ib_order_id)
                 log.info(
                     "Attached exit for dispatch %s: %s %s x%s — ib_order_id=%s, "
@@ -1298,7 +1367,127 @@ def _sum_commission(trade: Any) -> float | None:
         return None
 
 
-def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, str]):
+def _withdraw_orphan_child(
+    api: OrdertuneApiClient,
+    ibkr: Any,
+    parent_trade: Any,
+    dispatch_id_map: dict[int, str],
+) -> None:
+    """T1-144 S0-4 — der Einstieg ist unerfuellt zu Ende, das Kind faellt mit.
+
+    ## Warum es diesen Riegel gibt
+
+    Bis T1-144 trug das angehaengte Ausstiegsbein eine eigene Frist bis
+    Sitzungsschluss plus 15 Minuten. Sie war die Antwort auf ein Waisenkind vom
+    2026-08-31: `DAY` bindet einen Auftrag an die Sitzung, in der er ARBEITET,
+    und ein zurueckgehaltenes Kind arbeitet nicht — es lief also nie ab.
+
+    Die Frist konnte der Ordertyp nicht tragen (IBKR, Fehler 201: unzulaessige
+    Gueltigkeitsdauer fuer eine At-the-Closing-Order). Der Waisenschutz wandert
+    damit von einer Frist, die ein MOC nicht kennt, auf ein Ereignis, das jeder
+    Ordertyp hat: das Ende seines Elternteils.
+
+    ## Warum keine Teilfuellung mitzaehlt
+
+    Fuellt der Einstieg auch nur ein Stueck, gibt es Stuecke zu verkaufen. IBKR
+    passt die Stueckzahl des Kindes selbst an; es zurueckzunehmen hiesse, eine
+    reale Position ohne Ausstieg stehen zu lassen — genau der Schaden, gegen den
+    T1-136 gebaut ist.
+    """
+    filled = float(getattr(parent_trade.orderStatus, "filled", 0) or 0)
+    if filled > 0:
+        return
+
+    parent_id = int(getattr(parent_trade.order, "orderId", 0) or 0)
+    if not parent_id:
+        return
+    kind_trade = bracket_child_of(parent_id)
+    if kind_trade is None:
+        return
+
+    kind_order = getattr(kind_trade, "order", None)
+    kind_order_id = int(getattr(kind_order, "orderId", 0) or 0)
+    with _DISPATCH_MAP_LOCK:
+        kind_dispatch = dispatch_id_map.get(kind_order_id)
+    if not kind_dispatch:
+        log.warning(
+            "Entry %s ended unfilled and carries an attached exit (order %s), "
+            "but no dispatch is known for it. Not withdrawing — a cancel "
+            "without a report would leave the row on 'submitting'.",
+            parent_id,
+            kind_order_id,
+        )
+        return
+
+    kind_status = _STATUS_MAP.get(
+        str(getattr(getattr(kind_trade, "orderStatus", None), "status", "") or "")
+    )
+
+    # Schon tot: nur melden, NICHT stornieren. Ein Storno auf einen
+    # abgeschlossenen Auftrag beantwortet IBKR mit Fehler 10148 — am 2026-09-03
+    # zweimal im Protokoll, weil der Storno der Plattform auf ein bereits
+    # storniertes Kind traf.
+    if kind_status in TERMINAL_STATES:
+        log.info(
+            "Attached exit %s is already %s — reporting the withdrawal without "
+            "sending a cancel.",
+            kind_dispatch,
+            kind_status,
+        )
+    else:
+        try:
+            ibkr.cancel_order(kind_order)
+            log.info(
+                "Entry %s ended unfilled — withdrawing its attached exit %s "
+                "(order %s).",
+                parent_id,
+                kind_dispatch,
+                kind_order_id,
+            )
+        except Exception as exc:
+            # Die Meldung geht trotzdem hinaus. Ein Kind, das die Plattform fuer
+            # unterwegs haelt, blockiert den Roundtrip fuer dieses Lot dauerhaft
+            # — das waere schlimmer als ein Auftrag, der bei IBKR noch liegt und
+            # den der naechste Herzschlag ohnehin aufgreift.
+            log.error(
+                "Could not cancel the attached exit %s of entry %s: %s",
+                kind_dispatch,
+                parent_id,
+                exc,
+            )
+
+    if should_report(kind_dispatch, "cancelled"):
+        try:
+            api.result_order(
+                kind_dispatch,
+                "cancelled",
+                fill_qty=0.0,
+                reason_code="entry_ended_unfilled",
+                broker_order_id=kind_order_id or None,
+                broker_confirmed_end=True,
+            )
+            log.info(
+                "Result reported for dispatch %s: cancelled "
+                "(reason=entry_ended_unfilled) [path=orphan_withdrawal]",
+                kind_dispatch,
+            )
+        except Exception as exc:
+            log.error(
+                "Could not report the withdrawal of %s: %s", kind_dispatch, exc
+            )
+
+    forget_bracket_pair(parent_id)
+
+
+# T1-144 — Endzustaende eines Einstiegs, nach denen ein angehaengtes Kind
+# nichts mehr zu verkaufen hat. `filled` steht bewusst nicht dabei: dort ist
+# genau der Fall eingetreten, fuer den das Kind gebaut wurde.
+_ENTRY_END_WITHOUT_POSITION = frozenset({"cancelled", "rejected", "expired"})
+
+
+def _make_on_order_status(
+    api: OrdertuneApiClient, ibkr: Any, dispatch_id_map: dict[int, str]
+):
     """Callback für ib_insync order-status-events → /orders/{id}/result.
 
     ib_insync fires orderStatusEvent MULTIPLE TIMES per order (submitted,
@@ -1340,6 +1529,19 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
             return
 
         _report_status(api, dispatch_id, trade, mapped)
+
+        # T1-144 S0-4 — nach der eigenen Meldung, nie davor. Die Aussage ueber
+        # den Einstieg ist die wichtigere; scheitert die Ruecknahme des Kindes,
+        # darf sie den Einstieg nicht mit sich reissen.
+        if mapped in _ENTRY_END_WITHOUT_POSITION:
+            try:
+                _withdraw_orphan_child(api, ibkr, trade, dispatch_id_map)
+            except Exception as exc:
+                log.error(
+                    "Withdrawal of the attached exit for dispatch %s failed: %s",
+                    dispatch_id,
+                    exc,
+                )
 
     return on_status
 
@@ -2074,7 +2276,9 @@ def main() -> int:
         )
 
     dispatch_id_map: dict[int, str] = {}
-    ibkr.subscribe_order_status_callback(_make_on_order_status(api, dispatch_id_map))
+    ibkr.subscribe_order_status_callback(
+        _make_on_order_status(api, ibkr, dispatch_id_map)
+    )
 
     # T1-88c: VOR der Schleife. Ohne diesen Schritt ist nach jedem Neustart
     # jeder vorher abgesendete Auftrag unauffindbar — und IBKR meldet TWS

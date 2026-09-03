@@ -6,6 +6,8 @@ stehen, wenn sie IBKR erreichen. Die Schleife selbst haengt an einer
 IBKR-Verbindung und steht im Papiertest, den der Spec als Ausrollsperre nennt.
 """
 
+import pytest
+
 from ordertune_bridge_ibkr.main import _attached_exit
 from ordertune_bridge_ibkr.order_translator import (
     apply_bracket_transmit_flags,
@@ -112,30 +114,86 @@ def test_child_carries_the_parent_id():
 # ── T1-136 Nachtrag: die eigene Frist des Kindes ─────────────────────────────
 
 
-def test_child_deadline_forces_gtd_without_any_client_change():
-    """Der Riegel gegen das Waisenkind — und er kostet den Client nichts.
+def test_a_deadline_on_a_closing_auction_order_is_refused():
+    """T1-144 — diese Zusicherung stand bis zum 2026-09-03 auf dem Kopf.
 
-    Am 2026-08-31 stand ein angehaengtes Kind mit `tif=DAY` nach dem
-    Sitzungsschluss noch da, waehrend sein Parent verfallen war. `DAY` bindet
-    einen Auftrag an die Sitzung, in der er ARBEITET; ein zurueckgehaltenes Kind
-    arbeitet nicht.
+    Sie hiess `test_child_deadline_forces_gtd_without_any_client_change` und
+    sicherte zu, dass ein `MOC` mit einer Frist als `GTD` hinausgeht. Genau das
+    hat die Produktion abgewiesen:
 
-    Die Plattform gibt dem Kind deshalb eine eigene Frist mit. `translate_intent`
-    schaltet bei gesetztem `goodTillDate` seit T1-106 von sich aus auf GTD — es
-    braucht hier also KEINE Client-Aenderung, nur diese Zusicherung, dass es so
-    bleibt.
+        Error 201, reqId 624: Order abgewiesen - Grund: Unzulaessige
+        Gueltigkeitsdauer fuer eine At-the-Closing-Order.
+
+    Beide Breakout-Hunter-Auftraege des Tages kamen sofort zurueck, Einstieg wie
+    Ausstieg — der Parent lag mit `transmit=False` und wurde nie scharf.
+
+    Die Frist bleibt richtig, der Ordertyp vertraegt sie nicht. Der Riegel steht
+    hier als letzte Instanz vor dem Draht; die Plattform schickt sie seit T1-144
+    gar nicht erst mit.
     """
-    kind = translate_intent(
-        {**_kind(), "symbol": "MRVL", "goodTillDate": "20260831 16:15:00 US/Eastern"}
+    with pytest.raises(ValueError, match="vertraegt keine Frist"):
+        translate_intent(
+            {
+                **_kind(),
+                "symbol": "MRVL",
+                "goodTillDate": "20260831 16:15:00 US/Eastern",
+            }
+        )
+
+
+def test_a_deadline_on_a_closing_auction_limit_is_refused_too():
+    """`LOC` ist dieselbe Bauform wie `MOC` — an EINE Auktion gebunden.
+
+    Ungemessen bei IBKR und deshalb bewusst mit eingeschlossen statt durch
+    Unterlassen erlaubt. Folgenlos: ueber alle `signals` traegt keine einzige
+    LOC-Zeile ein `good_until` (0 von 736, Stand 2026-09-03).
+    """
+    with pytest.raises(ValueError, match="vertraegt keine Frist"):
+        translate_intent(
+            {
+                "symbol": "MRVL",
+                "side": "sell",
+                "orderType": "loc",
+                "qty": 5,
+                "lmtPrice": 196.0,
+                "goodTillDate": "20260831 16:15:00 US/Eastern",
+            }
+        )
+
+
+def test_a_limit_order_still_carries_its_deadline():
+    """Der Gegenbeweis, ohne den der Riegel ein Rueckschritt waere.
+
+    Day Ripper liefert seinen Einstieg als `GTD` mit `good_until = 13:00 ET` auf
+    einem `LMT`. Derselbe Mechanismus, dort richtig — wer die Frist streicht
+    statt sie an den Ordertyp zu binden, bricht Day Ripper mit.
+    """
+    order = translate_intent(
+        {
+            "symbol": "KLAC",
+            "side": "buy",
+            "orderType": "day_limit",
+            "qty": 2,
+            "lmtPrice": 163.45,
+            "timeInForce": "GTD",
+            "goodTillDate": "20260902 13:00:00 US/Eastern",
+        }
     )
-    assert kind.orderType == "MOC"
-    assert kind.tif == "GTD"
-    assert kind.goodTillDate == "20260831 16:15:00 US/Eastern"
+    assert order.orderType == "LMT"
+    assert order.tif == "GTD"
+    assert order.goodTillDate == "20260902 13:00:00 US/Eastern"
 
 
 def test_child_without_deadline_stays_on_day():
-    """Ohne Frist bleibt es beim alten Verhalten — kein stiller Zwang zu GTD."""
+    """Ohne Frist bleibt es beim alten Verhalten — kein stiller Zwang zu GTD.
+
+    T1-144 — seit dem Fix ist das der NORMALFALL und nicht mehr der Sonderfall:
+    die Plattform haengt einem MOC-Kind keine Frist mehr an, und was ankommt,
+    ist genau das, was `signals.time_in_force` sagt. Dort stand an beiden Zeilen
+    vom 2026-09-03 `DAY`.
+    """
     kind = translate_intent({**_kind(), "symbol": "MRVL"})
+    assert kind.orderType == "MOC"
     assert kind.tif == "DAY"
     assert not getattr(kind, "goodTillDate", "")
 
@@ -145,13 +203,23 @@ def test_the_deadline_survives_the_bracket_pairing():
 
     `apply_bracket_transmit_flags` fasst nur `transmit` an — aber genau solche
     Annahmen sind in diesem Repo schon zweimal stillschweigend gebrochen worden.
+
+    T1-144: das Kind traegt hier ein `day_limit` statt eines `MOC`. Ein MOC kann
+    keine Frist tragen, und die Frage dieser Zusicherung ist eine andere — ob
+    das Paaren einen bereits gesetzten Wert zerstoert.
     """
     eltern = translate_intent(
         {"symbol": "MRVL", "side": "buy", "orderType": "day_limit",
          "qty": 2, "lmtPrice": 196.0}
     )
     kind = translate_intent(
-        {**_kind(), "symbol": "MRVL", "goodTillDate": "20260831 16:15:00 US/Eastern"}
+        {
+            **_kind(),
+            "symbol": "MRVL",
+            "orderType": "day_limit",
+            "lmtPrice": 196.0,
+            "goodTillDate": "20260831 16:15:00 US/Eastern",
+        }
     )
     apply_bracket_transmit_flags([eltern, kind])
     assert kind.tif == "GTD"
