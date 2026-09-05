@@ -72,6 +72,45 @@ _AGGREGATE_CURRENCY_MARKERS = {"BASE", ""}
 # Nutzer aussieht wie ein abgestuerzter.
 POSITIONS_TIMEOUT_S = 20.0
 
+# T1-152: die Auffanggrenze fuer JEDE Abfrage, die ueber `IB._run()` laeuft.
+#
+# ## Woher sie kommt
+#
+# Am 2026-09-04 stand die Bridge zwei Stunden und vier Minuten in einem
+# einzigen `reqAllOpenOrders()`. TWS hat auf diese eine Anfrage kein
+# `openOrderEnd` geschickt, und der Aufruf hat keine Frist. Der Vorgang lief
+# dabei weiter — `reqAllOpenOrders` wartet ueber die Ereignisschleife, pumpt sie
+# also weiter: `updatePortfolio` kam weiter, und die Rueckrufe an
+# `orderStatusEvent` feuerten zwischendurch sogar noch. Nur der Faden mit
+# Heartbeat und Auftragsabruf stand. Ein Fenster voller frischer Zeilen, kein
+# Absturz, keine Fehlermeldung — und trotzdem seit zwei Stunden kein
+# Lebenszeichen nach draussen.
+#
+# ## Warum als Vorgabe und nicht je Aufrufstelle
+#
+# Die Fehlerklasse war bekannt: der Kommentar ueber `_probe_write_access` nennt
+# sie seit T1-103 beim Namen. Der Riegel wurde damals an EINER Stelle gelegt.
+# Vier Abfragen blieben ohne Grenze, und es traf genau eine davon. Eine Frist je
+# Aufrufstelle schuetzt nur die Stellen, an die jemand gedacht hat — diese hier
+# gilt auch fuer die, die spaeter dazukommen.
+#
+# ## Was sie NICHT beruehrt
+#
+# `IB.run` und `IB.sleep` sind `staticmethod(util.run)` bzw.
+# `staticmethod(util.sleep)` und gehen an `_run()` vorbei. Damit bleiben die
+# beiden engeren Fristen oben unveraendert gueltig, und `sleep()` — der
+# Pumpvorgang der Ereignisschleife, der gar keine Grenze haben darf — bekommt
+# auch keine.
+#
+# ## Die Zahl
+#
+# Ein vollstaendiger Takt braucht rund 135 ms. Was 15 Sekunden nicht schafft,
+# ist nicht langsam, sondern kaputt. Schlimmster Fall sind fuenf begrenzte
+# Abfragen in einem Takt (75 s); der Heartbeat geht als erstes raus, die
+# Verzoegerung trifft also erst den naechsten — Luecke rund 135 s. Der
+# Offline-Alarm der Plattform loest bei 300 s aus.
+REQUEST_TIMEOUT_S = 15.0
+
 
 def _opt(value: Any) -> float | None:
     """Eine Zahl, oder nichts — aber nie eine erfundene Null.
@@ -120,6 +159,9 @@ class IbkrClient:
         self._port = port
         self._client_id = client_id
         self._ib = IB()
+        # T1-152: keine Abfrage an TWS darf mehr unbegrenzt warten. Begruendung
+        # samt Vorfall an der Konstanten.
+        self._ib.RequestTimeout = REQUEST_TIMEOUT_S
         # T1-99: hat die Positionsabfrage in DIESER Sitzung je geantwortet?
         # Nicht „sind Zeilen angekommen" — ein leeres Depot liefert keine
         # Zeilen und ist trotzdem eine gueltige Auskunft. Es zaehlt, dass die
