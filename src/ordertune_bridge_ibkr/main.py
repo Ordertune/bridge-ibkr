@@ -1631,6 +1631,100 @@ def run_loop(
         ibkr.sleep(tick_s)
 
 
+# ── T1-152d: die Bridge kommt von allein zurueck ─────────────────────────────
+#
+# Am 2026-09-04 um 23:45:01 UTC schloss TWS die Verbindung — der naechtliche
+# Zwangsneustart, den `rebuild_dispatch_map` weiter oben laengst beim Namen
+# nennt. `run_loop` endete daraufhin, `main()` raeumte auf, und die Bridge war
+# 15 Stunden weg, bis sie jemand von Hand startete.
+#
+# Die Wartezeiten wachsen und bleiben dann stehen. Gewartet wird VOR dem ersten
+# Versuch: TWS braucht nach einem Neustart Zeit, und ein sofortiger Versuch
+# waere eine heisse Schleife gegen einen Port, der noch niemandem gehoert.
+RECONNECT_BACKOFF_S = (5.0, 10.0, 20.0, 30.0, 60.0)
+
+# Nur der erste Fehlversuch und danach jeder zehnte wird protokolliert. Ein
+# Wochenende mit ausgeschalteter TWS sind sonst rund 4.000 Zeilen ueber
+# denselben Sachverhalt.
+RECONNECT_LOG_EVERY = 10
+
+
+def reconnect_forever(
+    ibkr: Any,
+    stop: threading.Event,
+    *,
+    backoff: tuple[float, ...] = RECONNECT_BACKOFF_S,
+) -> bool:
+    """Stellt die Verbindung wieder her. `True`, wenn sie steht.
+
+    ## Warum ohne Obergrenze
+
+    Eine Bridge, die nach n Versuchen aufgibt, braucht wieder einen Menschen —
+    und genau das ist das Problem, das hier weggeht. Sie versucht es weiter,
+    leise.
+
+    ## Warum `stop.wait` und nicht `time.sleep`
+
+    Ein Abbruchsignal waehrend einer Wartezeit muss sofort greifen. Mit
+    `time.sleep(60)` bliebe es bis zu einer Minute liegen, und der Nutzer
+    haette ein Fenster vor sich, das auf Strg-C nicht reagiert.
+    """
+    versuch = 0
+    while not stop.is_set():
+        if stop.wait(backoff[min(versuch, len(backoff) - 1)]):
+            return False
+        versuch += 1
+        try:
+            ibkr.connect()
+        except Exception as exc:
+            if versuch == 1 or versuch % RECONNECT_LOG_EVERY == 0:
+                log.warning(
+                    "Could not reconnect to IBKR (attempt %d): %s. Still "
+                    "trying. Ordertune shows this Bridge as offline until the "
+                    "connection is back, and no order is sent in the meantime.",
+                    versuch,
+                    exc,
+                )
+            continue
+        log.info("Reconnected to IBKR after %d attempt(s).", versuch)
+        return True
+    return False
+
+
+def run_supervised(
+    ibkr: Any,
+    *,
+    heartbeat: Callable[[], None],
+    pending: Callable[[], None],
+    stop: threading.Event,
+    on_tick: Callable[[], None] | None = None,
+    on_reconnected: Callable[[], None] | None = None,
+    loop: Callable[..., None] = run_loop,
+    reconnect: Callable[..., bool] = reconnect_forever,
+) -> None:
+    """`run_loop`, aber ein Verbindungsverlust ist nicht das Ende.
+
+    `run_loop` kennt genau zwei Gruende aufzuhoeren: das Stopp-Signal, oder die
+    Verbindung ist weg. Der erste ist eine Anweisung, der zweite ein Zustand —
+    und dieser Unterschied wurde bis 0.21.0 nirgends gemacht.
+
+    `loop` und `reconnect` sind Argumente, damit die Zusicherungen den Aufseher
+    ohne TWS fahren koennen. Im Betrieb stehen dort die Vorgaben.
+    """
+    while True:
+        loop(ibkr, heartbeat=heartbeat, pending=pending, stop=stop, on_tick=on_tick)
+        if stop.is_set():
+            return
+        log.warning(
+            "Lost the connection to IBKR TWS/Gateway. This is what a nightly "
+            "TWS restart looks like. Reconnecting."
+        )
+        if not reconnect(ibkr, stop):
+            return
+        if on_reconnected is not None:
+            on_reconnected()
+
+
 ENV_FILE = "bridge.env"
 
 
@@ -1933,6 +2027,25 @@ def report_poll(cockpit: Any | None) -> None:
         log.debug("Cockpit state update failed: %s", exc)
 
 
+def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> None:
+    """T1-152d — nach einer Wiederverbindung beginnt eine neue Sitzung.
+
+    Ohne das stuende im Zustandsblock weiterhin der Zeitpunkt der ersten
+    Verbindung des Tages. Bei einer Bridge, die eine naechtliche Trennung
+    ueberlebt, waere das die falsche Auskunft an genau der Stelle, an der
+    jemand nachsieht, ob sie die Nacht ueberstanden hat.
+    """
+    if cockpit is None:
+        return
+    try:
+        cockpit.store.update(
+            session_connected_at=session_connected_at.isoformat(),
+            tws_connected=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Cockpit state update failed: %s", exc)
+
+
 def stop_cockpit(cockpit: Any | None, client_id: int) -> None:
     if cockpit is None:
         return
@@ -2149,16 +2262,43 @@ def main() -> int:
             _handle_pending(api, ibkr, dispatch_id_map, submitted)
             report_poll(cockpit)
 
-        run_loop(
+        def _on_reconnected() -> None:
+            """T1-152d — was eine neue Sitzung neu braucht."""
+            nonlocal session_connected_at
+            # T1-98: der Abgleich urteilt nur ueber Auftraege, die VOR dieser
+            # Sitzung abgesendet wurden. Bliebe der alte Zeitpunkt stehen,
+            # urteilte er ueber Auftraege der neuen mit.
+            session_connected_at = datetime.now(timezone.utc)
+            # T1-88c: die Zuordnung lebt im Arbeitsspeicher, und TWS vergibt
+            # nach seinem Neustart neue Auftragsnummern. Ohne Wiederaufbau
+            # faende ein Storno seinen Auftrag nicht — die Ursache des
+            # Phantom-Stornos vom 2026-08-13.
+            rebuild_dispatch_map(ibkr, dispatch_id_map)
+            report_reconnect(cockpit, session_connected_at)
+
+        # T1-152d: der Rueckruf fuer Auftragszustaende wird hier bewusst NICHT
+        # erneut angehaengt. Er haengt am `IB`-Objekt, nicht an der Verbindung,
+        # und ueberlebt sie — ein zweites `+=` schickte jede Auftragsmeldung
+        # doppelt.
+        run_supervised(
             ibkr,
             heartbeat=_beat,
             pending=_poll,
             stop=stop,
             on_tick=lambda: handle_deferred_cancels(api),
+            on_reconnected=_on_reconnected,
         )
     finally:
+        # T1-152d: das Ende wird sichtbar. Am 2026-09-04 stand nach dem
+        # Verbindungsabbruch KEINE weitere Zeile im Protokoll — auch nicht
+        # `Bridge exited normally.`, obwohl die nach diesem Block unbedingt
+        # kommt. Welcher der drei Schritte nicht zurueckkam, war deshalb nicht
+        # zu entscheiden. Beim naechsten Mal steht es da.
+        log.info("Shutting down: stopping the cockpit.")
         stop_cockpit(cockpit, config.ibkr_client_id)
+        log.info("Shutting down: disconnecting from IBKR.")
         ibkr.disconnect()
+        log.info("Shutting down: closing the Ordertune client.")
         api.close()
 
     log.info("Bridge exited normally.")
