@@ -39,6 +39,7 @@ from .order_vocabulary import (
     LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
     LIVE_WIRE_STATES,
     rejection_reason_of,
+    unmask_wire_escapes,
 )
 
 
@@ -510,9 +511,12 @@ def _reason_of(trade: Any) -> str | None:
         code = getattr(eintrag, "errorCode", 0)
         message = getattr(eintrag, "message", "") or ""
         if code and message:
-            return f"{message} (IBKR {code})"
+            # T1-151: derselbe Riegel wie in `rejection_reason_of`. Dieser Weg
+            # ist der zweite Meldeweg — und die Lehre aus T1-137 ist genau,
+            # dass eine Regel an nur einem von beiden keine Regel ist.
+            return f"{unmask_wire_escapes(message)} (IBKR {code})"
     advanced = getattr(trade, "advancedError", "") or ""
-    return advanced or None
+    return unmask_wire_escapes(advanced) if advanced else None
 
 
 # ── T1-104: die Zahlen einer nachgeholten Ausfuehrung ────────────────────────

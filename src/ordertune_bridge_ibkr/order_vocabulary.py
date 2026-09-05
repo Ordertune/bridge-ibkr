@@ -21,6 +21,8 @@ order-execution-status-pill.tsx`
 """
 from __future__ import annotations
 
+import re
+
 # Innerer Zustand der Bridge -> das Wort, das der Nutzer auf t1 sieht.
 LABELS: dict[str, str] = {
     "submitting": "Sending",
@@ -152,6 +154,39 @@ def is_warning_code(code: int) -> bool:
     return WARNING_CODE_MIN <= code < WARNING_CODE_MAX
 
 
+# ── T1-151 — die Maskierung faellt an der Quelle ─────────────────────────────
+#
+# TWS legt nicht-ASCII maskiert auf den Draht, und ib_insync reicht das
+# unveraendert weiter. Am 2026-09-03 stand deshalb in vier Zeilen der
+# Produktionsdatenbank — und in der Absage-Mail an den Owner:
+#
+#   Order abgewiesen - Grund:Unzulässige Gültigkeitsdauer ...
+#
+# Das ist in JEDER Sprache unlesbar, auch in der, in der es geschrieben wurde.
+# Die Plattform faengt es seit T1-151 beim Lesen ab (`broker-message.ts`) —
+# hier faellt es beim Schreiben, damit Protokoll und Datenbank kuenftig
+# lesbaren Text tragen und die Belegfrage nach neuen Ursachen ohne
+# Ruecktransformation beantwortbar bleibt.
+#
+# Beide Riegel sind noetig und keiner ist ueberfluessig: eine aeltere Fassung
+# der Bridge laeuft beim Kunden weiter, und der Altbestand ist ohnehin schon
+# geschrieben.
+_MASKIERUNG = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def unmask_wire_escapes(text: str) -> str:
+    """Loest `\\uXXXX` auf, mit dem TWS nicht-ASCII maskiert.
+
+    Eng auf diese eine Form gefasst — sie ist die beobachtete. `\\xNN` waere
+    die zweite denkbare (aus `decode(errors='backslashreplace')` in
+    `ib_insync/client.py`) und ist uns nie begegnet; sie mitzuraten hiesse,
+    einen Backslash umzudeuten, den eine echte Meldung tragen koennte.
+    """
+    if "\\u" not in text:
+        return text
+    return _MASKIERUNG.sub(lambda m: chr(int(m.group(1), 16)), text)
+
+
 def rejection_reason_of(trade: object) -> str | None:
     """Der Wortlaut, mit dem IBKR diesen Auftrag abgelehnt hat, oder nichts.
 
@@ -183,7 +218,10 @@ def rejection_reason_of(trade: object) -> str | None:
 
     for entry in reversed(entries):
         if getattr(entry, "errorCode", 0) in REJECTION_CODES:
-            message = (getattr(entry, "message", "") or "").strip()
+            # T1-151: entmaskiert, damit unten lesbarer Text weitergeht.
+            message = unmask_wire_escapes(
+                (getattr(entry, "message", "") or "").strip()
+            )
             return message or "Rejected by IBKR."
 
     if not entries:
@@ -213,5 +251,8 @@ def rejection_reason_of(trade: object) -> str | None:
     if is_warning_code(code):
         return None
 
-    message = (getattr(letzter, "message", "") or "").strip()
+    # T1-151: derselbe Riegel wie am ersten Rueckgabeweg. Zwei Rueckgaben,
+    # eine Regel — sonst haengt die Lesbarkeit daran, welcher Zweig zuerst
+    # zugegriffen hat, und genau dieser Fehlertyp war der Anlass von T1-137.
+    message = unmask_wire_escapes((getattr(letzter, "message", "") or "").strip())
     return message or "Rejected by IBKR."

@@ -223,3 +223,44 @@ def test_eine_ablehnung_ohne_text_bekommt_trotzdem_einen_grund() -> None:
 def test_die_juengste_ablehnung_gewinnt() -> None:
     trade = _Trade(log=[_Entry(201, "erste"), _Entry(0, ""), _Entry(201, "zweite")])
     assert rejection_reason(trade) == "zweite"
+
+
+# ── T1-151: die Maskierung faellt an der Quelle ─────────────────────────────
+#
+# TWS legt nicht-ASCII maskiert auf den Draht, ib_insync reicht es durch. Am
+# 2026-09-03 standen deshalb vier Zeilen so in der Produktionsdatenbank — und
+# so in der Absage-Mail an den Owner:
+#
+#   Order abgewiesen - Grund:Unzul\u00e4ssige G\u00fcltigkeitsdauer ...
+#
+# Unlesbar in jeder Sprache, auch in der, in der es geschrieben wurde.
+
+from ordertune_bridge_ibkr.order_vocabulary import unmask_wire_escapes
+
+
+def test_die_maskierung_wird_aufgeloest() -> None:
+    """Der Anlassfall, Zeichen fuer Zeichen aus der Produktionsdatenbank."""
+    roh = (
+        "Order abgewiesen - Grund:Unzul\\u00e4ssige G\\u00fcltigkeitsdauer "
+        "f\\u00fcr eine At-the-Closing-Order."
+    )
+    klar = unmask_wire_escapes(roh)
+    assert "\\u" not in klar
+    assert "Unzulässige Gültigkeitsdauer für" in klar
+
+
+def test_ein_text_ohne_maskierung_bleibt_unveraendert() -> None:
+    """Kein Umschreiben auf Verdacht."""
+    assert unmask_wire_escapes("insufficient buying power") == (
+        "insufficient buying power"
+    )
+    # Ein einzelner Backslash ist keine Maskierung.
+    assert unmask_wire_escapes(r"C:\temp\log") == r"C:\temp\log"
+
+
+def test_die_ablehnung_kommt_entmaskiert_heraus() -> None:
+    """Der Riegel sitzt im Meldeweg, nicht nur in der Hilfsfunktion."""
+    trade = _Trade(log=[_Entry(201, "Grund:Unzul\\u00e4ssige G\\u00fcltigkeit")])
+    grund = rejection_reason(trade)
+    assert grund is not None and "\\u" not in grund
+    assert "Unzulässige Gültigkeit" in grund
