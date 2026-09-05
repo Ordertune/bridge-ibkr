@@ -171,6 +171,9 @@ class IbkrClient:
         # T1-101 B-2: die 321er aus dem Verbindungsfenster, mit ihrem Text.
         self._validation_errors: list[str] = []
         self._write_access = WriteAccess()
+        # T1-152d: haengt der Fehler-Rueckruf schon? Seit es eine
+        # Wiederverbindung gibt, laeuft `connect()` mehr als einmal.
+        self._error_hook_attached = False
 
     def _on_error(self, reqId: int, errorCode: int, errorString: str, *_: Any) -> None:
         """Sammelt die Fehler, die TWS von sich aus schickt.
@@ -182,12 +185,38 @@ class IbkrClient:
             self._validation_errors.append(str(errorString or "").strip())
 
     def connect(self) -> None:
+        """Verbindet — und vertraegt es, ein zweites Mal gerufen zu werden.
+
+        ## T1-152d: warum das zaehlt
+
+        Bis 0.21.0 lief diese Methode genau einmal je Vorgang. Seit es eine
+        Wiederverbindung gibt, laeuft sie nach jedem TWS-Neustart erneut, und
+        zwei Zeilen darin waren dafuer nicht gebaut:
+
+        * Das Anhaengen des Fehler-Rueckrufs. Ein zweites `+=` haengt ihn ein
+          zweites Mal an, und jede 321er-Meldung stuende doppelt in der Liste.
+        * Die Befundliste selbst. Sie wurde nie geleert — eine 321er-Meldung
+          aus der Sitzung von gestern wuerde die Schreibrechte der heutigen als
+          eingeschraenkt einstufen. Das Ergebnis waere eine Bridge, die
+          grundlos jeden Auftrag fuer aussichtslos haelt, und zwar stumm.
+
+        Beides gehoert an DIESE Stelle und nicht in die Wiederverbindung: wer
+        `connect()` ruft, beginnt eine neue Sitzung, und was die vorige gesehen
+        hat, ist kein Befund ueber die neue.
+        """
         log.info("Connecting to IBKR TWS/Gateway at %s:%d (client-id=%d)",
                  self._host, self._port, self._client_id)
         # VOR dem Verbinden angehaengt: der 321er kommt rund eine Zehntel-
         # sekunde nach den Positionen, also mitten im Verbindungsvorgang.
         # Danach angehaengt waere er schon durch.
-        self._ib.errorEvent += self._on_error
+        if not self._error_hook_attached:
+            self._ib.errorEvent += self._on_error
+            self._error_hook_attached = True
+        # T1-152d: der Befund der vorigen Sitzung faellt hier weg, nicht spaeter.
+        # `_positions_known` ebenso — solange die neue Abfrage nicht geantwortet
+        # hat, weiss diese Sitzung nichts ueber das Depot.
+        self._validation_errors.clear()
+        self._positions_known = False
         self._ib.connect(self._host, self._port, clientId=self._client_id)
         log.info("Connected to IBKR TWS/Gateway.")
         self._confirm_positions_subscription()
