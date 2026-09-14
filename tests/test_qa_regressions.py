@@ -178,15 +178,26 @@ def test_a_dropped_connection_does_not_print_a_traceback(capfd) -> None:
 
 
 def test_the_page_obeys_the_brands_negative_list() -> None:
-    """Drei Regeln, jede ausdruecklich aufgeschrieben, jede zuerst verletzt.
+    """Die Regeln, die bleiben — und die eine, die der Owner gedreht hat.
 
-    Der erste Entwurf nahm die t1-Tokens und damit Ampelfarben. Der Owner hat
-    auf eine Sprache mit ordertune.com entschieden, und das System ist an
-    diesen Punkten unmissverstaendlich.
+    T1-101 baute diese Seite zuerst auf t1-Tokens, der Owner stellte damals auf
+    die Sprache von ordertune.com um (beiges Papier). **Owner-Entscheid
+    2026-09-14 dreht das zurueck**, weil die Kopplung aus T1-178 den Nutzer
+    innerhalb einer Minute zwischen dieser Seite und der Broker-Karte hin und
+    her schickt. Die Trennlinie verlaeuft jetzt zwischen Aussenauftritt
+    (ordertune.com, beige) und Produktflaechen (t1, docs, Cockpit).
+
+    Trader-Rot ist damit fuer die FEHLERZEILE frei — t1 fuehrt `#dc2626` als
+    `--color-t1-danger`. Es bleibt verboten fuer Kurse und Renditen, und die
+    gibt es auf dieser Seite nicht. Was bleibt: genau ein Rotwert, genau an
+    einer Stelle deklariert, nirgends als Direktfarbe eingestreut.
     """
-    # Trader-Rot: "red is for losses we want to talk *with*, not panic about".
-    for rot in ("#dc2626", "#ef4444", "#e11d48", "red;"):
-        assert rot not in PAGE_HTML, f"Trader-Rot ist zurueck: {rot}"
+    # Genau EIN Rotwert, und nur als Token-Deklaration. Jede weitere Fundstelle
+    # waere eine Direktfarbe am System vorbei.
+    assert PAGE_HTML.count("#dc2626") == 1, "Rot gehoert ausschliesslich in --danger."
+    assert "--danger: #dc2626" in PAGE_HTML
+    for rot in ("#ef4444", "#e11d48", "red;"):
+        assert rot not in PAGE_HTML, f"Rot am Token vorbei: {rot}"
 
     # Karte mit farbigem linken Rand steht woertlich auf der Verbotsliste.
     assert "border-left: 3px solid" not in PAGE_HTML
@@ -199,6 +210,40 @@ def test_the_page_obeys_the_brands_negative_list() -> None:
     # Zwei im Dokument — Assistent und Einstellungen sind nie gleichzeitig zu
     # sehen.
     assert PAGE_HTML.count("action primary") == 2
+
+
+def test_the_page_speaks_the_same_tokens_as_t1_and_docs() -> None:
+    """Die Werte sind aus t1 abgeschrieben — und muessen es bleiben.
+
+    Gegenstuecke: `t1.ordertune.com/src/app/globals.css` (Quelle) und
+    `docs.ordertune.com/styles/globals.css` (fuehrt dieselben Werte mit
+    Quellenangabe). Driftet einer der drei, faellt es hier auf, statt erst
+    jemandem ins Auge, der zwischen zwei Fenstern einen Code abtippt.
+    """
+    for token, wert in (
+        ("--bg", "#ffffff"),
+        ("--surface", "#f5f7fa"),
+        ("--surface-2", "#eef1f5"),
+        ("--surface-3", "#e6eaf0"),
+        ("--fg-1", "#18181b"),
+        ("--fg-2", "#52525b"),
+        ("--fg-3", "#a1a1aa"),
+        ("--border", "#d4d8df"),
+        ("--border-strong", "#b9bec7"),
+        ("--lime", "#c8f23e"),
+        ("--lime-deep", "#b6df2b"),
+    ):
+        assert f"{token}: {wert}" in PAGE_HTML, f"{token} weicht von t1 ab."
+
+    # Der dunkle Modus ist kein Beiwerk: docs startet dunkel, und eine Bridge
+    # laeuft abends. Ohne den Block waere die Seite nachts die einzige helle
+    # Flaeche im Vorgang.
+    assert "@media (prefers-color-scheme: dark)" in PAGE_HTML
+    assert "color-scheme: light dark" in PAGE_HTML
+
+    # Der Statement-Block darf im dunklen Modus nicht gegen die Flaeche
+    # verschwinden — dort traegt er einen Rahmen statt der Schwaerze.
+    assert "--statement-border: #3a3a3a" in PAGE_HTML
 
 
 def test_the_wordmark_is_never_typeset() -> None:
