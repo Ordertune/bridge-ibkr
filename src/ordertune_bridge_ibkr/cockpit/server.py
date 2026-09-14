@@ -164,6 +164,10 @@ class _Handler(BaseHTTPRequestHandler):
             "/verify": setup.verify,
             "/settings": setup.save,
             "/credentials": setup.replace,
+            # T1-178: die Kopplung. Zwei Wege, weil der Vorgang zwei Schritte
+            # hat, zwischen denen ein Mensch etwas tut.
+            "/pair/start": setup.pair_start,
+            "/pair/poll": setup.pair_poll,
         }
         handler = wege.get(parsed.path)
         if handler is None:

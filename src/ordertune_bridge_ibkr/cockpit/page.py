@@ -235,6 +235,15 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
 .note.ok { color: var(--success); } .note.bad { color: var(--danger); }
 
 /* ── Assistent ─────────────────────────────────────────────────────── */
+/* Der Kopplungscode. Er wird ABGETIPPT, oft von einem Fenster ins andere und
+   bei einem VPS sogar von einer Maschine auf die naechste — deshalb gross,
+   weit gesperrt und in Ziffernbreite. */
+.code { font-family: var(--mono); font-size: 30px; font-weight: 600;
+        letter-spacing: .22em; margin: 4px 0 10px;
+        font-variant-numeric: tabular-nums; color: var(--fg-1); }
+details { margin-top: 18px; }
+summary { cursor: pointer; font-size: 13px; color: var(--fg-2); }
+summary:hover { color: var(--fg-1); }
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li { padding: 0 0 40px 0; }
 .steps li + li { border-top: 1px solid var(--border); padding-top: 32px; }
@@ -283,13 +292,31 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
   <div id="setup" hidden>
     <ol class="steps">
       <li>
-        <h3>1 &middot; Put your bridge.env here</h3>
-        <p class="muted">Download it from Ordertune (Settings -&gt; Broker) and paste the
-        whole block. You never have to type a token by hand.</p>
-        <textarea id="envbox" rows="7" spellcheck="false"
-          placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
-        <p><button class="action primary" id="s1">Save bridge.env</button>
-           <span class="note" id="s1msg"></span></p>
+        <h3>1 &middot; Connect this machine to Ordertune</h3>
+        <p class="muted">Get a code here, type it into Ordertune, done. Nothing to
+        download, nothing to copy between windows.</p>
+        <p><button class="action primary" id="p1">Get a pairing code</button>
+           <span class="note" id="p1msg"></span></p>
+        <div id="paircode" hidden>
+          <p class="code">- - - - -</p>
+          <p class="muted">Open <span class="mono" id="pairurl">t1.ordertune.com</span>
+          &rarr; Settings &rarr; Broker and enter this code. It is valid for
+          <span id="pairttl">10</span> minutes.</p>
+          <p class="muted">Ordertune will ask you to confirm this machine. It should
+          show:<br>
+          computer <span class="mono" id="pairhost">-</span>, hardware
+          <span class="mono" id="pairfp">-</span></p>
+          <p class="note" id="pairstate">Waiting for you to confirm in Ordertune...</p>
+        </div>
+        <details>
+          <summary>Or paste a bridge.env you downloaded</summary>
+          <p class="muted">The older way, and it still works -- useful when this machine
+          has no browser, or when you run the Bridge unattended.</p>
+          <textarea id="envbox" rows="7" spellcheck="false"
+            placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
+          <p><button class="action" id="s1">Save bridge.env</button>
+             <span class="note" id="s1msg"></span></p>
+        </details>
       </li>
       <li>
         <h3>2 &middot; Find TWS</h3>
@@ -670,6 +697,59 @@ q("f-replace").addEventListener("click", () => {
     if (r.ok) { q("f-env").value = ""; loadConfig(); }
   });
 });
+
+/* T1-178 — die Kopplung.
+   Ein Code holen, anzeigen, und dann fragen, ob der Nutzer bestaetigt hat.
+   Das Geheimnis liegt ausschliesslich im Vorgang der Bridge; diese Seite
+   bekommt es nie zu sehen und braucht es auch nicht. */
+let pairTimer = null;
+let pairLeft = 0;
+
+q("p1").addEventListener("click", () => {
+  note("p1msg", {ok: true, message: "Asking Ordertune..."});
+  post("/pair/start", {}).then(r => {
+    if (!r.ok) { note("p1msg", r); return; }
+    note("p1msg", {ok: true, message: ""});
+    q("paircode").hidden = false;
+    q("paircode").querySelector(".code").textContent = r.code || "";
+    q("pairhost").textContent = r.hostname || "-";
+    q("pairfp").textContent = r.fingerprint_prefix || "-";
+    pairLeft = Math.max(0, Math.floor((r.expires_in || 600) / 60));
+    q("pairttl").textContent = String(pairLeft);
+    startPairPolling();
+  });
+});
+
+function startPairPolling() {
+  if (pairTimer !== null) clearInterval(pairTimer);
+  /* Alle drei Sekunden. Bei zehn Minuten Frist sind das gut zweihundert
+     Abrufe — der Deckel auf der Plattform liegt darueber. */
+  pairTimer = setInterval(pollPairing, 3000);
+  pollPairing();
+}
+
+function pollPairing() {
+  post("/pair/poll", {}).then(r => {
+    if (r.status === "ready") {
+      clearInterval(pairTimer); pairTimer = null;
+      q("pairstate").textContent =
+        "Paired. bridge.env written - the Bridge starts on its own.";
+      q("pairstate").className = "note ok";
+      return;
+    }
+    if (r.status === "pending") {
+      q("pairstate").textContent = "Waiting for you to confirm in Ordertune...";
+      q("pairstate").className = "note";
+      return;
+    }
+    /* `unknown` heisst: abgelaufen, verbraucht oder von jemand anderem
+       geholt. In allen drei Faellen hilft nur ein neuer Code. */
+    clearInterval(pairTimer); pairTimer = null;
+    q("pairstate").textContent = r.message
+      || "That code is no longer valid. Get a new one.";
+    q("pairstate").className = "note bad";
+  });
+}
 
 q("s1").addEventListener("click", () => {
   post("/credentials", {content: q("envbox").value}).then(r => note("s1msg", r));
