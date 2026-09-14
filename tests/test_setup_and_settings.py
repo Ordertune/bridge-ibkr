@@ -13,6 +13,7 @@ Die Zusagen, die hier tragen:
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -276,3 +277,111 @@ def test_orders_in_flight_ignores_settled_ones() -> None:
         assert m.orders_in_flight() is False
     finally:
         m._TRADES_BY_DISPATCH.clear()
+
+
+# ── T1-176 A: der Pruefschritt fragt die Tuer, die aufgeht ───────────────────
+
+
+class _Antwort:
+    """Was `httpx` zurueckgibt — nur so viel, wie `check_handshake` anfasst."""
+
+    status_code = 200
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _MitschreibenderClient:
+    """Faengt den Aufruf ab, statt ihn zu machen."""
+
+    letzte: ClassVar[dict] = {}
+
+    def __init__(self, *_, **kwargs) -> None:
+        type(self).letzte = {"init": kwargs}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_) -> None:
+        return None
+
+    def post(self, url, headers=None, json=None):
+        type(self).letzte.update(
+            {"method": "POST", "url": url, "headers": headers or {}, "json": json or {}}
+        )
+        return _Antwort()
+
+    def get(self, url, headers=None):
+        type(self).letzte.update(
+            {"method": "GET", "url": url, "headers": headers or {}}
+        )
+        return _Antwort()
+
+
+@pytest.fixture()
+def aufruf(monkeypatch):
+    _MitschreibenderClient.letzte = {}
+    monkeypatch.setattr(setup_mod.httpx, "Client", _MitschreibenderClient)
+    return _MitschreibenderClient
+
+
+def test_the_credential_check_asks_the_handshake_not_the_status_route(aufruf) -> None:
+    """Der Befund aus T1-176 A.
+
+    `handshake-status` ist die EINZIGE Route unter `/api/bridge/v1/*`, die eine
+    Browser-Sitzung verlangt. Mit einem Token befragt, antwortet sie `401` — und
+    weil `unauthenticated` nicht in `_HANDSHAKE_BY_CODE` steht, las der Nutzer
+    bei korrekten Zugangsdaten „Ordertune refused the handshake (HTTP 401)".
+
+    Es gab keine Eingabe, die diesen Schritt bestehen liess.
+    """
+    ergebnis = setup_mod.check_handshake(
+        "https://t1.ordertune.com", "t" * 40, "11111111-2222-3333-4444-555555555555"
+    )
+
+    assert ergebnis["ok"] is True
+    assert aufruf.letzte["method"] == "POST"
+    assert aufruf.letzte["url"].endswith("/api/bridge/v1/handshake")
+    assert "handshake-status" not in aufruf.letzte["url"]
+
+
+def test_the_credential_check_sends_no_connection_id_header(aufruf) -> None:
+    """Den Kopf hat serverseitig nie jemand gelesen.
+
+    Der Token loest die Verbindung auf; ein zweiter Bezeichner auf der Leitung
+    waere eine Quelle fuer Widersprueche.
+    """
+    setup_mod.check_handshake("https://t1.ordertune.com", "t" * 40, "egal")
+
+    koepfe = {k.lower() for k in aufruf.letzte["headers"]}
+    assert "x-bridge-connection-id" not in koepfe
+    assert "authorization" in koepfe
+    assert "x-bridge-fingerprint" in koepfe
+
+
+def test_the_credential_check_speaks_the_wire_contract(aufruf) -> None:
+    """Der Koerper ist `.strict()` — ein Feld zu viel oder zu wenig ist 422."""
+    from ordertune_bridge_ibkr import __version__
+    from ordertune_bridge_ibkr.capabilities import IBKR_CAPABILITIES
+
+    setup_mod.check_handshake("https://t1.ordertune.com", "t" * 40, "egal")
+
+    assert aufruf.letzte["json"] == {
+        "bridgeVersion": __version__,
+        "capabilities": IBKR_CAPABILITIES,
+    }
+
+
+def test_a_refused_check_still_carries_the_action(aufruf, monkeypatch) -> None:
+    """Die Zuordnung bleibt `classify_handshake_error` — sie war nie das Problem."""
+
+    class _Abgelehnt(_MitschreibenderClient):
+        def post(self, url, headers=None, json=None):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(setup_mod.httpx, "Client", _Abgelehnt)
+    ergebnis = setup_mod.check_handshake("https://t1.ordertune.com", "t" * 40, "egal")
+
+    assert ergebnis["ok"] is False
+    assert ergebnis["code"] == "platform_unreachable"
+    assert ergebnis["action"]

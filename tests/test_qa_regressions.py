@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ordertune_bridge_ibkr import env_file
+from ordertune_bridge_ibkr import env_file, failures
 from ordertune_bridge_ibkr.cockpit import CockpitServer, StateStore
 from ordertune_bridge_ibkr.cockpit import runfile
 from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
@@ -262,3 +262,59 @@ def test_the_wordmark_is_never_typeset() -> None:
 def test_figures_are_tabular() -> None:
     """Ziffern springen sonst bei jedem Takt — bei einer mitlaufenden Uhr sichtbar."""
     assert "tabular-nums" in PAGE_HTML
+
+
+# ── T1-177 D: ein Widerruf ist endgueltig, ein Netzfehler nicht ──────────────
+
+
+class _Antwort401:
+    status_code = 401
+
+    def __init__(self, code: str) -> None:
+        self.text = f'{{"error":{{"code":"{code}","message":"nope"}}}}'
+
+
+def _fehler(code: str, status: int = 401) -> Exception:
+    exc = RuntimeError("abgewiesen")
+    antwort = _Antwort401(code)
+    antwort.status_code = status
+    exc.response = antwort  # type: ignore[attr-defined]
+    return exc
+
+
+def test_a_revoked_token_is_terminal() -> None:
+    """Nach „Disconnect the bridge" lief das Programm bis hierher weiter.
+
+    Es hielt seine TWS-Sitzung und fragte alle paar Sekunden nach Auftraegen,
+    die es nie bekommen wuerde — und t1 konnte dem Nutzer nicht sagen, dass da
+    noch etwas laeuft, weil der Widerruf genau diesen Kanal kappt.
+    """
+    f = failures.revocation_failure(_fehler("connection_revoked"))
+    assert f is not None
+    assert f.code == "connection_revoked"
+    assert f.action
+
+
+def test_an_empty_or_bad_token_is_terminal_too() -> None:
+    for code in ("invalid_token", "missing_token"):
+        assert failures.revocation_failure(_fehler(code)) is not None
+
+
+def test_a_network_error_is_not_terminal() -> None:
+    """**Der Gegentest.** Wuerde die Bridge hier aufhoeren, waere T1-152d
+    zurueckgedreht — sie soll einen Ausfall aussitzen, nicht quittieren."""
+    assert failures.revocation_failure(RuntimeError("connection reset")) is None
+
+
+def test_a_rate_limit_is_not_terminal() -> None:
+    assert failures.revocation_failure(_fehler("rate_limited", status=429)) is None
+
+
+def test_a_fingerprint_mismatch_does_not_stop_the_bridge() -> None:
+    """Bewusst ausgenommen.
+
+    Er waere ebenso endgueltig — aber die Stabilitaet des Fingerabdrucks ist
+    eine offene Frage, und ein Riegel, der bei einer wandernden MAC-Adresse
+    anhaelt, waere derselbe Fehler wie der IP-Pin.
+    """
+    assert failures.revocation_failure(_fehler("fingerprint_mismatch", status=403)) is None

@@ -47,9 +47,10 @@ import threading
 import time
 from pathlib import Path
 
+from . import paths
+
 log = logging.getLogger(__name__)
 
-STATE_DIR = "run"
 DATEINAME = "submitted-dispatches.json"
 
 # Wie lange ein Eintrag mitgefuehrt wird. Deutlich mehr als die 24 Stunden, die
@@ -65,8 +66,12 @@ class SubmittedStore:
     funktionieren, wenn sonst nichts mehr geht.
     """
 
-    def __init__(self, state_dir: str | Path = STATE_DIR) -> None:
-        self._path = Path(state_dir) / DATEINAME
+    def __init__(self, state_dir: str | Path | None = None) -> None:
+        # T1-176 B: ohne Angabe die Ablage aus `paths`. Vorher `./run` —
+        # relativ zum Arbeitsverzeichnis, und damit bei einem Start von
+        # anderswo ein leerer Riegel.
+        basis = paths.run_dir() if state_dir is None else Path(state_dir)
+        self._path = basis / DATEINAME
         self._lock = threading.Lock()
         self._eintraege: dict[str, float] = {}
         self._schreibbar = True

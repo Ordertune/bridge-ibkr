@@ -7,10 +7,12 @@ from pathlib import Path
 
 import coloredlogs
 
+from . import paths
+
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 
-def setup_logging(level: str = "INFO", log_dir: str | Path = "logs") -> Path:
+def setup_logging(level: str = "INFO", log_dir: str | Path | None = None) -> Path:
     """Console + rolling-file logging. Files retained 30 days.
 
     Gibt den **absoluten** Pfad der Protokolldatei zurueck (T1-101 A-4).
@@ -22,7 +24,7 @@ def setup_logging(level: str = "INFO", log_dir: str | Path = "logs") -> Path:
     """
     coloredlogs.install(level=level, fmt=LOG_FORMAT)
 
-    log_path = Path(log_dir)
+    log_path = paths.log_dir() if log_dir is None else Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
     log_file = (log_path / "bridge.log").resolve()
 

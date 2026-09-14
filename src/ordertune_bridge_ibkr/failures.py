@@ -327,6 +327,19 @@ def _error_code_from_body(body: str) -> str | None:
     return None
 
 
+def _response_body(response: object) -> str:
+    """Den Antwortkoerper lesen, ohne dass das Lesen selbst zum Fehler wird.
+
+    Stand zweimal wortgleich da — einmal in der Zuordnung, einmal im
+    Widerrufs-Erkenner. Beim zweiten Kopieren gehoert so etwas ins gemeinsame
+    Stueck, sonst driften die beiden.
+    """
+    try:
+        return getattr(response, "text", "") or ""
+    except Exception:  # noqa: BLE001 - ein unlesbarer Koerper ist kein Absturz
+        return ""
+
+
 def classify_handshake_error(exc: Exception, api_base: str | None = None) -> Failure:
     """Die Antwort der Plattform in einen Satz und eine Handlung uebersetzen."""
     response = getattr(exc, "response", None)
@@ -345,11 +358,7 @@ def classify_handshake_error(exc: Exception, api_base: str | None = None) -> Fai
             ),
         )
 
-    body = ""
-    try:
-        body = response.text or ""
-    except Exception:  # pragma: no cover - defensiv
-        body = ""
+    body = _response_body(response)
 
     known = _HANDSHAKE_BY_CODE.get(_error_code_from_body(body) or "")
     if known is not None:
@@ -419,3 +428,46 @@ def render(failure: Failure, log_path: str | None = None) -> str:
     # `UnicodeEncodeError` beim Ausgeben einer Fehlermeldung waere ausgerechnet
     # der Fehler, den dieser Baustein verhindern soll.
     return "\n".join(lines).encode("ascii", "replace").decode("ascii")
+
+
+# ── T1-177 D: der Widerruf ist endgueltig, ein Netzfehler nicht ──────────────
+
+# Antwortcodes, nach denen ein Weiterlaufen sinnlos ist. Alle drei sagen
+# dasselbe: dieser Token oeffnet nichts mehr, und kein Neustart aendert das.
+#
+# Bewusst NICHT dabei ist `fingerprint_mismatch`. Er waere ebenso endgueltig,
+# aber die Stabilitaet des Fingerabdrucks ist eine eigene, offene Frage
+# (T1-176, „Nicht in diesem Spec"), und ein Riegel, der bei einer wandernden
+# MAC-Adresse die Bridge anhaelt, waere derselbe Fehler wie der IP-Pin.
+TERMINAL_AUTH_CODES = frozenset({
+    "connection_revoked",
+    "invalid_token",
+    "missing_token",
+})
+
+
+def revocation_failure(
+    exc: Exception, api_base: str | None = None
+) -> Failure | None:
+    """Wurde diese Bridge ausgesperrt — oder war nur das Netz weg?
+
+    Der Unterschied ist der ganze Punkt. Bis hierher fing `_handle_heartbeat`
+    beides gleich ab, schrieb eine Warnung und lief weiter: nach einem Klick auf
+    „Disconnect the bridge" lief das Programm also unveraendert weiter, hielt
+    seine TWS-Sitzung und fragte alle paar Sekunden nach Auftraegen, die es nie
+    bekommen wuerde. Der Nutzer hatte keine Rueckmeldung, dass da noch etwas
+    laeuft — und t1 konnte ihm keine geben, weil der Widerruf genau den Kanal
+    kappt, ueber den die Frage zu beantworten waere.
+
+    Gibt `None` zurueck, wenn weitergelaufen werden soll. Das ist die
+    Vorgabe — ein Netzausfall darf die Bridge nicht anhalten, dafuer ist
+    T1-152d gebaut.
+    """
+    response = getattr(exc, "response", None)
+    if getattr(response, "status_code", None) != 401:
+        return None
+
+    if _error_code_from_body(_response_body(response)) not in TERMINAL_AUTH_CODES:
+        return None
+
+    return classify_handshake_error(exc, api_base)

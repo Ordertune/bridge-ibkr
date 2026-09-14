@@ -17,16 +17,18 @@ import logging
 import os
 from pathlib import Path
 
+from .. import paths
+
 log = logging.getLogger(__name__)
 
-RUN_DIR = "run"
+
+def runfile_path(client_id: int, run_dir: str | Path | None = None) -> Path:
+    """T1-176 B: ohne Angabe die Ablage aus `paths`, nicht mehr `./run`."""
+    basis = paths.run_dir() if run_dir is None else Path(run_dir)
+    return basis / f"cockpit-{client_id}.json"
 
 
-def runfile_path(client_id: int, run_dir: str | Path = RUN_DIR) -> Path:
-    return Path(run_dir) / f"cockpit-{client_id}.json"
-
-
-def write(client_id: int, url: str, run_dir: str | Path = RUN_DIR) -> Path | None:
+def write(client_id: int, url: str, run_dir: str | Path | None = None) -> Path | None:
     """Legt die Adresse ab. Ein Fehler hier haelt die Bridge nicht auf."""
     path = runfile_path(client_id, run_dir)
     try:
@@ -50,7 +52,7 @@ def write(client_id: int, url: str, run_dir: str | Path = RUN_DIR) -> Path | Non
         return None
 
 
-def remove(client_id: int, run_dir: str | Path = RUN_DIR) -> None:
+def remove(client_id: int, run_dir: str | Path | None = None) -> None:
     try:
         runfile_path(client_id, run_dir).unlink(missing_ok=True)
     except OSError as exc:  # pragma: no cover - defensiv

@@ -49,6 +49,8 @@ from zoneinfo import ZoneInfo
 
 from . import __version__, console, failures, order_vocabulary, port_probe
 from .api_client import OrdertuneApiClient
+from . import paths
+from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
 from .fingerprint import compute_fingerprint
 from .ibkr_client import IbkrClient
@@ -300,12 +302,6 @@ def should_report(dispatch_id: str, mapped: str) -> bool:
 #
 # fractionalQtyPrecision=0: es werden ganze Stücke gehandelt. Steht die Zahl
 # falsch, rundet die Plattform Ordermengen auf Bruchteile, die IBKR ablehnt.
-IBKR_CAPABILITIES: dict[str, Any] = {
-    "supportsFractionalShares": False,
-    "fractionalQtyPrecision": 0,
-    "minNotionalUsd": None,
-    "supportsBulkSend": True,
-}
 _REPORTED_LOCK = threading.Lock()
 
 
@@ -2119,8 +2115,17 @@ def main() -> int:
                 argv,
             )
 
+    # T1-176 B: die Zustandsdateien liegen ab jetzt am Nutzerprofil und nicht
+    # mehr im Arbeitsverzeichnis. Der Umzug muss VOR `setup_logging` laufen,
+    # weil der Protokollordner selbst dazugehoert — deshalb sammelt er seine
+    # Meldungen ein, statt sie zu schreiben.
+    umzugsmeldungen = paths.migrate_legacy()
+    paths.ensure_readme()
+
     log_file = setup_logging(level=config.log_level)
     log.info("Log file: %s", log_file)
+    for stufe, zeile in umzugsmeldungen:
+        log.log(logging.WARNING if stufe == "warning" else logging.INFO, "%s", zeile)
     log.info("ordertune-bridge-ibkr v%s starting up", __version__)
 
     if config.update_check_enabled:
@@ -2237,12 +2242,33 @@ def main() -> int:
         write_access=ibkr.write_access(),
     )
 
+    # T1-177 D: wenn der Zugang entzogen wurde, haelt sich die Bridge selbst
+    # an — und der Grund ueberlebt die Schleife, damit er danach im gerahmten
+    # Block steht und nicht nur als Warnzeile im Protokoll.
+    widerruf: failures.Failure | None = None
+
     try:
         def _beat() -> None:
+            nonlocal widerruf
             # Zuerst das Lebenszeichen, dann die Fremdsicht. Umgekehrt haette
             # ein langsamer Abruf den Heartbeat verzoegert, und der ist das
             # Einzige, woran die Plattform erkennt, dass die Bridge lebt.
             snap, beat_error = _handle_heartbeat(api, ibkr)
+
+            # Der Herzschlag ist der verlaessliche Melder: er laeuft jede
+            # Minute und spricht immer mit der Plattform. Ein Widerruf faellt
+            # hier also spaetestens nach einem Takt auf.
+            if beat_error is not None and widerruf is None:
+                widerruf = failures.revocation_failure(
+                    beat_error, str(config.ordertune_api_base)
+                )
+                if widerruf is not None:
+                    log.warning(
+                        "Ordertune has revoked this bridge's access. Stopping "
+                        "— a restart will not help until a new token is issued."
+                    )
+                    stop.set()
+                    return
             _handle_external_executions(api, ibkr)
             # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
             # Fremdsicht — er ist die langsamste der drei Aufgaben und die
@@ -2300,6 +2326,14 @@ def main() -> int:
         ibkr.disconnect()
         log.info("Shutting down: closing the Ordertune client.")
         api.close()
+
+    # T1-177 D: kein normales Ende. Der gerahmte Block sagt, was passiert ist
+    # und was zu tun ist — dieselbe Ausgabe wie bei einem Startfehler, weil es
+    # fuer den Nutzer dieselbe Sorte Nachricht ist. Er steht NACH dem
+    # Aufraeumen, damit die TWS-Sitzung sauber geschlossen ist, bevor jemand
+    # liest, dass er etwas tun soll.
+    if widerruf is not None:
+        return _abort(widerruf, log_file, argv)
 
     log.info("Bridge exited normally.")
     return 0

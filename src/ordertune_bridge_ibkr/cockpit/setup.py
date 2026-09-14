@@ -79,21 +79,52 @@ def check_socket(host: str, port: int) -> dict[str, Any]:
 def check_handshake(base_url: str, token: str, connection_id: str) -> dict[str, Any]:
     """C-1 Schritt 4 — nimmt die Plattform diese Zugangsdaten an?
 
-    Ein gewoehnlicher HTTPS-Aufruf gegen denselben Weg, den die Bridge beim
-    Start geht. Er registriert den Fingerabdruck dieser Maschine, wenn er noch
-    nicht gesetzt ist — genau das, was beim ersten Start ohnehin passiert.
+    ## Der Fehler, aus dem das entstanden ist (T1-176 A)
+
+    Bis hierher fragte dieser Schritt `GET /api/bridge/v1/handshake-status` mit
+    einem Bearer-Token und einem Kopf `X-Bridge-Connection-Id`. Beides ging ins
+    Leere: jene Route ist die EINZIGE unter `/api/bridge/v1/*`, die eine
+    Browser-Sitzung verlangt, und sie liest die Verbindung aus dem
+    Abfrageteil der URL. Den Kopf liest serverseitig niemand.
+
+    Ohne Sitzungs-Cookie antwortete sie `401 unauthenticated`. Der Code steht
+    nicht in `_HANDSHAKE_BY_CODE`, also griff der Notfall-Zweig, und der Nutzer
+    las bei voellig korrekten Zugangsdaten „Ordertune refused the handshake
+    (HTTP 401)". Es gab keine Eingabe, die diesen Schritt bestehen liess.
+
+    ## Was jetzt gefragt wird
+
+    Der Weg, den die Bridge beim Start ohnehin geht: `POST /handshake`. Das ist
+    kein Umweg, sondern die genauere Frage — „nimmt die Plattform diese
+    Zugangsdaten an" ist genau das, was der Handshake beantwortet. Der
+    Docstring behauptete das vorher schon; jetzt tut der Code es auch.
+
+    Er bindet dabei den Fingerabdruck dieser Maschine, falls noch keiner
+    gebunden ist. Das ist gewollt und identisch mit dem, was der naechste Start
+    ohnehin tun wuerde.
+
+    `connection_id` wird nicht mehr mitgeschickt — der Token loest die
+    Verbindung serverseitig auf, und ein zweiter Bezeichner waere eine Quelle
+    fuer Widersprueche. Das Argument bleibt in der Signatur, weil die Flaeche
+    es als „sind ueberhaupt Zugangsdaten hinterlegt" auswertet.
     """
+    from .. import __version__
+    from ..capabilities import IBKR_CAPABILITIES
     from ..failures import classify_handshake_error
 
-    url = f"{base_url.rstrip('/')}/api/bridge/v1/handshake-status"
+    url = f"{base_url.rstrip('/')}/api/bridge/v1/handshake"
     try:
         with httpx.Client(timeout=HANDSHAKE_TIMEOUT_S) as client:
-            r = client.get(
+            r = client.post(
                 url,
                 headers={
                     "Authorization": f"Bearer {token}",
-                    "X-Bridge-Connection-Id": connection_id,
                     "X-Bridge-Fingerprint": compute_fingerprint(),
+                    "X-Bridge-Version": __version__,
+                },
+                json={
+                    "bridgeVersion": __version__,
+                    "capabilities": IBKR_CAPABILITIES,
                 },
             )
             r.raise_for_status()
