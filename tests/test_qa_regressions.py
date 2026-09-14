@@ -318,3 +318,70 @@ def test_a_fingerprint_mismatch_does_not_stop_the_bridge() -> None:
     anhaelt, waere derselbe Fehler wie der IP-Pin.
     """
     assert failures.revocation_failure(_fehler("fingerprint_mismatch", status=403)) is None
+
+
+# ── T1-179 Zweiter Durchgang: die Flaeche des ersten Starts ──────────────────
+
+
+def test_the_window_says_what_it_is() -> None:
+    """Auf dem Rechner sind TWS, ein Browser und die Ordertune-Seite offen.
+
+    „Bridge" als Augenbraue neben einem Icon genuegt dann nicht, um den
+    richtigen Tab wiederzufinden.
+    """
+    assert "Ordertune Bridge" in PAGE_HTML
+    assert '<span class="name">' in PAGE_HTML
+
+
+def test_the_pairing_code_gets_its_own_surface() -> None:
+    """Der Code ist der Grund, aus dem dieses Fenster beim ersten Start aufgeht.
+
+    Er stand zuerst als Zeile zwischen zwei Absaetzen. Jetzt traegt er eine
+    eigene Flaeche, und die Schrift ist gross genug zum Abtippen von einem
+    Rechner auf den naechsten.
+    """
+    assert 'class="pairbox"' in PAGE_HTML
+    assert ".code {" in PAGE_HTML
+    # Ziffernbreite und Sperrung sind nicht Geschmack: der Code wird
+    # abgetippt, und 0/O sind im Alphabet zwar ausgeschlossen, 5/S aber nicht.
+    assert "font-variant-numeric: tabular-nums" in PAGE_HTML
+    assert "letter-spacing: .24em" in PAGE_HTML
+
+
+def test_the_machine_block_is_set_apart() -> None:
+    """**Der Riegel gegen die erschlichene Kopplung.**
+
+    Rechnername und Fingerabdruck sind kein Beiwerk — sie sind das Einzige,
+    woran der Nutzer erkennt, ob t1 gerade SEINE Maschine zeigt. Deshalb
+    abgesetzt, mit eigener Aufforderung zum Vergleich.
+    """
+    assert 'class="pairmachine"' in PAGE_HTML
+    assert "It must show exactly this" in PAGE_HTML
+    assert 'id="pairhost"' in PAGE_HTML and 'id="pairfp"' in PAGE_HTML
+
+
+def test_the_deadline_counts_down() -> None:
+    """Eine Frist, die nur als Zahl dasteht, sagt nach fuenf Minuten nichts mehr.
+
+    Und wer abtippt, sieht nicht auf die Uhr.
+    """
+    assert "function startTtl" in PAGE_HTML
+    assert "This code has expired" in PAGE_HTML
+    # Kurz vor Schluss faerbt sie sich — ueber `--warn`, nicht ueber `--danger`:
+    # eine ablaufende Frist ist kein Fehler.
+    assert ".pairttl.soon { color: var(--warn); }" in PAGE_HTML
+
+
+def test_the_target_is_a_link_not_a_string_to_retype() -> None:
+    """Der Browser ist auf demselben Rechner offen. Ihn die Adresse abtippen zu
+    lassen, waere genau die Handarbeit, die dieser Vorgang abschafft."""
+    assert 'id="pairurl" href=' in PAGE_HTML
+    assert 'target="_blank"' in PAGE_HTML and 'rel="noopener"' in PAGE_HTML
+
+
+def test_the_steps_carry_a_marker_instead_of_a_number_in_the_title() -> None:
+    """Eine Ziffer im Fliesstext liest sich als Teil der Ueberschrift."""
+    assert "counter-reset: schritt" in PAGE_HTML
+    assert "counter-increment: schritt" in PAGE_HTML
+    # Und die alte Schreibweise ist weg.
+    assert "1 &middot;" not in PAGE_HTML

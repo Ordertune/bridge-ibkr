@@ -135,8 +135,16 @@ body { margin: 0; background: var(--bg); color: var(--fg-1);
 .shell { max-width: 62rem; margin: 0 auto; padding: 40px 24px 96px; }
 
 /* ── Kopf ──────────────────────────────────────────────────────────── */
-header { display: flex; align-items: center; gap: 12px; margin-bottom: 48px; }
-header img { width: 28px; height: 28px; border-radius: var(--r-xs); display: block; }
+/* T1-179: das Fenster sagt jetzt, was es ist. Vorher stand neben dem Icon
+   nur „Bridge" als Augenbraue — auf einem Rechner, auf dem gleichzeitig TWS,
+   ein Browser und die Ordertune-Seite offen sind, ist das zu wenig, um den
+   richtigen Tab wiederzufinden. */
+header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 44px;
+         padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+header img { width: 24px; height: 24px; border-radius: var(--r-xs);
+             display: block; align-self: center; }
+header .name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+               color: var(--fg-1); }
 .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
            color: var(--fg-2); font-weight: 500; }
 header .ver { margin-left: auto; font-size: 12px; color: var(--fg-3);
@@ -235,18 +243,55 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
 .note.ok { color: var(--success); } .note.bad { color: var(--danger); }
 
 /* ── Assistent ─────────────────────────────────────────────────────── */
-/* Der Kopplungscode. Er wird ABGETIPPT, oft von einem Fenster ins andere und
-   bei einem VPS sogar von einer Maschine auf die naechste — deshalb gross,
-   weit gesperrt und in Ziffernbreite. */
-.code { font-family: var(--mono); font-size: 30px; font-weight: 600;
-        letter-spacing: .22em; margin: 4px 0 10px;
+/* T1-179 — der Kopplungscode ist das, wofuer dieses Fenster beim ersten Start
+   ueberhaupt aufgeht. Er bekommt deshalb eine eigene Flaeche und nicht eine
+   Zeile zwischen zwei Absaetzen.
+
+   Der Code wird ABGETIPPT, oft von einem Fenster ins andere und bei einem VPS
+   sogar von einer Maschine auf die naechste — gross, weit gesperrt, in
+   Ziffernbreite. Die Restzeit steht darunter und laeuft mit: eine Frist, die
+   man nur als Zahl liest („10 Minuten"), sagt nach fuenf Minuten nichts mehr. */
+.pairbox { border: 1px solid var(--border); border-radius: var(--r-md);
+           background: var(--surface); padding: 24px; margin: 14px 0 0; }
+.pairlead { margin: 0; font-size: 13px; font-weight: 500; color: var(--fg-2);
+            text-transform: uppercase; letter-spacing: .1em; }
+.code { font-family: var(--mono); font-size: 38px; font-weight: 600;
+        letter-spacing: .24em; margin: 10px 0 2px; line-height: 1.1;
         font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.pairttl { margin: 0 0 18px; font-size: 13px; color: var(--fg-3);
+           font-variant-numeric: tabular-nums; }
+.pairttl.soon { color: var(--warn); }
+.pairwhere { margin: 0 0 18px; font-size: 14px; color: var(--fg-2); }
+.pairwhere a { color: var(--fg-1); text-decoration: underline;
+               text-underline-offset: 3px; text-decoration-color: var(--lime-deep);
+               text-decoration-thickness: 2px; }
+
+/* Die Maschinenangaben sind kein Beiwerk: sie sind der einzige Riegel gegen
+   eine erschlichene Kopplung. Deshalb abgesetzt, damit der Blick sie findet,
+   und mit demselben Wortlaut wie die Flaeche auf t1. */
+.pairmachine { border-top: 1px solid var(--border); padding-top: 16px;
+               margin-bottom: 16px; }
+.pairmachine-lead { margin: 0 0 10px; font-size: 13px; color: var(--fg-2);
+                    max-width: 52ch; }
+.pairmachine dl { grid-template-columns: 6rem 1fr; gap: 6px 16px; }
+.pairmachine dt { font-size: 13px; }
+.pairmachine dd { font-size: 13px; }
 details { margin-top: 18px; }
 summary { cursor: pointer; font-size: 13px; color: var(--fg-2); }
 summary:hover { color: var(--fg-1); }
-.steps { list-style: none; padding: 0; margin: 0; }
-.steps li { padding: 0 0 40px 0; }
+/* T1-179: die Schrittnummer steht als Marke links, nicht als „1 · " im
+   Titel. Eine Ziffer im Fliesstext liest sich als Teil der Ueberschrift; eine
+   Marke daneben sagt „Schritt", ohne das Wort zu brauchen. */
+.steps { list-style: none; padding: 0; margin: 0; counter-reset: schritt; }
+.steps li { position: relative; padding: 0 0 36px 44px; counter-increment: schritt; }
+.steps li::before { content: counter(schritt); position: absolute; left: 0; top: 0;
+                    width: 26px; height: 26px; border-radius: 50%;
+                    background: var(--surface-2); border: 1px solid var(--border);
+                    color: var(--fg-2); font-size: 12px; font-weight: 600;
+                    display: flex; align-items: center; justify-content: center;
+                    font-variant-numeric: tabular-nums; }
 .steps li + li { border-top: 1px solid var(--border); padding-top: 32px; }
+.steps li + li::before { top: 32px; }
 .steps h3 { font-size: 17px; font-weight: 600; margin: 0 0 6px;
             letter-spacing: -0.01em; }
 .steps p { margin: 6px 0 14px; font-size: 14px; color: var(--fg-2);
@@ -267,7 +312,7 @@ summary:hover { color: var(--fg-1); }
 <div class="shell">
   <header>
     <img src="data:image/png;base64,""" + ICON_PNG + """" alt="">
-    <span class="eyebrow">Bridge</span>
+    <span class="name">Ordertune Bridge</span>
     <span class="ver" id="ver"></span>
   </header>
 
@@ -292,20 +337,25 @@ summary:hover { color: var(--fg-1); }
   <div id="setup" hidden>
     <ol class="steps">
       <li>
-        <h3>1 &middot; Connect this machine to Ordertune</h3>
+        <h3>Connect this machine to Ordertune</h3>
         <p class="muted">Get a code here, type it into Ordertune, done. Nothing to
         download, nothing to copy between windows.</p>
         <p><button class="action primary" id="p1">Get a pairing code</button>
            <span class="note" id="p1msg"></span></p>
-        <div id="paircode" hidden>
+        <div class="pairbox" id="paircode" hidden>
+          <p class="pairlead">Enter this code in Ordertune</p>
           <p class="code">- - - - -</p>
-          <p class="muted">Open <span class="mono" id="pairurl">t1.ordertune.com</span>
-          &rarr; Settings &rarr; Broker and enter this code. It is valid for
-          <span id="pairttl">10</span> minutes.</p>
-          <p class="muted">Ordertune will ask you to confirm this machine. It should
-          show:<br>
-          computer <span class="mono" id="pairhost">-</span>, hardware
-          <span class="mono" id="pairfp">-</span></p>
+          <p class="pairttl"><span id="pairttl">10:00</span> left</p>
+          <p class="pairwhere">Open <a id="pairurl" href="#" target="_blank"
+             rel="noopener">t1.ordertune.com/settings?tab=broker</a></p>
+          <div class="pairmachine">
+            <p class="pairmachine-lead">Ordertune asks you to confirm this
+            machine. It must show exactly this:</p>
+            <dl>
+              <dt>Computer</dt><dd class="mono" id="pairhost">-</dd>
+              <dt>Hardware</dt><dd class="mono" id="pairfp">-</dd>
+            </dl>
+          </div>
           <p class="note" id="pairstate">Waiting for you to confirm in Ordertune...</p>
         </div>
         <details>
@@ -319,7 +369,7 @@ summary:hover { color: var(--fg-1); }
         </details>
       </li>
       <li>
-        <h3>2 &middot; Find TWS</h3>
+        <h3>Find TWS</h3>
         <p class="muted">The socket port is a setting in TWS - it does not follow from
         the account type. This checks the four IBKR defaults.</p>
         <p><button class="action" id="s2">Search for TWS</button>
@@ -327,12 +377,12 @@ summary:hover { color: var(--fg-1); }
         <div id="s2ports"></div>
       </li>
       <li>
-        <h3>3 &middot; Check the port</h3>
+        <h3>Check the port</h3>
         <p><button class="action" id="s3">Check</button>
            <span class="note" id="s3msg"></span></p>
       </li>
       <li>
-        <h3>4 &middot; Check the credentials</h3>
+        <h3>Check the credentials</h3>
         <p><button class="action" id="s4">Check with Ordertune</button>
            <span class="note" id="s4msg"></span></p>
       </li>
@@ -714,11 +764,40 @@ q("p1").addEventListener("click", () => {
     q("paircode").querySelector(".code").textContent = r.code || "";
     q("pairhost").textContent = r.hostname || "-";
     q("pairfp").textContent = r.fingerprint_prefix || "-";
-    pairLeft = Math.max(0, Math.floor((r.expires_in || 600) / 60));
-    q("pairttl").textContent = String(pairLeft);
+    const ziel = (r.api_base || "https://t1.ordertune.com")
+      + "/settings?tab=broker";
+    const link = q("pairurl");
+    link.href = ziel;
+    link.textContent = ziel.split("://").pop();
+    pairLeft = Math.max(0, r.expires_in || 600);
+    startTtl();
     startPairPolling();
   });
 });
+
+/* Die Restzeit laeuft mit. Eine Frist, die nur als Zahl dasteht, sagt nach
+   fuenf Minuten nichts mehr — und wer abtippt, sieht nicht auf die Uhr. */
+let ttlTimer = null;
+function startTtl() {
+  if (ttlTimer !== null) clearInterval(ttlTimer);
+  const zeichne = () => {
+    const m = Math.floor(pairLeft / 60);
+    const sek = pairLeft % 60;
+    q("pairttl").textContent = m + ":" + String(sek).padStart(2, "0");
+    q("pairttl").parentElement.classList.toggle("soon", pairLeft <= 120);
+    if (pairLeft <= 0) {
+      clearInterval(ttlTimer); ttlTimer = null;
+      q("pairttl").textContent = "0:00";
+      q("pairstate").textContent = "This code has expired. Get a new one.";
+      q("pairstate").className = "note bad";
+      if (pairTimer !== null) { clearInterval(pairTimer); pairTimer = null; }
+      return;
+    }
+    pairLeft -= 1;
+  };
+  zeichne();
+  ttlTimer = setInterval(zeichne, 1000);
+}
 
 function startPairPolling() {
   if (pairTimer !== null) clearInterval(pairTimer);
@@ -732,6 +811,8 @@ function pollPairing() {
   post("/pair/poll", {}).then(r => {
     if (r.status === "ready") {
       clearInterval(pairTimer); pairTimer = null;
+      if (ttlTimer !== null) { clearInterval(ttlTimer); ttlTimer = null; }
+      q("pairttl").parentElement.hidden = true;
       q("pairstate").textContent =
         "Paired. bridge.env written - the Bridge starts on its own.";
       q("pairstate").className = "note ok";

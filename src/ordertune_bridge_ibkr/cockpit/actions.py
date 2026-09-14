@@ -104,6 +104,11 @@ class SetupActions:
             "expires_in": ergebnis["expires_in"],
             "hostname": ergebnis["hostname"],
             "fingerprint_prefix": ergebnis["fingerprint_prefix"],
+            # T1-179: die Flaeche baut daraus einen anklickbaren Verweis auf
+            # genau die Seite, auf der der Code einzutippen ist. Vorher stand
+            # dort eine Zeichenkette, die der Nutzer selbst abtippen musste —
+            # auf demselben Rechner, auf dem gerade ein Browser offen ist.
+            "api_base": basis,
         }
 
     def pair_poll(self, _body: dict[str, Any]) -> dict[str, Any]:
