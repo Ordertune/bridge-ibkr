@@ -214,3 +214,25 @@ def test_a_finished_pairing_writes_the_file_and_forgets_the_secret(
     # Zweiter Abruf: es gibt nichts mehr abzuholen, die Zeile ist auf der
     # Plattform geloescht.
     assert actions.pair_poll({})["ok"] is False
+
+
+def test_the_file_route_is_still_offered() -> None:
+    """Der Dateiweg bleibt neben der Kopplung bestehen.
+
+    Ein Einrichtungsweg, der nur online funktioniert, waere ein Rueckschritt
+    gegenueber einer Datei, die man auch hinlegen kann — und fuer
+    unbeaufsichtigte Starts geht der Assistent ohnehin nicht auf.
+
+    Diese Zusicherung stand zuerst im verify-Skript von t1 und las dafuer ueber
+    die Repo-Grenze (`../ordertune-bridge-ibkr/...`). Lokal lief das, in CI ist
+    dort nur t1 ausgecheckt und der Lauf starb mit ENOENT. Jede Seite sichert
+    ihren eigenen Code zu.
+    """
+    from ordertune_bridge_ibkr.cockpit import setup as setup_mod
+    from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
+
+    assert hasattr(setup_mod, "replace_credentials")
+    # Und die Flaeche bietet ihn an — eingeklappt unter dem neuen Schritt,
+    # aber vorhanden.
+    assert "Or paste a bridge.env you downloaded" in PAGE_HTML
+    assert 'id="envbox"' in PAGE_HTML
