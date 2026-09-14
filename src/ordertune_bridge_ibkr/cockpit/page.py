@@ -2,29 +2,51 @@
 
 ## Woher die Gestaltung kommt
 
-Aus dem **Ordertune-Design-System**: beiges Papier (`#F4EFE6`), Tinte statt
-reinem Schwarz (`#2A2A2A`), ein einziger Akzent (`#C8F23E`), Inter selbst
-gehostet, kaum Rahmen. Die erste Fassung nahm die t1-Tokens (weiss/kuehlgrau)
-mit der Begruendung, der Nutzer komme aus dem Einrichtungs-Assistenten auf t1.
-Der Owner hat entschieden: eine Sprache mit ordertune.com.
+Aus den **t1-Tokens** (`t1.ordertune.com/src/app/globals.css`), denen
+`docs.ordertune.com` bereits folgt — dort stehen sie sogar namentlich als
+Quelle in `styles/globals.css`. Weiss bzw. tiefes Schwarz als Flaeche,
+kuehle Graustufen darueber, Inter selbst gehostet, ein einziger Akzent
+(`#c8f23e`), der in allen drei Flaechen identisch ist.
 
-## Was das konkret geaendert hat
+## Die Entscheidung dahinter — und dass sie einmal anders war
 
-Der erste Entwurf verstiess gegen drei Regeln des Systems, jede davon
-ausdruecklich aufgeschrieben:
+T1-101 hat diese Seite zunaechst auf t1-Tokens gebaut, der Owner hat das
+damals auf die Sprache von ordertune.com umgestellt (beiges Papier,
+`#F4EFE6`). Owner-Entscheid 2026-09-14 dreht das zurueck.
 
-  * **Ampelfarben.** `#dc2626` ist Trader-Rot, und das ist verboten — „red is
-    for losses we want to talk *with*, not panic about". Fehlertext ist
-    `--data-neg-2` (weiches Ocker). Wo es wirklich laut werden muss, benutzt
-    die Marke ihr eigenes Mittel: den **schwarzen Statement-Block**.
-  * **Karte mit farbigem linken Rand.** Steht woertlich auf der Verbotsliste.
-  * **Vier bunte Laempchen.** Das System kennt genau einen Statuspunkt, in
-    genau zwei Zustaenden: Lime (live) oder `--fg-2` (idle). Die Bedeutung
-    traegt das Wort daneben, nicht die Farbe — was fuer eine Betriebsflaeche
-    ohnehin die bessere Bauform ist.
+Der Grund ist nicht Geschmack, sondern ein neuer Ablauf: mit der Kopplung aus
+T1-178 steht der Nutzer innerhalb einer Minute abwechselnd vor dieser Seite und
+vor der Broker-Karte auf t1 und tippt einen Code von der einen in die andere.
+Dieses Nebeneinander gab es nicht, als die erste Entscheidung fiel. Zwei
+Farbwelten in einem Vorgang sind dann kein Markenreichtum, sondern die Frage
+„bin ich hier noch richtig".
 
-Dazu: **ein Lime-Knopf je Ansicht**, keine Icons, keine Emojis, keine
-Unicode-Piktogramme, Ziffern immer `tabular-nums`, Unterzeilen nie fett.
+`ordertune.com` behaelt sein beiges Papier. Die Trennlinie verlaeuft zwischen
+**Aussenauftritt** (Marke) und **Produktflaechen** (t1, docs, Cockpit).
+
+## Was aus dem Aufbau bleibt
+
+Der Aufbau hat sich bewaehrt und wird nicht angefasst — nur neu eingefaerbt:
+
+  * **Ein Akzent je Ansicht.** Genau ein Lime-Knopf, sonst nichts Lime ausser
+    dem Statuspunkt und dem Reiter-Unterstrich.
+  * **Ein Statuspunkt in zwei Zustaenden**, Lime (live) oder `--fg-3` (idle).
+    Die Bedeutung traegt das Wort daneben, nicht die Farbe.
+  * **Der Statement-Block** bleibt das laute Mittel. Er entstand als Ersatz
+    fuer verbotenes Rot; er bleibt, weil er funktioniert. Neu ist, dass er im
+    dunklen Modus nicht gegen die Flaeche verschwinden darf — dort traegt er
+    einen Rahmen statt der Schwaerze.
+  * **Keine Icons, keine Emojis, keine Unicode-Piktogramme**, Ziffern immer
+    `tabular-nums`, Unterzeilen nie fett.
+
+Neu dazu, weil t1 und docs es koennen und docs sogar dunkel startet:
+**`prefers-color-scheme`**. Eine Bridge laeuft nachts auf einem Rechner, vor
+dem jemand sitzt; eine weisse Flaeche um 23 Uhr ist eine Entscheidung, die wir
+nicht fuer ihn treffen muessen.
+
+Fehlertext ist ab jetzt `--danger` (`#dc2626`), wie in t1. Das Trader-Rot-Verbot
+gilt fuer die Marke und fuer Kurse und Renditen — nicht fuer die Fehlerzeile
+einer Betriebsflaeche, und t1 haelt es genauso.
 
 ## Die Regeln, die aus dem Entwurf bleiben
 
@@ -68,22 +90,46 @@ PAGE_HTML = """<!doctype html>
 <style>
 """ + FONT_FACES + """
 :root {
-  /* Kopie der Ordertune-Tokens. Gegenstueck: das Design-System-Verzeichnis. */
-  --beige: #F4EFE6; --beige-soft: #ECE6DA; --beige-deep: #E4DDCC;
-  --black: #0E0E0E; --ink: #2A2A2A;
-  --fg-1: #1F1F1F; --fg-2: #5A5A55; --fg-3: #8A867D;
-  --inv-1: #F4EFE6; --inv-2: #B5B0A6; --inv-3: #6F6B62;
-  --lime: #C8F23E; --lime-deep: #B6DF2B; --lime-ink: #0E0E0E;
-  --pos: #5E9C2E; --neg: #C99A82;
-  --hair: rgba(31,31,31,0.08); --soft: rgba(31,31,31,0.14);
-  --hair-dark: rgba(255,255,255,0.10);
+  /* Kopie der t1-Tokens aus t1.ordertune.com/src/app/globals.css.
+     Gegenstueck: docs.ordertune.com/styles/globals.css, das dieselben Werte
+     mit denselben Quellenangaben fuehrt. Aendert sich dort etwas, gehoert es
+     hierher nachgezogen — die drei Flaechen sind eine Sprache. */
+  --bg: #ffffff;
+  --surface: #f5f7fa; --surface-2: #eef1f5; --surface-3: #e6eaf0;
+  --fg-1: #18181b; --fg-2: #52525b; --fg-3: #a1a1aa;
+  --border: #d4d8df; --border-strong: #b9bec7;
+
+  /* Der eine erlaubte Akzent. In t1, docs und hier identisch. */
+  --lime: #c8f23e; --lime-deep: #b6df2b; --lime-ink: #0a0a0a;
+
+  /* Status. t1 fuehrt dafuer EINEN Satz ohne Dunkel-Gegenstueck; das wird
+     hier bewusst nicht "verbessert", sonst driften die Flaechen. */
+  --success: #16a34a; --warn: #d97706; --danger: #dc2626;
+
+  /* Der Statement-Block. Im hellen Modus die dunkle Flaeche von t1, im
+     dunklen eine erhoehte mit Rahmen — schwarz auf schwarz waere kein
+     Statement, sondern ein Loch. */
+  --statement-bg: #0a0a0a; --statement-fg: #fafafa; --statement-fg-2: #a3a3a3;
+  --statement-border: transparent;
+
   --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-pill: 999px;
   --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111; --surface-2: #171717; --surface-3: #1f1f1f;
+    --fg-1: #fafafa; --fg-2: #a3a3a3; --fg-3: #6b6b6b;
+    --border: #262626; --border-strong: #3a3a3a;
+    --statement-bg: #171717; --statement-fg: #fafafa;
+    --statement-fg-2: #a3a3a3; --statement-border: #3a3a3a;
+  }
+}
 * { box-sizing: border-box; }
-html { -webkit-font-smoothing: antialiased; }
-body { margin: 0; background: var(--beige); color: var(--ink);
+html { -webkit-font-smoothing: antialiased; color-scheme: light dark; }
+body { margin: 0; background: var(--bg); color: var(--fg-1);
        font-family: var(--sans); font-size: 15px; line-height: 1.55;
        font-weight: 400; }
 .shell { max-width: 62rem; margin: 0 auto; padding: 40px 24px 96px; }
@@ -101,30 +147,33 @@ header .ver { margin-left: auto; font-size: 12px; color: var(--fg-3);
            font-weight: 700; color: var(--fg-1); margin: 0 0 20px;
            max-width: 34ch; }
 
-/* Der schwarze Statement-Block ist das Mittel der Marke, wenn es laut werden
-   muss. Kein Rot, kein farbiger Randstreifen — beides steht auf der
-   Verbotsliste des Systems. */
-.statement { background: var(--black); color: var(--inv-1);
+/* Der Statement-Block ist das laute Mittel dieser Flaeche. Er ersetzt den
+   farbigen Randstreifen, den weder t1 noch die Marke kennen. Im dunklen Modus
+   traegt er einen Rahmen, sonst waere er ein Loch statt einer Aussage. */
+.statement { background: var(--statement-bg); color: var(--statement-fg);
+             border: 1px solid var(--statement-border);
              border-radius: var(--r-md); padding: 28px 32px; margin: 0 0 32px; }
 .statement h2 { margin: 0 0 14px; font-size: 22px; line-height: 1.25;
                 letter-spacing: -0.01em; font-weight: 700; max-width: 40ch; }
 .statement pre { font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
-                 white-space: pre-wrap; color: var(--inv-2); margin: 0; }
+                 white-space: pre-wrap; color: var(--statement-fg-2); margin: 0; }
+/* Die Trennlinie sitzt IM dunklen Block, in beiden Modi — deshalb hier ein
+   fester Weisswert und kein Token, das mit der Flaeche kippt. */
 .statement pre + pre { margin-top: 14px; padding-top: 14px;
-                       border-top: 1px solid var(--hair-dark); }
+                       border-top: 1px solid rgba(255,255,255,0.12); }
 
 /* ── Statuspunkte: Lime oder idle. Die Bedeutung traegt das Wort. ──── */
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 44px; }
 .chip { display: inline-flex; align-items: center; gap: 8px;
-        padding: 6px 14px 6px 12px; background: var(--beige-soft);
-        border: 1px solid var(--hair); border-radius: var(--r-pill);
+        padding: 6px 14px 6px 12px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--r-pill);
         font-size: 13px; color: var(--fg-2); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3);
        flex: none; }
 .dot.live { background: var(--lime-deep); }
 
 /* ── Reiter ────────────────────────────────────────────────────────── */
-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--hair);
+nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
       margin-bottom: 36px; }
 nav button { background: none; border: 0; border-bottom: 2px solid transparent;
              padding: 10px 16px; font: inherit; font-size: 14px;
@@ -143,7 +192,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--fg-1); }
 .mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all;
         color: var(--fg-2); }
 .muted { color: var(--fg-3); }
-.warn { color: var(--neg); }
+.warn { color: var(--danger); }
 
 /* ── Tabellen: schlichte Zellen, keine Sortierpfeile, keine Badges ──── */
 .scroll { overflow-x: auto; }
@@ -151,55 +200,65 @@ table { border-collapse: collapse; width: 100%; font-size: 14px;
         font-variant-numeric: tabular-nums; }
 th { text-align: left; font-weight: 500; color: var(--fg-2); font-size: 11px;
      text-transform: uppercase; letter-spacing: .1em; padding-bottom: 10px;
-     border-bottom: 1px solid var(--soft); white-space: nowrap; }
-td { padding: 11px 20px 11px 0; border-bottom: 1px solid var(--hair);
+     border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
+td { padding: 11px 20px 11px 0; border-bottom: 1px solid var(--border);
      white-space: nowrap; color: var(--fg-1); }
 th { padding-right: 20px; }
 td.state { color: var(--fg-2); }
-td.state.done { color: var(--pos); }
-td.state.gone { color: var(--neg); }
-td.reason { white-space: normal; color: var(--neg); font-size: 13px;
+td.state.done { color: var(--success); }
+td.state.gone { color: var(--danger); }
+td.reason { white-space: normal; color: var(--danger); font-size: 13px;
             max-width: 34rem; }
 
 /* ── Knoepfe: genau EINER in Lime je Ansicht ───────────────────────── */
 button.action { font: inherit; font-size: 14px; font-weight: 600;
                 cursor: pointer; background: transparent; color: var(--fg-1);
-                border: 1px solid var(--soft); border-radius: var(--r-sm);
-                padding: 9px 18px; }
-button.action:hover { background: var(--beige-soft); }
+                border: 1px solid var(--border-strong);
+                border-radius: var(--r-sm); padding: 9px 18px; }
+button.action:hover { background: var(--surface-2); }
 button.action.primary { background: var(--lime); color: var(--lime-ink);
                         border-color: var(--lime); }
 button.action.primary:hover { background: var(--lime-deep);
                               border-color: var(--lime-deep); }
-button.action:disabled { color: var(--fg-3); border-color: var(--hair);
+button.action:disabled { color: var(--fg-3); border-color: var(--border);
                          background: transparent; cursor: default; }
 
 input, select, textarea { font: inherit; font-size: 14px;
-  background: var(--beige-soft); color: var(--fg-1);
-  border: 1px solid var(--soft); border-radius: var(--r-sm); padding: 8px 10px; }
+  background: var(--surface); color: var(--fg-1);
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  padding: 8px 10px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--lime);
   outline-offset: 1px; }
 textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
            line-height: 1.6; }
 .note { font-size: 13px; margin-left: 12px; color: var(--fg-2); }
-.note.ok { color: var(--pos); } .note.bad { color: var(--neg); }
+.note.ok { color: var(--success); } .note.bad { color: var(--danger); }
 
 /* ── Assistent ─────────────────────────────────────────────────────── */
+/* Der Kopplungscode. Er wird ABGETIPPT, oft von einem Fenster ins andere und
+   bei einem VPS sogar von einer Maschine auf die naechste — deshalb gross,
+   weit gesperrt und in Ziffernbreite. */
+.code { font-family: var(--mono); font-size: 30px; font-weight: 600;
+        letter-spacing: .22em; margin: 4px 0 10px;
+        font-variant-numeric: tabular-nums; color: var(--fg-1); }
+details { margin-top: 18px; }
+summary { cursor: pointer; font-size: 13px; color: var(--fg-2); }
+summary:hover { color: var(--fg-1); }
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li { padding: 0 0 40px 0; }
-.steps li + li { border-top: 1px solid var(--hair); padding-top: 32px; }
+.steps li + li { border-top: 1px solid var(--border); padding-top: 32px; }
 .steps h3 { font-size: 17px; font-weight: 600; margin: 0 0 6px;
             letter-spacing: -0.01em; }
 .steps p { margin: 6px 0 14px; font-size: 14px; color: var(--fg-2);
            max-width: 62ch; font-weight: 400; }
 
-.banner { background: var(--beige-deep); border: 1px solid var(--hair);
+.banner { background: var(--surface-2); border: 1px solid var(--border);
           border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 32px;
           font-size: 14px; color: var(--fg-1); }
 
 #loglines { font-family: var(--mono); font-size: 12px; line-height: 1.65;
-            white-space: pre-wrap; background: var(--beige-soft);
-            border: 1px solid var(--hair); border-radius: var(--r-sm);
+            white-space: pre-wrap; background: var(--surface);
+            border: 1px solid var(--border); border-radius: var(--r-sm);
             padding: 16px; max-height: 32rem; overflow: auto; margin: 0;
             color: var(--fg-2); }
 </style>
@@ -233,13 +292,31 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
   <div id="setup" hidden>
     <ol class="steps">
       <li>
-        <h3>1 &middot; Put your bridge.env here</h3>
-        <p class="muted">Download it from Ordertune (Settings -&gt; Broker) and paste the
-        whole block. You never have to type a token by hand.</p>
-        <textarea id="envbox" rows="7" spellcheck="false"
-          placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
-        <p><button class="action primary" id="s1">Save bridge.env</button>
-           <span class="note" id="s1msg"></span></p>
+        <h3>1 &middot; Connect this machine to Ordertune</h3>
+        <p class="muted">Get a code here, type it into Ordertune, done. Nothing to
+        download, nothing to copy between windows.</p>
+        <p><button class="action primary" id="p1">Get a pairing code</button>
+           <span class="note" id="p1msg"></span></p>
+        <div id="paircode" hidden>
+          <p class="code">- - - - -</p>
+          <p class="muted">Open <span class="mono" id="pairurl">t1.ordertune.com</span>
+          &rarr; Settings &rarr; Broker and enter this code. It is valid for
+          <span id="pairttl">10</span> minutes.</p>
+          <p class="muted">Ordertune will ask you to confirm this machine. It should
+          show:<br>
+          computer <span class="mono" id="pairhost">-</span>, hardware
+          <span class="mono" id="pairfp">-</span></p>
+          <p class="note" id="pairstate">Waiting for you to confirm in Ordertune...</p>
+        </div>
+        <details>
+          <summary>Or paste a bridge.env you downloaded</summary>
+          <p class="muted">The older way, and it still works -- useful when this machine
+          has no browser, or when you run the Bridge unattended.</p>
+          <textarea id="envbox" rows="7" spellcheck="false"
+            placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
+          <p><button class="action" id="s1">Save bridge.env</button>
+             <span class="note" id="s1msg"></span></p>
+        </details>
       </li>
       <li>
         <h3>2 &middot; Find TWS</h3>
@@ -528,7 +605,7 @@ function render() {
   q("hb").textContent = s.last_heartbeat_at
     ? age(s.last_heartbeat_at) + (heartbeatStale(s) ? " - overdue" : "")
     : "waiting for the first one";
-  q("hb").style.color = heartbeatStale(s) ? "var(--neg)" : "";
+  q("hb").style.color = heartbeatStale(s) ? "var(--danger)" : "";
   q("poll").textContent = age(s.last_pending_poll_at);
   q("since").textContent = age(s.session_connected_at);
   q("acct").textContent = s.account_masked || "-";
@@ -620,6 +697,59 @@ q("f-replace").addEventListener("click", () => {
     if (r.ok) { q("f-env").value = ""; loadConfig(); }
   });
 });
+
+/* T1-178 — die Kopplung.
+   Ein Code holen, anzeigen, und dann fragen, ob der Nutzer bestaetigt hat.
+   Das Geheimnis liegt ausschliesslich im Vorgang der Bridge; diese Seite
+   bekommt es nie zu sehen und braucht es auch nicht. */
+let pairTimer = null;
+let pairLeft = 0;
+
+q("p1").addEventListener("click", () => {
+  note("p1msg", {ok: true, message: "Asking Ordertune..."});
+  post("/pair/start", {}).then(r => {
+    if (!r.ok) { note("p1msg", r); return; }
+    note("p1msg", {ok: true, message: ""});
+    q("paircode").hidden = false;
+    q("paircode").querySelector(".code").textContent = r.code || "";
+    q("pairhost").textContent = r.hostname || "-";
+    q("pairfp").textContent = r.fingerprint_prefix || "-";
+    pairLeft = Math.max(0, Math.floor((r.expires_in || 600) / 60));
+    q("pairttl").textContent = String(pairLeft);
+    startPairPolling();
+  });
+});
+
+function startPairPolling() {
+  if (pairTimer !== null) clearInterval(pairTimer);
+  /* Alle drei Sekunden. Bei zehn Minuten Frist sind das gut zweihundert
+     Abrufe — der Deckel auf der Plattform liegt darueber. */
+  pairTimer = setInterval(pollPairing, 3000);
+  pollPairing();
+}
+
+function pollPairing() {
+  post("/pair/poll", {}).then(r => {
+    if (r.status === "ready") {
+      clearInterval(pairTimer); pairTimer = null;
+      q("pairstate").textContent =
+        "Paired. bridge.env written - the Bridge starts on its own.";
+      q("pairstate").className = "note ok";
+      return;
+    }
+    if (r.status === "pending") {
+      q("pairstate").textContent = "Waiting for you to confirm in Ordertune...";
+      q("pairstate").className = "note";
+      return;
+    }
+    /* `unknown` heisst: abgelaufen, verbraucht oder von jemand anderem
+       geholt. In allen drei Faellen hilft nur ein neuer Code. */
+    clearInterval(pairTimer); pairTimer = null;
+    q("pairstate").textContent = r.message
+      || "That code is no longer valid. Get a new one.";
+    q("pairstate").className = "note bad";
+  });
+}
 
 q("s1").addEventListener("click", () => {
   post("/credentials", {content: q("envbox").value}).then(r => note("s1msg", r));
