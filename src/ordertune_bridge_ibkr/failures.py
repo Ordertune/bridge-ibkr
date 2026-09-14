@@ -471,3 +471,53 @@ def revocation_failure(
         return None
 
     return classify_handshake_error(exc, api_base)
+
+
+# Codes, bei denen eine ERNEUTE KOPPLUNG hilft.
+#
+# Die Unterscheidung zu `TERMINAL_AUTH_CODES` ist nicht dieselbe Frage. Dort
+# geht es um „soll die laufende Schleife aufhoeren"; hier um „kann der Nutzer
+# das hier und jetzt selbst in Ordnung bringen".
+#
+# `fingerprint_already_set` gehoert deshalb dazu, obwohl es kein 401 ist: die
+# Kopplung rotiert den Token, und das Rotieren loescht den gebundenen
+# Fingerabdruck. Das ist genau der vorgesehene Ausweg bei einem
+# Maschinenwechsel — er stand bisher nur als Satz im Fehlerblock und verlangte
+# einen Weg ueber die Website.
+RENEWABLE_AUTH_CODES = frozenset({
+    "connection_revoked",
+    "invalid_token",
+    "missing_token",
+    "fingerprint_already_set",
+})
+
+
+def renewable_failure(
+    exc: Exception, api_base: str | None = None
+) -> Failure | None:
+    """Laesst sich das durch eine neue Kopplung beheben?
+
+    ## Der Fehler, aus dem das entstanden ist
+
+    Owner-Befund 2026-09-14: wer die Verbindung im Broker-Tab trennt und die
+    `bridge.env` neben der EXE liegen laesst, bekommt beim naechsten Start
+    einen Fehler — und keinen Assistenten.
+
+    Das ist die falsche Antwort auf die Lage. Der Assistent geht auf, wenn
+    `load_config()` scheitert; hier laedt die Datei einwandfrei, sie ist nur
+    wertlos. Fuer den Nutzer ist das derselbe Zustand: er hat keine gueltigen
+    Zugangsdaten. Ihn stattdessen auf die Website zu schicken, um eine Datei zu
+    holen, ist genau der Umweg, den T1-178 abgeschafft hat.
+
+    Gibt `None` zurueck, wenn eine neue Kopplung nicht hilft — dann bleibt es
+    beim Abbruch mit dem gerahmten Block.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status not in (401, 409):
+        return None
+
+    if _error_code_from_body(_response_body(response)) not in RENEWABLE_AUTH_CODES:
+        return None
+
+    return classify_handshake_error(exc, api_base)

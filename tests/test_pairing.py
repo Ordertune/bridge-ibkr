@@ -9,6 +9,7 @@ Maschine.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -236,3 +237,98 @@ def test_the_file_route_is_still_offered() -> None:
     # aber vorhanden.
     assert "Or paste a bridge.env you downloaded" in PAGE_HTML
     assert 'id="envbox"' in PAGE_HTML
+
+
+# ── T1-181: ein wertloses Token ist dasselbe wie gar keins ───────────────────
+
+
+def _abgewiesen(code: str, status: int = 401) -> Exception:
+    class _A:
+        def __init__(self) -> None:
+            self.status_code = status
+            self.text = '{"error":{"code":"%s","message":"nope"}}'.replace("%s", code)
+
+    exc = RuntimeError("abgewiesen")
+    exc.response = _A()  # type: ignore[attr-defined]
+    return exc
+
+
+@pytest.mark.parametrize(
+    "code,status",
+    [
+        ("connection_revoked", 401),
+        ("invalid_token", 401),
+        ("missing_token", 401),
+        ("fingerprint_already_set", 409),
+    ],
+)
+def test_these_are_fixed_by_pairing_again(code: str, status: int) -> None:
+    """Der Anlassfall des Owners und seine drei Geschwister.
+
+    Wer im Broker-Tab trennt und die `bridge.env` liegen laesst, bekam beim
+    naechsten Start einen Fehler statt eines Assistenten — obwohl der kuerzere
+    Weg im selben Fenster steht.
+
+    `fingerprint_already_set` gehoert dazu, obwohl es kein 401 ist: die
+    Kopplung rotiert den Token, und das Rotieren loescht den gebundenen
+    Fingerabdruck. Das ist der vorgesehene Ausweg beim Maschinenwechsel.
+    """
+    from ordertune_bridge_ibkr import failures
+
+    assert failures.renewable_failure(_abgewiesen(code, status)) is not None
+
+
+@pytest.mark.parametrize(
+    "code,status",
+    [
+        ("fingerprint_mismatch", 403),
+        ("rate_limited", 429),
+        ("invalid_body", 422),
+    ],
+)
+def test_these_are_not(code: str, status: int) -> None:
+    """**Der Gegentest.**
+
+    Ein Assistent, der bei jedem Fehlschlag aufgeht, ist kein Assistent — er
+    verspricht eine Loesung, die er nicht hat. Wo eine neue Kopplung nichts
+    aendert, bleibt es beim gerahmten Block.
+    """
+    from ordertune_bridge_ibkr import failures
+
+    assert failures.renewable_failure(_abgewiesen(code, status)) is None
+
+
+def test_a_network_error_does_not_open_the_assistant() -> None:
+    from ordertune_bridge_ibkr import failures
+
+    assert failures.renewable_failure(RuntimeError("connection reset")) is None
+
+
+def test_the_assistant_waits_for_DIFFERENT_credentials(tmp_path, monkeypatch) -> None:
+    """Nicht „laedt die Datei" — das tut sie die ganze Zeit.
+
+    Ohne diese Unterscheidung kehrte der Assistent im Widerrufsfall sofort
+    zurueck, weil die Vorgabe schon beim ersten Durchgang erfuellt waere.
+    """
+    from ordertune_bridge_ibkr import main as m
+
+    stand = {"token": "alt"}
+    monkeypatch.setattr(
+        m, "load_config", lambda: SimpleNamespace(ordertune_bridge_token=stand["token"])
+    )
+
+    assert m._token_changed("alt") is False
+    stand["token"] = "neu"
+    assert m._token_changed("alt") is True
+
+
+def test_an_unreadable_file_is_not_progress(monkeypatch) -> None:
+    """Mitten im Schreiben gelesen: das ist noch kein Fortschritt, nur ein
+    halber Zustand. Der naechste Durchgang kommt in zwei Sekunden."""
+    from ordertune_bridge_ibkr import main as m
+
+    def kaputt():
+        raise ValueError("halb geschrieben")
+
+    monkeypatch.setattr(m, "load_config", kaputt)
+    assert m._token_changed("alt") is False

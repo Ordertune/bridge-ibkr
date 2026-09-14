@@ -1880,6 +1880,8 @@ def run_setup_cockpit(
     failure: failures.Failure,
     env_path: Path,
     argv: list[str],
+    *,
+    fertig: Callable[[], bool] | None = None,
 ) -> bool:
     """T1-101 C-1 / D3 — die Oberflaeche startet vor der Konfiguration.
 
@@ -1895,7 +1897,23 @@ def run_setup_cockpit(
     Der Assistent geht nur auf, wenn auch jemand da ist, der etwas eintraegt —
     dieselbe Bedingung wie beim Halt aus A-1. Sonst waere es kein Assistent,
     sondern ein haengender Vorgang.
+
+    ## T1-181: `fertig` — worauf gewartet wird
+
+    Beim ersten Start ist die Frage „laedt die Datei ueberhaupt". Nach einem
+    Widerruf ist sie eine andere: die Datei laedt einwandfrei, sie ist nur
+    wertlos. Gewartet wird dann darauf, dass die Zugangsdaten sich AENDERN.
+
+    Ohne diese Unterscheidung kehrte der Assistent im zweiten Fall sofort
+    zurueck — die Vorgabe waere schon beim ersten Durchgang erfuellt.
     """
+    if fertig is None:
+        def fertig() -> bool:
+            try:
+                load_config()
+            except Exception:  # noqa: BLE001 - jede Ursache heisst hier dasselbe
+                return False
+            return True
     if not console.setup_wanted(argv):
         return False
 
@@ -1928,11 +1946,9 @@ def run_setup_cockpit(
     try:
         while True:
             time.sleep(SETUP_POLL_S)
-            try:
-                load_config()
-            except Exception:
+            if not fertig():
                 continue
-            log.info("bridge.env is readable now — continuing startup.")
+            log.info("bridge.env is usable now — continuing startup.")
             return True
     except KeyboardInterrupt:
         return False
@@ -2083,6 +2099,33 @@ def _abort(
     return 1
 
 
+def _handshake_or_none(
+    api: OrdertuneApiClient, fingerprint: str
+) -> tuple[OrdertuneApiClient, Exception | None]:
+    """Den Handschlag versuchen und den Fehler zurueckgeben statt ihn zu werfen.
+
+    Der Aufrufer entscheidet, ob daraus ein Abbruch wird oder ein Assistent.
+    """
+    try:
+        api.handshake(capabilities=IBKR_CAPABILITIES)
+        log.info("Handshake successful — Bridge is active.")
+        return api, None
+    except Exception as exc:  # noqa: BLE001 - die Zuordnung macht `failures`
+        return api, exc
+
+
+def _token_changed(alter_token: str) -> bool:
+    """Stehen inzwischen ANDERE Zugangsdaten in der Datei?
+
+    Nicht „laedt sie": das tut sie die ganze Zeit. Nach einem Widerruf ist der
+    Fortschritt genau dieser Unterschied.
+    """
+    try:
+        return load_config().ordertune_bridge_token != alter_token
+    except Exception:  # noqa: BLE001 - halb geschriebene Datei, gleich nochmal
+        return False
+
+
 def main() -> int:
     argv = sys.argv[1:]
 
@@ -2178,18 +2221,76 @@ def main() -> int:
         fingerprint=fingerprint,
     )
 
-    try:
-        api.handshake(capabilities=IBKR_CAPABILITIES)
-        log.info("Handshake successful — Bridge is active.")
-    except Exception as exc:
-        ibkr.disconnect()
-        return _abort(
-            failures.classify_handshake_error(
-                exc, str(config.ordertune_api_base)
-            ),
-            log_file,
-            argv,
+    # T1-181 — ein wertloses Token ist fuer den Nutzer dasselbe wie gar keins.
+    #
+    # ## Der Befund
+    #
+    # Owner 2026-09-14: wer die Verbindung im Broker-Tab trennt und die
+    # `bridge.env` neben der EXE liegen laesst, bekommt beim naechsten Start
+    # einen Fehler — und keinen Assistenten.
+    #
+    # Der Grund stand oben: der Assistent geht auf, wenn `load_config()`
+    # SCHEITERT. Hier laedt die Datei einwandfrei, sie ist nur nichts mehr
+    # wert. Zwei verschiedene Ursachen, fuer den Nutzer derselbe Zustand — er
+    # hat keine gueltigen Zugangsdaten und will weiterarbeiten.
+    #
+    # Ihn stattdessen mit einem gerahmten Block auf die Website zu schicken,
+    # um dort eine Datei zu holen, ist genau der Umweg, den T1-178 abgeschafft
+    # hat. Der kuerzere Weg steht schon im selben Fenster.
+    #
+    # ## Was nicht passiert
+    #
+    # Der Assistent geht nur auf, wenn `console.setup_wanted` erfuellt ist —
+    # also nicht bei einem unbeaufsichtigten Start. Dort bleibt es beim
+    # Abbruch, und das ist richtig: ein wartender Vorgang ohne jemanden davor
+    # meldet keinen Herzschlag und ist von einem Absturz nicht zu
+    # unterscheiden.
+    api, handshake_fehler = _handshake_or_none(api, fingerprint)
+    if handshake_fehler is not None:
+        erneuerbar = failures.renewable_failure(
+            handshake_fehler, str(config.ordertune_api_base)
         )
+        neu_gekoppelt = False
+        if erneuerbar is not None:
+            alter_token = config.ordertune_bridge_token
+            neu_gekoppelt = run_setup_cockpit(
+                erneuerbar,
+                env_path,
+                argv,
+                # Gewartet wird auf ANDERE Zugangsdaten, nicht auf eine
+                # ladbare Datei — die laedt ja bereits.
+                fertig=lambda: _token_changed(alter_token),
+            )
+
+        if not neu_gekoppelt:
+            ibkr.disconnect()
+            return _abort(
+                failures.classify_handshake_error(
+                    handshake_fehler, str(config.ordertune_api_base)
+                ),
+                log_file,
+                argv,
+            )
+
+        config = load_config()
+        api = OrdertuneApiClient(
+            base_url=str(config.ordertune_api_base),
+            token=config.ordertune_bridge_token,
+            connection_id=config.ordertune_bridge_connection_id,
+            fingerprint=fingerprint,
+        )
+        api, handshake_fehler = _handshake_or_none(api, fingerprint)
+        if handshake_fehler is not None:
+            # Einmal wird nachgefasst, nicht endlos. Scheitert auch die frische
+            # Kopplung, liegt es an etwas, das der Assistent nicht loest.
+            ibkr.disconnect()
+            return _abort(
+                failures.classify_handshake_error(
+                    handshake_fehler, str(config.ordertune_api_base)
+                ),
+                log_file,
+                argv,
+            )
 
     dispatch_id_map: dict[int, str] = {}
     ibkr.subscribe_order_status_callback(_make_on_order_status(api, dispatch_id_map))
