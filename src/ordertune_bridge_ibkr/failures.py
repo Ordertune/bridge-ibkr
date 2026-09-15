@@ -66,6 +66,24 @@ class Failure:
     detail: tuple[str, ...] = field(default_factory=tuple)
     action: tuple[str, ...] = field(default_factory=tuple)
 
+    # T1-184 — die Handlung fuer die Flaeche, auf der der Kopplungsknopf steht.
+    #
+    # `action` beantwortet „was tun" fuer jemanden, der **keinen Knopf** vor
+    # sich hat: den gerahmten Konsolen-Abbruch und die Karte im laufenden
+    # Cockpit. Dort ist der Verweis auf die Website die einzig moegliche
+    # Antwort, und er bleibt unveraendert richtig.
+    #
+    # Im Assistenten steht derselbe Text ueber einem Knopf, der genau das
+    # erledigt — und sagte bis 0.23.3 „download the new bridge.env", drei
+    # Zentimeter ueber „Nothing to download, nothing to copy between windows".
+    # Die Karte argumentierte gegen den Knopf.
+    #
+    # Deshalb zwei Angaben statt einer Zeichenkette fuer beide Flaechen: hier
+    # steht nur noch der ZUSTAND, das Was-tun traegt der Knopf. Leer heisst
+    # „diese Stoerung erreicht den Assistenten nicht" — dann faellt die
+    # Darstellung auf `action` zurueck und nichts aendert sich.
+    action_paired: tuple[str, ...] = field(default_factory=tuple)
+
 
 # ── Konfiguration ────────────────────────────────────────────────────────────
 
@@ -244,7 +262,16 @@ def classify_connect_error(
 
 # ── Ordertune-Plattform ──────────────────────────────────────────────────────
 
-_HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
+# Vierter Eintrag je Code: der Text fuer den Assistenten (siehe
+# `Failure.action_paired`). Leer heisst „erreicht den Assistenten nicht" — das
+# gilt fuer jeden Code ausserhalb von `RENEWABLE_AUTH_CODES`, und dort bleibt
+# der heutige Wortlaut samt Website unveraendert stehen.
+#
+# Die Texte hier nennen bewusst KEINE Handlung. Der Knopf darunter ist die
+# Handlung; ein Satz, der dasselbe noch einmal sagt, muss mitgepflegt werden
+# und widerspricht ihm beim ersten Mal, wo das jemand vergisst. Genau so ist
+# dieser Vorgang entstanden.
+_HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {
     "invalid_token": (
         "token_invalid",
         "Ordertune rejected the access token.",
@@ -252,6 +279,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "Generate a fresh token in Ordertune and download the new",
             "bridge.env. The plain token is shown only once.",
         ),
+        ("This access token is no longer valid.",),
     ),
     "missing_token": (
         "token_invalid",
@@ -260,6 +288,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "ORDERTUNE_BRIDGE_TOKEN is empty or malformed in bridge.env.",
             "Download a fresh pre-filled file.",
         ),
+        ("This machine has no usable access token.",),
     ),
     "connection_revoked": (
         "connection_revoked",
@@ -268,6 +297,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "Create a new connection in Ordertune, download the new",
             "bridge.env and replace the old one.",
         ),
+        ("This connection was revoked, so its token no longer works.",),
     ),
     "ip_mismatch": (
         "ip_mismatch",
@@ -277,6 +307,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "Run the Bridge on a VPS with a fixed outbound IP, or rotate the",
             "token to register the current network.",
         ),
+        (),
     ),
     "fingerprint_mismatch": (
         "fingerprint_mismatch",
@@ -285,6 +316,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "Rotate the token in Ordertune. That clears the stored hardware",
             "fingerprint, and the next handshake registers this machine.",
         ),
+        (),
     ),
     "fingerprint_already_set": (
         "fingerprint_already_set",
@@ -292,6 +324,14 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
         (
             "Rotate the token in Ordertune and download the new bridge.env.",
             "Do not run two bridges from one token -- give each machine its own.",
+        ),
+        # Der Zusatz gehoert hierher und nicht zum Knopf: die Kopplung rotiert
+        # den Token und loest damit genau diese Lage auf — aber sie macht die
+        # ANDERE Maschine still unbrauchbar. Das ist eine Folge, keine
+        # Handlung, und sie steht sonst nirgends im Fenster.
+        (
+            "This token is already bound to another machine.",
+            "Pairing here rotates it, and that machine stops working.",
         ),
     ),
     "missing_fingerprint": (
@@ -301,6 +341,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "This build could not identify the machine. Download the current",
             f"release: {RELEASES_URL}",
         ),
+        (),
     ),
     "rate_limited": (
         "rate_limited",
@@ -309,6 +350,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...]]] = {
             "Wait a minute and start the Bridge again. If it repeats, more",
             "than one bridge is probably using the same connection.",
         ),
+        (),
     ),
 }
 
@@ -362,12 +404,17 @@ def classify_handshake_error(exc: Exception, api_base: str | None = None) -> Fai
 
     known = _HANDSHAKE_BY_CODE.get(_error_code_from_body(body) or "")
     if known is not None:
-        code, headline, action = known
+        code, headline, action, action_paired = known
         return Failure(
             code=code,
             headline=headline,
             detail=(f"  Server answered {status}.",),
             action=action + ("", f"  {settings_url(api_base)}"),
+            # Ohne die Adresse. Sie ist der Weg fuer jemanden ohne Knopf; im
+            # Assistenten waere sie eine zweite, umstaendlichere Anleitung
+            # neben der, die als Knopf danebensteht — und der Grund, warum die
+            # Karte im Bildschirmfoto zum Herunterladen einer Datei riet.
+            action_paired=action_paired,
         )
 
     if status == 422:
