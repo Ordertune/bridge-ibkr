@@ -10,8 +10,74 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+
+    # Auf **Job**-Ebene, nicht am Schritt. Darin lag T1-182 B.
+    #
+    # Der Signierschritt trug bisher `if: env.CERT_PFX_BASE64 != ''` und
+    # definierte `CERT_PFX_BASE64` im `env:`-Block desselben Schrittes. Ein
+    # `if:` sieht die `env:` seines eigenen Schrittes aber nicht — nur die von
+    # Job und Workflow. Die Bedingung verglich also immer Leer gegen Leer, war
+    # immer falsch, und der Schritt ist **kein einziges Mal gelaufen**.
+    #
+    # Das war nicht daran zu merken, dass etwas fehlschlug: ein
+    # uebersprungener Schritt ist in der Oberflaeche grau, nicht rot, und der
+    # Release war gruen. Deshalb steht die Ableitung hier oben, wo `if:` sie
+    # lesen kann.
+    env:
+      SIGNIERUNG_KONFIGURIERT: ${{ secrets.SSLCOM_USERNAME != '' }}
+      UNSIGNIERT_ERLAUBT: ${{ vars.ALLOW_UNSIGNED_RELEASE == 'true' }}
+
+      # Der Name, auf den das Zertifikat lautet — und damit der Name, den
+      # Windows im Startdialog anzeigt.
+      #
+      # Steht hier im Klartext und nicht in einem Geheimnis: er ist per
+      # Konstruktion oeffentlich (er steckt in jeder ausgelieferten EXE und im
+      # Handelsregister), und als Geheimnis waere er in den Protokollen
+      # maskiert — ausgerechnet in der Meldung, die erklaeren soll, welcher
+      # Name erwartet wurde.
+      #
+      # Order Dynamics GmbH, Geschwister-Scholl-Str. 109, 20251 Hamburg,
+      # HRB 200459. Abgeglichen wird gegen den Zertifikats-Subject, der die
+      # Form `CN=..., O=..., L=Hamburg, C=DE` hat — deshalb Teilstring und
+      # nicht Gleichheit.
+      ERWARTETER_HERAUSGEBER: "Order Dynamics GmbH"
+
     steps:
       - uses: actions/checkout@v4
+
+      # Vor dem Bauen, nicht danach — ein Release, der am letzten Schritt
+      # scheitert, hat zehn Minuten Rechenzeit fuer nichts verbraucht.
+      - name: Ein Tag-Release ohne Signierung ist eine Entscheidung, kein Versehen
+        if: >-
+          startsWith(github.ref, 'refs/tags/v')
+          && env.SIGNIERUNG_KONFIGURIERT != 'true'
+          && env.UNSIGNIERT_ERLAUBT != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error title=Unsignierter Release::Es fehlen die Signier-Zugangsdaten."
+          Write-Host @"
+
+          Dieser Tag wuerde eine unsignierte EXE veroeffentlichen. Windows meldet
+          darauf „Unknown publisher", und der Kunde wird gefragt, ob er das
+          Programm trotzdem starten will — neben seinem Depot.
+
+          Bis 0.23.2 ist das stillschweigend passiert, weil der Signierschritt
+          eine Bedingung hatte, die nie zutraf. Ab T1-182 ist es eine Ansage.
+
+          Zwei Wege weiter:
+
+            1. Zertifikat einrichten. Die vier Geheimnisse setzen:
+                 SSLCOM_USERNAME, SSLCOM_PASSWORD,
+                 SSLCOM_CREDENTIAL_ID, SSLCOM_TOTP_SECRET
+               Beschaffung und Einrichtung: docs/CODE_SIGNING.md
+
+            2. Bewusst unsigniert ausliefern. Repository-Variable setzen:
+                 ALLOW_UNSIGNED_RELEASE = true
+               Damit laeuft dieser Release durch und die Release-Notiz sagt
+               offen, dass die Datei unsigniert ist.
+
+          "@
+          exit 1
 
       - uses: actions/setup-python@v5
         with:
@@ -29,7 +95,9 @@ jobs:
       # API, so they have to be able to stop the build.
       - name: Run tests
         run: |
-          pip install pytest
+          # Pillow: siehe ci.yml — traegt den Abgleich zwischen `icon.ico` und
+          # dem Marken-Glyph. Ohne es ueberspringt der Test sich selbst.
+          pip install pytest Pillow
           pytest -q
 
       - name: Build EXE
@@ -91,19 +159,99 @@ jobs:
           # this guard was reported as a failure.
           exit 0
 
-      - name: Sign EXE (if cert available)
-        if: env.CERT_PFX_BASE64 != ''
-        env:
-          CERT_PFX_BASE64: ${{ secrets.CERT_PFX_BASE64 }}
-          CERT_PW: ${{ secrets.CERT_PW }}
+      # Cloud-HSM statt `.pfx`-Datei.
+      #
+      # Hier stand ein `signtool sign /f cert.pfx /p <Passwort>`. Dieser Weg
+      # ist nicht bloss ungenutzt gewesen, er ist **nicht mehr gangbar**: seit
+      # dem 01.06.2023 verlangt das CA/Browser-Forum, dass der private
+      # Schluessel eines Code-Signing-Zertifikats auf Hardware nach FIPS 140-2
+      # Level 2 bzw. EAL4+ liegt. Seitdem gibt keine Zertifizierungsstelle mehr
+      # eine `.pfx`-Datei heraus. Ein Geheimnis namens CERT_PFX_BASE64 haette
+      # also nie befuellt werden koennen — der Schritt wartete auf etwas, das
+      # es nicht zu kaufen gibt.
+      #
+      # Der Schluessel liegt jetzt beim Dienstleister im HSM und verlaesst ihn
+      # nicht. Die Aktion schickt den Hashwert hin und bekommt die Signatur
+      # zurueck. Auf SHA gepinnt, nicht auf `@develop` wie in der Anleitung des
+      # Anbieters: ein Tag laesst sich verschieben, und diese Aktion bekommt
+      # unsere Signierrechte zu sehen.
+      - name: Sign EXE
+        if: env.SIGNIERUNG_KONFIGURIERT == 'true'
+        uses: SSLcom/esigner-codesign@cf5f6c1d38ad10f47e3ed9aca873f429b1a8d85b # v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.SSLCOM_USERNAME }}
+          password: ${{ secrets.SSLCOM_PASSWORD }}
+          credential_id: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.SSLCOM_TOTP_SECRET }}
+          file_path: ${{ github.workspace }}\dist\ordertune-bridge-ibkr.exe
+          override: true
+
+      # Dass der Signierschritt gruen war, belegt die Signatur nicht.
+      #
+      # Das ist dieselbe Lehre wie beim Symbol: `--icon` mitzugeben hiess
+      # nicht, dass es ankam, und ein durchgelaufener Signierschritt heisst
+      # nicht, dass die Datei jetzt eine gueltige Kette hat. Hier wird die
+      # ausgelieferte Datei gelesen.
+      - name: Signatur belegen
+        if: env.SIGNIERUNG_KONFIGURIERT == 'true'
         shell: pwsh
         run: |
-          [System.Convert]::FromBase64String($env:CERT_PFX_BASE64) | Set-Content cert.pfx -Encoding Byte
+          $exe = "dist\ordertune-bridge-ibkr.exe"
+
+          # `Get-AuthenticodeSignature` statt der Textausgabe von signtool.
+          # Herausgeber und Zeitstempel kommen hier als Objekte; ein
+          # `-match "Timestamp"` auf eine Textausgabe haengt dagegen an
+          # Formulierung und Sprache des Werkzeugs.
+          $sig = Get-AuthenticodeSignature $exe
+
+          if ($sig.Status -ne 'Valid') {
+            Write-Error "Signaturzustand ist '$($sig.Status)', nicht 'Valid'. $($sig.StatusMessage)"
+            exit 1
+          }
+
+          # Der Zeitstempel ist der Teil, der die Signatur ueberlebt: ohne ihn
+          # wird die Datei ungueltig, sobald das Zertifikat ablaeuft — also
+          # mitten im Leben einer ausgelieferten Fassung.
+          if (-not $sig.TimeStamperCertificate) {
+            Write-Error "Signatur ohne Zeitstempel. Sie wird mit dem Zertifikat ungueltig statt zu bestehen."
+            exit 1
+          }
+
+          # Auf WELCHEN Namen signiert wurde, ist nicht kosmetisch: genau
+          # dieser Name steht kuenftig in Windows' Startdialog, und an ihm
+          # haengt der Reputationsaufbau. Ein Zertifikat, das versehentlich auf
+          # eine andere Identitaet lautet — falscher `credential_id`, zweites
+          # Zertifikat im Konto, Wechsel beim Verlaengern —, wuerde sonst still
+          # ausgeliefert und der aufgebaute Ruf begaenne von vorn.
+          $subject = $sig.SignerCertificate.Subject
+          if ($subject -notmatch [regex]::Escape($env:ERWARTETER_HERAUSGEBER)) {
+            Write-Error @"
+          Signiert auf den falschen Herausgeber.
+
+            erwartet : $($env:ERWARTETER_HERAUSGEBER)
+            gefunden : $subject
+
+          Stimmt der neue Name absichtlich nicht mehr, ist ERWARTETER_HERAUSGEBER
+          in dieser Datei nachzuziehen — und zu bedenken, dass die SmartScreen-
+          Reputation am Zertifikat haengt und mit dem Wechsel bei null beginnt.
+          "@
+            exit 1
+          }
+
+          # Gegenprobe mit signtool: /pa ist die Richtlinie, nach der Windows
+          # beim Doppelklick prueft. Ohne /pa wird gegen eine andere Kette
+          # geprueft, und das meldet Erfolg, wo der Explorer spaeter meckert.
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" `
                      | Sort-Object FullName -Descending | Select-Object -First 1
-          & $signtool.FullName sign /f cert.pfx /p $env:CERT_PW `
-            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-            dist/ordertune-bridge-ibkr.exe
+          & $signtool.FullName verify /pa /v $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "signtool lehnt die Signatur unter der Windows-Richtlinie ab."
+            exit 1
+          }
+
+          Write-Host "Signatur belegt: $subject, mit Zeitstempel."
+          exit 0
 
       - name: Package release zip
         shell: pwsh
@@ -112,10 +260,42 @@ jobs:
           Compress-Archive -Path dist/ordertune-bridge-ibkr.exe,dist/README.txt `
             -DestinationPath dist/ordertune-bridge-ibkr-${{ github.ref_name }}.zip
 
+      # Eine unsignierte Datei muss sich als solche zu erkennen geben.
+      #
+      # Wer die Seite oeffnet, soll nicht raten muessen, ob die Warnung beim
+      # Start erwartbar ist oder auf etwas Manipuliertes hindeutet. Genau diese
+      # Ununterscheidbarkeit ist der Grund, warum „Unknown publisher" mehr
+      # kaputt macht als es aussieht.
+      - name: Hinweis fuer die Release-Notiz
+        id: hinweis
+        shell: pwsh
+        run: |
+          if ($env:SIGNIERUNG_KONFIGURIERT -eq 'true') {
+            $text = "Signiert. Windows zeigt den Herausgeber im Startdialog an."
+          } else {
+            $text = @"
+          > **Diese Datei ist nicht signiert.**
+          > Windows meldet beim Start ``Unknown publisher`` und fragt nach, ob das
+          > Programm trotzdem laufen soll. Das ist bei dieser Fassung erwartbar und
+          > kein Hinweis auf eine veraenderte Datei. Pruefen laesst sich das ueber
+          > die SHA-256-Summe unten.
+          "@
+          }
+          $summe = (Get-FileHash dist\ordertune-bridge-ibkr.exe -Algorithm SHA256).Hash
+          $block = "$text`n`n``SHA-256: $summe``"
+          # Mehrzeilig ueber ein Begrenzerzeichen, sonst schluckt die Ausgabe
+          # alles ab der zweiten Zeile.
+          "notiz<<ENDE`n$block`nENDE" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: |
             dist/ordertune-bridge-ibkr.exe
             dist/ordertune-bridge-ibkr-${{ github.ref_name }}.zip
+          # `body` wird den erzeugten Notizen VORANgestellt — der Hinweis steht
+          # also oben, nicht unter der Liste der Aenderungen. Bewusst ohne
+          # `append_body`: das haengt an eine bestehende Notiz an, und ein
+          # zweiter Lauf auf denselben Tag hinterliesse den Hinweis doppelt.
           generate_release_notes: true
+          body: ${{ steps.hinweis.outputs.notiz }}

@@ -68,6 +68,33 @@ zusammen — die gemeldete Stueckzahl je Symbol kann dann groesser sein als das,
 was ein einzelnes Konto haelt. Bitte melden Sie sich beim Support; der Fall ist
 loesbar, aber nicht durch Raten.
 
+## `Windows protected your PC` / `Unknown publisher` beim ersten Start
+
+Windows SmartScreen meldet beim ersten Start, die Anwendung sei unbekannt, und
+fragt, ob sie trotzdem laufen soll. Über **More info → Run anyway** startet die
+Bridge normal.
+
+Das ist kein Fehler und kein Hinweis auf eine veränderte Datei. Windows zeigt
+diesen Dialog bei jeder Anwendung, die es noch nicht oft genug gesehen hat.
+
+Wer sichergehen will, vergleicht die Prüfsumme mit der Angabe auf der
+Release-Seite:
+
+```powershell
+Get-FileHash .\ordertune-bridge-ibkr.exe -Algorithm SHA256
+```
+
+Stimmt die Summe überein, ist die Datei exakt die veröffentlichte.
+
+## Die EXE trägt ein Python-Symbol
+
+Betrifft Fassungen **bis einschließlich 0.23.2**. Der Build hat das
+Marken-Symbol stillschweigend übersprungen und PyInstallers Voreinstellung
+genommen. Behoben ab 0.23.3 — die Datei trägt dort das Ordertune-Zeichen.
+
+Kein Handlungsbedarf außer dem Update; auf die Funktion hatte es keinen
+Einfluss.
+
 ## Log-Files
 
 Rolling-Logs unter `logs/bridge.log`. Retention: 30 Tage.

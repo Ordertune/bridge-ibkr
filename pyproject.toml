@@ -1,6 +1,6 @@
 [project]
 name = "ordertune-bridge-ibkr"
-version = "0.23.2"
+version = "0.23.3"
 description = "Ordertune Bridge — Windows-Native Client für IBKR TWS/Gateway. Holt confirmed Signale aus t1.ordertune.com, führt Orders auf privatem IBKR-Depot aus, meldet Depot-State und Order-Results zurück."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -22,6 +22,10 @@ dev = [
     "pytest>=8.0.0",
     "pyinstaller>=6.0.0",
     "ruff>=0.4.0",
+    # Nur fuer `tools/make_icon.py` und den Abgleich des Symbols gegen das
+    # Design-System. Der Build selbst braucht es nicht — `assets/icon.ico`
+    # liegt fertig im Repo.
+    "Pillow>=10.0.0",
 ]
 
 [project.scripts]
