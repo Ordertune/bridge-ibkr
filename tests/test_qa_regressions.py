@@ -385,3 +385,43 @@ def test_the_steps_carry_a_marker_instead_of_a_number_in_the_title() -> None:
     assert "counter-increment: schritt" in PAGE_HTML
     # Und die alte Schreibweise ist weg.
     assert "1 &middot;" not in PAGE_HTML
+
+
+# ── T1-179 Dritter Durchgang: was erst das Bildschirmfoto gezeigt hat ────────
+
+
+def test_the_pairing_panel_outranks_the_step_paragraphs() -> None:
+    """**Der Fehler, den kein Test gesehen hat.**
+
+    Das Kopplungsfeld steht IN der Schrittliste, und `.steps p` weiter unten
+    ist spezifischer als eine blosse Klasse. Ohne Schachtelung unter
+    `.pairbox` wurde die ganze Flaeche auf 14 px plattgedrueckt — der Code
+    eingeschlossen, der als einziges Element dieser Seite gross sein MUSS.
+
+    Gefunden hat das erst das erste Bildschirmfoto: die Zusicherungen prueften,
+    DASS die Regel dasteht, nicht dass sie auch gewinnt.
+    """
+    for regel in (
+        ".pairbox .code {",
+        ".pairbox .pairlead {",
+        ".pairbox .pairttl {",
+        ".pairbox .pairwhere {",
+        ".pairbox .pairmachine-lead {",
+    ):
+        assert regel in PAGE_HTML, f"{regel} ist nicht unter .pairbox gehaengt"
+
+    # Und keine der Regeln darf wieder als blosse Klasse dastehen: dort
+    # verliert sie gegen `.steps p`.
+    for lose in ("\n.code {", "\n.pairlead {", "\n.pairttl {", "\n.pairwhere {"):
+        assert lose not in PAGE_HTML, f"{lose.strip()} steht wieder ungeschachtelt da"
+
+
+def test_hidden_beats_a_display_rule() -> None:
+    """`[hidden]` ist nur `display: none` aus dem Vorgabestylesheet.
+
+    `nav { display: flex }` hat die Reiterleiste deshalb auch im Assistenten
+    stehen lassen, obwohl das Skript sie ausdruecklich versteckt. Die Regel
+    gilt fuer alle Elemente, nicht nur fuer `nav` — sonst wartet derselbe
+    Fehler beim naechsten mit eigenem `display`.
+    """
+    assert "[hidden] { display: none !important; }" in PAGE_HTML

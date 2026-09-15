@@ -128,6 +128,13 @@ PAGE_HTML = """<!doctype html>
   }
 }
 * { box-sizing: border-box; }
+/* `[hidden]` ist nur `display: none` aus dem Vorgabestylesheet und verliert
+   gegen JEDE eigene `display`-Regel. `nav { display: flex }` hat die
+   Reiterleiste deshalb auch im Assistenten stehen lassen, obwohl das Skript
+   sie ausdruecklich versteckt — sichtbar wurde das erst beim Abfotografieren
+   der Seite. Diese Zeile gilt fuer alle, nicht nur fuer `nav`: derselbe
+   Fehler wartet sonst bei jedem weiteren Element mit eigenem `display`. */
+[hidden] { display: none !important; }
 html { -webkit-font-smoothing: antialiased; color-scheme: light dark; }
 body { margin: 0; background: var(--bg); color: var(--fg-1);
        font-family: var(--sans); font-size: 15px; line-height: 1.55;
@@ -251,18 +258,25 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
    sogar von einer Maschine auf die naechste — gross, weit gesperrt, in
    Ziffernbreite. Die Restzeit steht darunter und laeuft mit: eine Frist, die
    man nur als Zahl liest („10 Minuten"), sagt nach fuenf Minuten nichts mehr. */
+/* Jede Regel hier ist unter `.pairbox` gehaengt, und das ist nicht Kosmetik:
+   das Feld steht IN der Schrittliste, und `.steps p` weiter unten ist
+   spezifischer als eine blosse Klasse. Ohne diese Schachtelung wurde die
+   ganze Flaeche auf 14 px plattgedrueckt — der Code eingeschlossen, der als
+   einziges Element dieser Seite gross sein MUSS. Gefunden hat das kein Test,
+   sondern das erste Bildschirmfoto. */
 .pairbox { border: 1px solid var(--border); border-radius: var(--r-md);
            background: var(--surface); padding: 24px; margin: 14px 0 0; }
-.pairlead { margin: 0; font-size: 13px; font-weight: 500; color: var(--fg-2);
-            text-transform: uppercase; letter-spacing: .1em; }
-.code { font-family: var(--mono); font-size: 38px; font-weight: 600;
+.pairbox .pairlead { margin: 0; font-size: 13px; font-weight: 500;
+            color: var(--fg-2); text-transform: uppercase; letter-spacing: .1em;
+            max-width: none; }
+.pairbox .code { font-family: var(--mono); font-size: 38px; font-weight: 600;
         letter-spacing: .24em; margin: 10px 0 2px; line-height: 1.1;
-        font-variant-numeric: tabular-nums; color: var(--fg-1); }
-.pairttl { margin: 0 0 18px; font-size: 13px; color: var(--fg-3);
+        font-variant-numeric: tabular-nums; color: var(--fg-1); max-width: none; }
+.pairbox .pairttl { margin: 0 0 18px; font-size: 13px; color: var(--fg-3);
            font-variant-numeric: tabular-nums; }
-.pairttl.soon { color: var(--warn); }
-.pairwhere { margin: 0 0 18px; font-size: 14px; color: var(--fg-2); }
-.pairwhere a { color: var(--fg-1); text-decoration: underline;
+.pairbox .pairttl.soon { color: var(--warn); }
+.pairbox .pairwhere { margin: 0 0 18px; font-size: 14px; color: var(--fg-2); }
+.pairbox .pairwhere a { color: var(--fg-1); text-decoration: underline;
                text-underline-offset: 3px; text-decoration-color: var(--lime-deep);
                text-decoration-thickness: 2px; }
 
@@ -271,8 +285,8 @@ textarea { width: 100%; font-family: var(--mono); font-size: 12.5px;
    und mit demselben Wortlaut wie die Flaeche auf t1. */
 .pairmachine { border-top: 1px solid var(--border); padding-top: 16px;
                margin-bottom: 16px; }
-.pairmachine-lead { margin: 0 0 10px; font-size: 13px; color: var(--fg-2);
-                    max-width: 52ch; }
+.pairbox .pairmachine-lead { margin: 0 0 10px; font-size: 13px;
+                    color: var(--fg-2); max-width: 52ch; }
 .pairmachine dl { grid-template-columns: 6rem 1fr; gap: 6px 16px; }
 .pairmachine dt { font-size: 13px; }
 .pairmachine dd { font-size: 13px; }
