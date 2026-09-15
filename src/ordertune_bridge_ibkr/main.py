@@ -1929,7 +1929,20 @@ def run_setup_cockpit(
                 failure_code=failure.code,
                 failure_headline=failure.headline,
                 failure_detail=list(failure.detail),
-                failure_action=list(failure.action),
+                # T1-184: der Assistent ist die EINE Flaeche, auf der der
+                # Kopplungsknopf steht — hier gilt `action_paired`.
+                #
+                # Die beiden anderen Flaechen behalten `action`: der gerahmte
+                # Konsolen-Abbruch und die Karte im laufenden Cockpit. Dort
+                # gibt es keinen Knopf, auf den sich ein Text zurueckziehen
+                # koennte, und der Verweis auf die Website ist die einzig
+                # moegliche Antwort.
+                #
+                # `or failure.action` ist kein Vorsichtsschnoerkel: jede
+                # Stoerung ausserhalb von `RENEWABLE_AUTH_CODES` hat keinen
+                # Assistenten-Text, und sollte eine davon je hier landen, ist
+                # der ausfuehrliche Text besser als ein leeres Feld.
+                failure_action=list(failure.action_paired or failure.action),
             )
         )
         server = CockpitServer(
