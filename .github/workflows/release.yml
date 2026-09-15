@@ -257,8 +257,24 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item README.md dist/README.txt
+
+          # `github.ref_name` wanderte bisher ungefiltert in den Dateinamen.
+          # Bei einem Tag geht das gut (`v0.23.3`), bei einem Branch nicht:
+          # jeder Branchname hier traegt einen Schraegstrich (`feat/…`,
+          # `fix/…`), und daraus wird ein Unterverzeichnis, das es nicht gibt
+          # — `Compress-Archive` bricht ab. Damit war der `workflow_dispatch`,
+          # den diese Datei ausdruecklich anbietet, auf keinem Branch je
+          # benutzbar.
+          #
+          # Aufgefallen beim Probelauf zu T1-182, der genau dafuer da war: den
+          # Build einmal durchspielen, ohne einen Tag zu setzen. Genau das
+          # wird gebraucht, wenn die Signierung erstmals erprobt wird.
+          #
+          # Tags bleiben unveraendert — `v0.23.3` enthaelt kein Zeichen, das
+          # die Ersetzung anfasst.
+          $name = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
           Compress-Archive -Path dist/ordertune-bridge-ibkr.exe,dist/README.txt `
-            -DestinationPath dist/ordertune-bridge-ibkr-${{ github.ref_name }}.zip
+            -DestinationPath "dist/ordertune-bridge-ibkr-$name.zip"
 
       # Eine unsignierte Datei muss sich als solche zu erkennen geben.
       #
