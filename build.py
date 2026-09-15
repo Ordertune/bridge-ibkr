@@ -3,9 +3,10 @@
 Baut single-file EXE für Windows:
   dist/ordertune-bridge-ibkr.exe
 
-Nach dem Build sollte die EXE mit einem EV-Code-Signing-Cert signiert
-werden (siehe .github/workflows/release.yml — dort passiert das automatisch
-wenn CERT_PFX_BASE64 + CERT_PW als GitHub-Secrets gesetzt sind).
+Nach dem Build wird die EXE signiert — siehe `.github/workflows/release.yml`,
+Schritt „Sign EXE". Das passiert ueber einen Cloud-HSM-Dienst; ein
+`.pfx`-Datei-Zertifikat, wie es hier bis T1-182 stand, gibt es seit dem
+CA/Browser-Forum-Beschluss vom 01.06.2023 nicht mehr zu kaufen.
 """
 from __future__ import annotations
 
@@ -48,12 +49,91 @@ def main() -> int:
         str(root / "src"),
         str(root / "launcher.py"),
     ]
+    # Das Symbol ist Pflicht, nicht Kuer.
+    #
+    # Hier stand `if icon.exists()`. Die Datei existierte nie — `assets/` war
+    # ein leeres Verzeichnis —, also fiel der Build stillschweigend auf
+    # PyInstallers Voreinstellung zurueck, und die ist das **Python-Symbol**.
+    # Jede Fassung bis 0.23.2 hat so ausgeliefert: der Kunde stellt eine
+    # Anwendung neben sein Depot, und sie sieht aus wie eine fremde
+    # Programmiersprache. Gemerkt hat es niemand, weil ein uebersprungener
+    # Schritt nichts sagt.
+    #
+    # Ein fehlendes Symbol ist ab jetzt ein Baufehler. Wer `assets/icon.ico`
+    # loescht, bekommt keinen stillen Rueckfall, sondern einen Abbruch mit dem
+    # Befehl, der die Datei wiederherstellt.
     icon = root / "assets" / "icon.ico"
-    if icon.exists():
-        cmd.extend(["--icon", str(icon)])
+    if not icon.exists():
+        print(
+            f"FEHLER: {icon.relative_to(root)} fehlt.\n"
+            "        Ohne diese Datei baut PyInstaller die EXE mit dem\n"
+            "        Python-Symbol — das ist kein brauchbares Ergebnis.\n"
+            "        Wiederherstellen mit:  python tools/make_icon.py",
+            file=sys.stderr,
+        )
+        return 2
+    cmd.extend(["--icon", str(icon)])
 
     proc = subprocess.run(cmd, check=False)
-    return proc.returncode
+    if proc.returncode != 0:
+        return proc.returncode
+
+    return verify_icon(dist / "ordertune-bridge-ibkr.exe", icon)
+
+
+def ico_frames(ico: Path) -> list[bytes]:
+    """Die Rahmen-Nutzlasten einer ICO-Datei, unveraendert.
+
+    Genau diese Bytes legt PyInstaller als `RT_ICON`-Ressourcen in die EXE.
+    Sie dort wiederzufinden ist der Beleg, dass das Symbol angekommen ist.
+    """
+    raw = ico.read_bytes()
+    count = int.from_bytes(raw[4:6], "little")
+    frames = []
+    for i in range(count):
+        entry = 6 + i * 16
+        length = int.from_bytes(raw[entry + 8:entry + 12], "little")
+        offset = int.from_bytes(raw[entry + 12:entry + 16], "little")
+        frames.append(raw[offset:offset + length])
+    return frames
+
+
+def verify_icon(exe: Path, icon: Path) -> int:
+    """Belegt, dass das Symbol wirklich in der EXE steht.
+
+    `--icon` mitzugeben ist kein Beweis — PyInstaller nimmt das Argument auch
+    dann an, wenn es die Ressource anschliessend nicht schreibt, und genau die
+    Sorte stiller Rueckfall hat das Python-Symbol ueberhaupt erst bis zum
+    Kunden getragen. Hier wird deshalb die gebaute Datei gelesen, nicht der
+    Aufruf geglaubt.
+    """
+    if sys.platform != "win32":
+        # Das Einbetten ist eine Windows-Ressourcenoperation. Ausserhalb von
+        # Windows baut PyInstaller ohne sie, und ein Fehlschlag waere hier
+        # kein Befund, sondern ein falscher Alarm.
+        print("Hinweis: Symbolpruefung nur auf Windows — hier uebersprungen.")
+        return 0
+
+    if not exe.exists():
+        print(f"FEHLER: {exe} wurde nicht gebaut.", file=sys.stderr)
+        return 2
+
+    blob = exe.read_bytes()
+    frames = ico_frames(icon)
+    gefunden = sum(1 for f in frames if f in blob)
+
+    if gefunden == 0:
+        print(
+            "FEHLER: Keiner der Symbolrahmen steht in der gebauten EXE.\n"
+            "        PyInstaller hat `--icon` angenommen und die Ressource\n"
+            "        nicht geschrieben. Die EXE traegt damit weiterhin das\n"
+            "        Python-Symbol — genau der Zustand, den T1-182 beendet.",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"Symbol belegt: {gefunden} von {len(frames)} Rahmen in der EXE gefunden.")
+    return 0
 
 
 if __name__ == "__main__":
