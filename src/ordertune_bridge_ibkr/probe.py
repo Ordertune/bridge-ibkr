@@ -51,6 +51,11 @@ from .order_reference import ORDER_REF_PREFIX, is_ours  # noqa: F401
 # reichlich Reserve fuer eine Diagnose, die ohnehin nur einmal laeuft.
 COMMISSION_GRACE_S = 2.0
 
+# T1-191 AC-1: wie weit der Zeitfilter zurueckfragt. Sieben Tage decken jeden
+# Fall ab, an dem eine Fuellung noch heilbar waere, und sind kurz genug, dass
+# die Antwort ueberschaubar bleibt.
+PROBE_LOOKBACK_DAYS = 7
+
 
 def probe_requested(argv: list[str]) -> bool:
     """Steht die Sonde auf der Befehlszeile?
@@ -185,5 +190,32 @@ def run_probe(ibkr: Any) -> None:
     except Exception as exc:
         log.error("reqExecutions ist gescheitert: %s", exc)
 
+    # ── T1-191 AC-1: reicht `reqExecutions` ueber den Tag hinaus? ──────────
+    #
+    # Das ist die Weiche des ganzen Vorgangs T1-191. Antwortet IBKR hier mit
+    # Ausfuehrungen von GESTERN, laesst sich eine verlorene Fuellung exakt
+    # zuordnen — der Auftragsvermerk traegt die Dispatch-Kennung. Antwortet es
+    # nicht, bleibt nur die Herleitung aus dem Depotbestand.
+    #
+    # Der Filter fragt sieben Tage zurueck. Aussagekraeftig ist der Lauf nur an
+    # einem Tag, an dem VORGESTERN oder frueher etwas ausgefuehrt wurde —
+    # sonst ist ein leeres Ergebnis mehrdeutig.
+    try:
+        seit = ibkr.now_minus_days(PROBE_LOOKBACK_DAYS)
+        frueher = ibkr.executions_since(seit)
+        ibkr.sleep(COMMISSION_GRACE_S)
+        _abschnitt(
+            f"reqExecutions(ExecutionFilter(time={seit})) — {PROBE_LOOKBACK_DAYS} Tage zurueck",
+            [describe_fill(f) for f in ibkr.fills()],
+            "T1-191 AC-1. Stehen hier Ausfuehrungen von einem FRUEHEREN "
+            "Handelstag, reicht der Abruf ueber den Tag hinaus und T1-191 kann "
+            "exakt zuordnen statt herzuleiten. Stehen nur heutige darin, "
+            "bestaetigt das die bisherige Annahme. "
+            f"({len(frueher)} Roh-Ausfuehrungen gemeldet.)",
+        )
+    except Exception as exc:
+        log.error("reqExecutions mit Zeitfilter ist gescheitert: %s", exc)
+        log.error("  -> Auch das ist ein Ergebnis: der Abruf traegt nicht.")
+
     log.info("")
-    log.info("T1-94-PROBE: fertig. Bitte die drei Abschnitte oben schicken.")
+    log.info("T1-94-PROBE: fertig. Bitte die vier Abschnitte oben schicken.")

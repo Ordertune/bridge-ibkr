@@ -640,6 +640,24 @@ class IbkrClient:
         """
         return list(self._ib.reqExecutions())
 
+    def executions_since(self, since: Any) -> list[Any]:
+        """T1-191-Sonde: Ausfuehrungen AB einem Zeitpunkt erfragen.
+
+        ## Wofuer
+
+        `reqCompletedOrders` und `ib.fills()` halten nach allem, was dieser
+        Client bisher annimmt, nur den laufenden Tag vor. Ob `reqExecutions`
+        MIT einem `ExecutionFilter` weiter zurueckreicht, ist nie gemessen
+        worden — und an dieser Frage haengt, ob T1-191 eine verlorene Fuellung
+        exakt zuordnen kann oder sie aus dem Depotbestand herleiten muss.
+
+        `since` ist IBKRs Format `yyyymmdd hh:mm:ss`. Die Methode gibt
+        zurueck, was kommt; sie deutet nichts. **Es geht nichts hinaus.**
+        """
+        from ib_insync import ExecutionFilter  # lokal: nur die Sonde braucht ihn
+
+        return list(self._ib.reqExecutions(ExecutionFilter(time=str(since))))
+
     def fills(self) -> list[Any]:
         """Die Ausfuehrungen aus dem Speicher von ib_insync, mit Gebuehr.
 
@@ -690,3 +708,15 @@ class IbkrClient:
     def sleep(self, seconds: float) -> None:
         """ib_insync-native sleep that keeps event-loop running."""
         self._ib.sleep(seconds)
+
+    @staticmethod
+    def now_minus_days(days: int) -> str:
+        """Ein Zeitpunkt in IBKRs Filterformat `yyyymmdd hh:mm:ss`.
+
+        Lokalzeit ohne Zonenangabe, weil `ExecutionFilter.time` genau das
+        erwartet — eine Zone anzuhaengen laesst den Filter stillschweigend ins
+        Leere laufen. Nur die Sonde benutzt das.
+        """
+        from datetime import datetime, timedelta
+
+        return (datetime.now() - timedelta(days=days)).strftime("%Y%m%d %H:%M:%S")
