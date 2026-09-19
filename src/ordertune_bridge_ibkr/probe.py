@@ -200,22 +200,59 @@ def run_probe(ibkr: Any) -> None:
     # Der Filter fragt sieben Tage zurueck. Aussagekraeftig ist der Lauf nur an
     # einem Tag, an dem VORGESTERN oder frueher etwas ausgefuehrt wurde —
     # sonst ist ein leeres Ergebnis mehrdeutig.
-    try:
-        seit = ibkr.now_minus_days(PROBE_LOOKBACK_DAYS)
-        frueher = ibkr.executions_since(seit)
-        ibkr.sleep(COMMISSION_GRACE_S)
-        _abschnitt(
-            f"reqExecutions(ExecutionFilter(time={seit})) — {PROBE_LOOKBACK_DAYS} Tage zurueck",
-            [describe_fill(f) for f in ibkr.fills()],
-            "T1-191 AC-1. Stehen hier Ausfuehrungen von einem FRUEHEREN "
-            "Handelstag, reicht der Abruf ueber den Tag hinaus und T1-191 kann "
-            "exakt zuordnen statt herzuleiten. Stehen nur heutige darin, "
-            "bestaetigt das die bisherige Annahme. "
-            f"({len(frueher)} Roh-Ausfuehrungen gemeldet.)",
-        )
-    except Exception as exc:
-        log.error("reqExecutions mit Zeitfilter ist gescheitert: %s", exc)
-        log.error("  -> Auch das ist ein Ergebnis: der Abruf traegt nicht.")
+    #
+    # ## Warum ZWEI Formate, nicht eines
+    #
+    # Der erste Lauf am 2026-09-19 fragte in Ortszeit mit Leerzeichen
+    # (`20260912 11:37:06`). IBKR hat das beanstandet:
+    #
+    #     Warning 2174: ... ohne explizite Zeitzone ... Bitte verwenden Sie das
+    #     Format yyyymmdd-hh:mm:ss in UTC ...
+    #
+    # und danach null Ausfuehrungen gemeldet. Ein leeres Ergebnis auf eine
+    # bemaengelte Anfrage ist **kein Ergebnis**: es ist nicht zu unterscheiden,
+    # ob der Abruf nicht ueber den Tag hinausreicht oder ob der Filter gar nicht
+    # gelesen wurde.
+    #
+    # Deshalb stehen beide Formen nebeneinander. Erst wenn BEIDE leer bleiben,
+    # ist belegt, dass `reqExecutions` den laufenden Tag nicht verlaesst.
+    # Liefert nur die zweite etwas, lag es am Format — und dann ist die exakte
+    # Zuordnung ueber den Auftragsvermerk erreichbar.
+    # Die Zeitstempel werden INNERHALB des `try` gebildet, nicht davor. Steht
+    # der Aufruf ausserhalb, nimmt eine fehlende Methode den ganzen Abschnitt
+    # mit, statt nur die eine Form ausfallen zu lassen — dieselbe
+    # Fehlerisolierung, die jeder andere Abschnitt dieser Sonde hat.
+    formen = (
+        ("alt, Ortszeit mit Leerzeichen", "now_minus_days"),
+        ("neu, UTC mit Bindestrich", "utc_minus_days"),
+    )
+    for bezeichnung, formatierer in formen:
+        try:
+            seit = getattr(ibkr, formatierer)(PROBE_LOOKBACK_DAYS)
+            frueher = ibkr.executions_since(seit)
+            ibkr.sleep(COMMISSION_GRACE_S)
+            # Beschrieben werden die Zeilen DIESES Abrufs, nicht `ibkr.fills()`.
+            # Der Speicher von ib_insync sammelt ueber beide Abrufe hinweg — der
+            # zweite Abschnitt zeigte sonst die Zeilen des ersten mit und die
+            # Gegenueberstellung waere wertlos. Die Gebuehr fehlt in den
+            # Rohdaten; fuer die Frage „steht hier etwas von Freitag" braucht es
+            # sie nicht.
+            _abschnitt(
+                f"reqExecutions(ExecutionFilter(time={seit})) — "
+                f"{PROBE_LOOKBACK_DAYS} Tage zurueck [{bezeichnung}]",
+                [describe_fill(f) for f in frueher],
+                "T1-191 AC-1. Stehen hier Ausfuehrungen von einem FRUEHEREN "
+                "Handelstag, reicht der Abruf ueber den Tag hinaus und die "
+                "verlorene Fuellung laesst sich exakt zuordnen statt herzuleiten. "
+                f"({len(frueher)} Roh-Ausfuehrungen gemeldet.)",
+            )
+        except Exception as exc:
+            log.error(
+                "reqExecutions mit Zeitfilter [%s] ist gescheitert: %s",
+                bezeichnung,
+                exc,
+            )
+            log.error("  -> Auch das ist ein Ergebnis: diese Form traegt nicht.")
 
     log.info("")
-    log.info("T1-94-PROBE: fertig. Bitte die vier Abschnitte oben schicken.")
+    log.info("T1-94-PROBE: fertig. Bitte die fuenf Abschnitte oben schicken.")

@@ -711,12 +711,47 @@ class IbkrClient:
 
     @staticmethod
     def now_minus_days(days: int) -> str:
-        """Ein Zeitpunkt in IBKRs Filterformat `yyyymmdd hh:mm:ss`.
+        """Ein Zeitpunkt in IBKRs ALTEM Filterformat `yyyymmdd hh:mm:ss`.
 
-        Lokalzeit ohne Zonenangabe, weil `ExecutionFilter.time` genau das
-        erwartet — eine Zone anzuhaengen laesst den Filter stillschweigend ins
-        Leere laufen. Nur die Sonde benutzt das.
+        Hier stand: „Lokalzeit ohne Zonenangabe, weil `ExecutionFilter.time`
+        genau das erwartet — eine Zone anzuhaengen laesst den Filter
+        stillschweigend ins Leere laufen."
+
+        **Das war eine Annahme, und sie ist widerlegt.** Der erste Lauf der
+        Sonde am 2026-09-19 hat darauf geantwortet:
+
+            Warning 2174: Sie haben eine Anfrage mit Datum-Zeit-Attributen
+            ohne explizite Zeitzone uebermittelt. Bitte verwenden Sie das
+            Format yyyymmdd-hh:mm:ss in UTC ... Die Funktion, die eine
+            implizite Zeitzone erlaubt, wird in der naechsten API-Version
+            entfernt.
+
+        Danach kamen null Ausfuehrungen. Ein leeres Ergebnis auf eine
+        bemaengelte Anfrage beweist nichts — es ist nicht zu unterscheiden, ob
+        der Abruf nicht ueber den Tag hinausreicht oder ob IBKR den Filter gar
+        nicht erst gelesen hat.
+
+        Die Form bleibt stehen, damit die Sonde beide nebeneinander stellen
+        kann. Nur sie benutzt das.
         """
         from datetime import datetime, timedelta
 
         return (datetime.now() - timedelta(days=days)).strftime("%Y%m%d %H:%M:%S")
+
+    @staticmethod
+    def utc_minus_days(days: int) -> str:
+        """Derselbe Zeitpunkt in der Form, die IBKR in Warnung 2174 verlangt.
+
+        `yyyymmdd-hh:mm:ss` in UTC — Bindestrich statt Leerzeichen, und keine
+        Ortszeit. Das ist die Form, die die naechste API-Version als einzige
+        behalten wird.
+
+        Sie steht neben `now_minus_days`, nicht an deren Stelle: erst wenn
+        BEIDE im selben Lauf dasselbe leere Ergebnis liefern, ist belegt, dass
+        `reqExecutions` nicht ueber den laufenden Tag hinausreicht. Liefert nur
+        diese hier etwas, lag es am Format.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        zeitpunkt = datetime.now(timezone.utc) - timedelta(days=days)
+        return zeitpunkt.strftime("%Y%m%d-%H:%M:%S")
