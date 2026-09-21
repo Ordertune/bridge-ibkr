@@ -102,6 +102,20 @@ HEARTBEAT_INTERVAL_S = 60.0
 PENDING_INTERVAL_MARKET_S = 5.0
 PENDING_INTERVAL_OFF_S = 60.0
 
+# T1-203 — wie weit der Abgleich beim Wiederverbinden zurueckfragt und wie lange
+# nach dem Verbinden er das tut.
+#
+# Sieben Tage: dieselbe Spanne wie die Sonde (`probe.PROBE_LOOKBACK_DAYS`) und
+# deckt jeden Fall ab, an dem eine verpasste Fuellung noch heilbar ist
+# (FREEZE_MAX_AGE_MS der Plattform ist groesser, aber IBKR gibt nicht beliebig
+# weit zurueck).
+RECONCILE_LOOKBACK_DAYS = 7
+# Der 7-Tage-`reqExecutions` laeuft NUR in diesem Fenster nach dem Verbinden —
+# `_handle_order_reconcile` selbst laeuft in jedem Herzschlag, und ein solcher
+# Abruf je Minute reizte IBKRs Ratenlimit. Drei Minuten decken zwei bis drei
+# Herzschlaege ab; danach traegt der laufende Tag alles.
+DEEP_RECONCILE_WINDOW_S = 180.0
+
 # Wie fein die Schleife tickt. Klein genug, dass ein 5-Sekunden-Abruf nicht
 # merklich spaeter kommt; gross genug, dass Leerlauf nichts kostet. Waehrend
 # dieses Aufrufs laeuft die ib_insync-Schleife — das ist der Moment, in dem
@@ -891,7 +905,33 @@ def _handle_order_reconcile(
     # FREMDEN Handel macht; hier wird die andere Haelfte gelesen.
     fills_by_ref: dict[str, Any] = {}
     try:
-        fills_by_ref = fills_by_dispatch(ibkr.fills())
+        heutige = list(ibkr.fills())
+        # ── T1-203: der 7-Tage-Abruf, nur kurz nach dem Verbinden ────────────
+        #
+        # `ib.fills()` haelt nur den LAUFENDEN Tag. Eine Fuellung von gestern,
+        # deren Bridge damals aus war, faellt sonst durch und muss aus dem
+        # Depotbestand hergeleitet werden (T1-191) statt exakt gebucht — obwohl
+        # der Auftragsvermerk `ot-<dispatchId>` sie eindeutig zuordnen wuerde.
+        # `reqExecutions` MIT Zeitfilter reicht weiter zurueck (in der Sonde
+        # gemessen).
+        #
+        # Nur im ersten Fenster nach dem Verbinden: `_handle_order_reconcile`
+        # laeuft in JEDEM Herzschlag, und ein 7-Tage-`reqExecutions` je Minute
+        # reizte IBKRs Ratenlimit. Die Heilung zaehlt genau dann, wenn die
+        # Bridge gerade zurueckkam — danach traegt der laufende Tag alles.
+        aeltere: list[Any] = []
+        seit_verbunden = (datetime.now(timezone.utc) - session_connected_at).total_seconds()
+        if seit_verbunden < DEEP_RECONCILE_WINDOW_S:
+            try:
+                seit = ibkr.utc_minus_days(RECONCILE_LOOKBACK_DAYS)
+                aeltere = list(ibkr.executions_since(seit))
+            except Exception as exc:
+                # Rein additiv: faellt der Zeitfilter aus (aeltere TWS-Version,
+                # IBKR liefert nichts), bleibt es beim laufenden Tag.
+                log.warning("Could not read prior-day executions (7d): %s", exc)
+        # Der laufende Tag ZUERST: `fills_by_dispatch` dedupt ueber `execId`,
+        # und so gewinnt seine Gebuehr, die der reqExecutions-Abruf nicht traegt.
+        fills_by_ref = fills_by_dispatch(heutige + aeltere)
     except Exception as exc:
         # Ohne sie faellt der Abgleich auf das Verhalten von 0.9.1 zurueck:
         # ein Auftrag ohne Mengenangabe bleibt ungeklaert. Schwaecher, nie
