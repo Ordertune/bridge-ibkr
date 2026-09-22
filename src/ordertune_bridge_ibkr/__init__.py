@@ -1,3 +1,3 @@
 """Ordertune Bridge — IBKR Windows-Native Client."""
 
-__version__ = "0.25.0"
+__version__ = "0.25.1"

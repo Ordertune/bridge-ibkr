@@ -635,11 +635,11 @@ function renderCard(s) {
     q("card-title").textContent = "TWS is not writing trade reports";
     q("card-detail").textContent = s.trade_export_detail || "";
     q("card-action").textContent =
-      "Trading still works. What does not work is recovery: if an order fills\n"
-      + "while the Bridge is off, nobody can tell Ordertune about it afterwards.\n\n"
-      + "In TWS: File -> Global Configuration -> Export Reports.\n"
-      + "Switch on 'Export trade reports periodically', set an interval of 1\n"
-      + "minute, pick a folder - and leave 'Export filename' EMPTY, so TWS\n"
+      "Trading still works. What does not work is recovery: if an order fills\\n"
+      + "while the Bridge is off, nobody can tell Ordertune about it afterwards.\\n\\n"
+      + "In TWS: File -> Global Configuration -> Export Reports.\\n"
+      + "Switch on 'Export trade reports periodically', set an interval of 1\\n"
+      + "minute, pick a folder - and leave 'Export filename' EMPTY, so TWS\\n"
       + "writes one dated file per trading day instead of overwriting one.";
   }
 }
