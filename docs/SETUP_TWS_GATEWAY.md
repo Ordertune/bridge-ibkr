@@ -101,6 +101,21 @@ Die Bridge liest diesen Ordner nur. Sie schreibt nichts hinein und lädt die
 Dateien nicht hoch — übertragen werden ausschließlich die daraus abgeleiteten
 Füllungen, genau wie bei einer Füllung im laufenden Betrieb.
 
+### Zeitzone
+
+Der Haken bei „Für die Uhrzeiten der Trades die lokale Zeitzone verwenden"
+entscheidet, ob die TWS Maschinenzeit oder UTC schreibt. Die Bridge liest die
+Datei als **Ortszeit dieser Maschine** — sie läuft ja auf derselben.
+
+Läuft der Server selbst auf UTC, ist beides identisch und der Haken ändert
+nichts. Läuft er auf deutscher Zeit und der Haken fehlt, liegt jede
+nachgetragene Füllung zwei Stunden daneben, und an der Tagesgrenze wird daraus
+ein falscher Kalendertag.
+
+Die Bridge misst das selbst: an jedem Tag, an dem sie lief, liegt dieselbe
+Ausführung in beiden Quellen. Weichen die Zeitpunkte um mehr als eine Minute
+voneinander ab, steht der gemessene Versatz als Warnung im Protokoll.
+
 ### Prüfen, ob es wirkt
 
 Nach dem ersten Handelstag liegen in `C:\IBExport` Dateien mit einem Datum im

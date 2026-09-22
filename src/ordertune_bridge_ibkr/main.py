@@ -63,6 +63,7 @@ from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
 from .order_reconcile import (
+    als_utc,
     fills_by_dispatch,
     UnresolvedDispatch,
     reconcile_open_dispatches,
@@ -838,6 +839,77 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
             )
 
 
+#: Wie weit Datei und Live-Bericht zur selben Ausfuehrung auseinanderliegen
+#: duerfen. Die Datei traegt Sekunden, der Bericht auch — ein Unterschied von
+#: mehr als einer Minute ist keine Rundung, sondern ein Versatz.
+ZEITVERSATZ_GRENZE_S = 90.0
+
+
+def _pruefe_zeitzone(live: list[Any], archiv: list[Any]) -> float | None:
+    """T1-207 — schreibt die TWS wirklich Ortszeit?
+
+    ## Warum das nicht zu pruefen teuer waere
+
+    Im Export-Dialog steht „Fuer die Uhrzeiten der Trades die lokale Zeitzone
+    verwenden". Ist der Haken nicht gesetzt, schreibt die TWS UTC. Auf einer
+    Maschine, die selbst auf UTC laeuft, faellt das nie auf — auf einer mit
+    deutscher Zeit liegt jede nachgetragene Fuellung zwei Stunden daneben, und
+    an der Tagesgrenze wird daraus ein falscher Kalendertag.
+
+    Von aussen ist das nicht zu sehen: eine Uhrzeit sieht nicht falsch aus.
+
+    ## Wie es trotzdem messbar ist
+
+    An jedem Tag, an dem die Bridge lief, liegt dieselbe Ausfuehrung in BEIDEN
+    Quellen — im Live-Bericht von IBKR (mit Zeitzone, unstrittig) und in der
+    Datei. Ueber die Ausfuehrungskennung sind sie vergleichbar. Stimmen die
+    Zeitpunkte nicht ueberein, ist die Einstellung falsch, und zwar genau um
+    den gemessenen Versatz.
+
+    Gibt den groessten gemessenen Versatz in Sekunden zurueck, oder `None`,
+    wenn es nichts zu vergleichen gab. Entscheidet nichts — eine Fuellung wird
+    deswegen nicht verworfen. Ein Versatz macht die Zeit ungenau, nicht die
+    Menge, und eine gebuchte Fuellung mit schiefer Uhrzeit ist immer noch
+    besser als eine fehlende.
+    """
+    if not live or not archiv:
+        return None
+
+    live_zeiten: dict[str, Any] = {}
+    for fill in live:
+        ex = getattr(fill, "execution", None)
+        kennung = str(getattr(ex, "execId", "") or "") if ex is not None else ""
+        wann = als_utc(getattr(ex, "time", None)) if ex is not None else None
+        if kennung and wann is not None:
+            live_zeiten[kennung] = wann
+
+    groesster = 0.0
+    getroffen = 0
+    for fill in archiv:
+        ex = getattr(fill, "execution", None)
+        kennung = str(getattr(ex, "execId", "") or "") if ex is not None else ""
+        drueben = live_zeiten.get(kennung)
+        hier = als_utc(getattr(ex, "time", None)) if ex is not None else None
+        if drueben is None or hier is None:
+            continue
+        getroffen += 1
+        versatz = abs((hier - drueben).total_seconds())
+        groesster = max(groesster, versatz)
+
+    if not getroffen:
+        return None
+    if groesster > ZEITVERSATZ_GRENZE_S:
+        log.warning(
+            "TWS trade reports: the timestamps in the export are off by up to "
+            "%.0f minutes against what IBKR reported live. In TWS open Global "
+            "Configuration - Export Reports and switch ON 'Use the local time "
+            "zone for trade times'. Until then a recovered fill can land on "
+            "the wrong calendar day.",
+            groesster / 60.0,
+        )
+    return groesster
+
+
 def _pruefe_export(export_dir: str | None, cockpit: Any | None = None) -> Any:
     """T1-207 — taugt das Archiv der TWS als Quelle, und sagt es laut.
 
@@ -1035,6 +1107,7 @@ def _handle_order_reconcile(
     # unabhaengig vom Abruf oben: ein Fehler beim Broker darf das Archiv nicht
     # mitreissen, und umgekehrt.
     aus_archiv = _archiv_fuellungen(export_dir, report_store, verbundenes_konto)
+    _pruefe_zeitzone(heutige, aus_archiv)
 
     fills_by_ref: dict[str, Any] = {}
     try:

@@ -588,3 +588,78 @@ def test_erstlauf_deckt_das_fenster_der_plattform_ab() -> None:
     from ordertune_bridge_ibkr.trade_report_store import ERSTLAUF_TAGE
 
     assert ERSTLAUF_TAGE == 14
+
+
+# ── Der Zeitzonen-Riegel ─────────────────────────────────────────────────────
+
+
+def _live(exec_id: str, wann: datetime) -> SimpleNamespace:
+    return SimpleNamespace(
+        execution=SimpleNamespace(
+            execId=exec_id,
+            orderRef=f"ot-MU-7451-Momentum_Powerho-{MU_DISPATCH}",
+            shares=14,
+            price=1015.01,
+            time=wann,
+        ),
+        commissionReport=SimpleNamespace(execId=exec_id, commission=1.00004),
+    )
+
+
+def test_zeitzone_stimmt_auf_einer_utc_maschine(tmp_path: Path, caplog) -> None:
+    """Der gemessene Fall: der Server laeuft auf UTC+0.
+
+    `19:59:00` in der Datei ist dann 19:59 UTC — 15:59 Eastern, eine Minute vor
+    der Schlussauktion. Die Umrechnung ist auf dieser Maschine ein No-Op, und
+    genau das muss der Riegel als „in Ordnung" lesen.
+    """
+    import logging
+
+    from ordertune_bridge_ibkr.main import _pruefe_zeitzone
+
+    _schreibe(tmp_path)
+    archiv = trade_reports.lies_archiv(tmp_path, KONTO).fuellungen
+    aus_datei = {f.execution.execId: f.execution.time for f in archiv}
+
+    with caplog.at_level(logging.WARNING):
+        versatz = _pruefe_zeitzone([_live(MU_EXEC_ID, aus_datei[MU_EXEC_ID])], archiv)
+
+    assert versatz == 0.0
+    assert not [r for r in caplog.records if "off by up to" in r.getMessage()]
+
+
+def test_vergessener_haken_wird_gemessen(tmp_path: Path, caplog) -> None:
+    """Der unsichtbare Fehler.
+
+    Ohne den Haken schreibt die TWS UTC. Auf einer Maschine mit deutscher Zeit
+    liegt jede nachgetragene Fuellung zwei Stunden daneben — und an der
+    Tagesgrenze wird daraus ein falscher Kalendertag. Von aussen sieht eine
+    Uhrzeit nie falsch aus; vergleichbar ist sie nur gegen den Live-Bericht.
+    """
+    import logging
+
+    from ordertune_bridge_ibkr.main import _pruefe_zeitzone
+
+    _schreibe(tmp_path)
+    archiv = trade_reports.lies_archiv(tmp_path, KONTO).fuellungen
+    aus_datei = {f.execution.execId: f.execution.time for f in archiv}
+    echt = aus_datei[MU_EXEC_ID] - timedelta(hours=2)
+
+    with caplog.at_level(logging.WARNING):
+        versatz = _pruefe_zeitzone([_live(MU_EXEC_ID, echt)], archiv)
+
+    assert versatz == 7200.0
+    meldung = [r.getMessage() for r in caplog.records if "off by up to" in r.getMessage()]
+    assert meldung and "120 minutes" in meldung[0]
+    assert "local time zone" in meldung[0]
+
+
+def test_ohne_gemeinsame_ausfuehrung_wird_nichts_behauptet(tmp_path: Path) -> None:
+    """Kein Vergleichsstueck heisst keine Aussage — nicht „alles in Ordnung"."""
+    from ordertune_bridge_ibkr.main import _pruefe_zeitzone
+
+    _schreibe(tmp_path)
+    archiv = trade_reports.lies_archiv(tmp_path, KONTO).fuellungen
+
+    assert _pruefe_zeitzone([], archiv) is None
+    assert _pruefe_zeitzone([_live("fremde.kennung.01.01", datetime.now(timezone.utc))], archiv) is None

@@ -674,7 +674,7 @@ def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:
         eintrag["qty"] += menge
 
         # T1-207: der Zeitpunkt der spaetesten Teilausfuehrung.
-        wann = _als_utc(getattr(ex, "time", None))
+        wann = als_utc(getattr(ex, "time", None))
         if wann is not None and (eintrag["wann"] is None or wann > eintrag["wann"]):
             eintrag["wann"] = wann
         if kurs is not None and kurs > 0:
@@ -703,7 +703,7 @@ def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:
     return ergebnis
 
 
-def _als_utc(wert: Any) -> datetime | None:
+def als_utc(wert: Any) -> datetime | None:
     """Einen Zeitpunkt vergleichbar machen, oder gar nicht.
 
     ib_insync liefert `Execution.time` mit Zeitzone; der Leser aus T1-207
