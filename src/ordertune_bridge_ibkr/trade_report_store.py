@@ -49,7 +49,13 @@ SICHERHEITSABSTAND_TAGE = 2
 #: Ein Kunde kann ein Archiv von zwei Jahren liegen haben; das auf einen Schlag
 #: einzulesen waere kein Nachtragen mehr, sondern eine Migration — und eine,
 #: die niemand angeordnet hat.
-ERSTLAUF_TAGE = 7
+#:
+#: **14 und nicht 7.** Die Plattform fragt nach Auftraegen, die hoechstens
+#: `ABGLEICH_FENSTER_TAGE = 14` alt sind (`unresolved-dispatches.ts`). Ein
+#: engeres Fenster hier liesse genau die Tage liegen, nach denen drueben noch
+#: gefragt wird — und das waere eine Luecke ohne Gegenwert: aelter als 14 Tage
+#: findet ohnehin keinen Abnehmer mehr.
+ERSTLAUF_TAGE = 14
 
 
 def _tag(zeitpunkt: datetime) -> str:

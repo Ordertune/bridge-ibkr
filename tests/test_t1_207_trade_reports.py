@@ -513,3 +513,78 @@ def test_gutes_setup_meldet_ok_ins_cockpit(tmp_path: Path) -> None:
     cockpit = SimpleNamespace(store=_Store())
     assert _pruefe_export(str(tmp_path), cockpit).ok
     assert cockpit.store.changes["trade_export"] == "ok"
+
+
+# ── Befunde der Selbst-QA vom 2026-09-22 ─────────────────────────────────────
+
+
+def test_nan_wird_nicht_gebucht(tmp_path: Path) -> None:
+    """`float("nan")` gelingt, und `nan <= 0` ist falsch.
+
+    Die Zeile rutschte damit durch jede Mengenpruefung und haette `nan` als
+    Bestand ins Buch geschrieben, wo sie jede weitere Rechnung vergiftet.
+    """
+    kaputt = ZEILEN[0].replace(",BOT,,53,,MRVL,244.21,", ",BOT,,nan,,MRVL,244.21,")
+    _schreibe(tmp_path, zeilen=[kaputt])
+    lesung = trade_reports.lies_archiv(tmp_path, KONTO)
+
+    assert lesung.fuellungen == []
+    assert len(lesung.quarantaene) == 1
+
+
+def test_unendlich_wird_nicht_gebucht(tmp_path: Path) -> None:
+    """`inf` und `1e400` ebenfalls — dieselbe Falle, andere Schreibweise."""
+    kaputt = ZEILEN[0].replace(",BOT,,53,,MRVL,244.21,", ",BOT,,inf,,MRVL,1e400,")
+    _schreibe(tmp_path, zeilen=[kaputt])
+    assert trade_reports.lies_archiv(tmp_path, KONTO).fuellungen == []
+
+
+def test_marke_zieht_nicht_an_einer_abgelehnten_datei_vorbei(tmp_path: Path) -> None:
+    """Sonst ist der Tag weg, sobald der Kunde seine Spaltenauswahl repariert."""
+    _schreibe(tmp_path, kopf=KOPF.replace("Order Ref.,", "Weg,"))
+    lesung = trade_reports.lies_archiv(tmp_path, KONTO)
+
+    assert len(lesung.abgelehnt) == 1
+    assert lesung.neuester_dateitag is None
+
+
+def test_marke_zieht_an_gelesenen_dateien_weiter(tmp_path: Path) -> None:
+    """Der Gegenbeweis: eine lesbare Datei bewegt die Marke sehr wohl."""
+    _schreibe(tmp_path)
+    assert trade_reports.lies_archiv(tmp_path, KONTO).neuester_dateitag == "20260918"
+
+
+def test_kontoabweichung_wird_laut(tmp_path: Path, caplog) -> None:
+    """Der stille Totalausfall.
+
+    Passt die Kennung am Draht nicht zu der in der Datei, liest die Bridge
+    jeden Tag brav ein Archiv, verwirft jede Zeile — und die
+    Bereitschaftspruefung sagt trotzdem „ok".
+    """
+    import logging
+
+    from ordertune_bridge_ibkr.main import _archiv_fuellungen
+
+    ordner = tmp_path / "export"
+    ordner.mkdir()
+    _schreibe(ordner)
+    store = TradeReportStore(tmp_path / "state")
+
+    with caplog.at_level(logging.WARNING):
+        assert _archiv_fuellungen(str(ordner), store, "DU1234567") == []
+
+    meldungen = [r.getMessage() for r in caplog.records]
+    assert any("none belong to account" in m for m in meldungen)
+    # Maskiert. Eine Kontonummer gehoert nicht ins Protokoll.
+    assert not any("DU1234567" in m for m in meldungen)
+
+
+def test_erstlauf_deckt_das_fenster_der_plattform_ab() -> None:
+    """Die Plattform fragt 14 Tage zurueck (`ABGLEICH_FENSTER_TAGE`).
+
+    Ein engeres Fenster hier liesse genau die Tage liegen, nach denen drueben
+    noch gefragt wird.
+    """
+    from ordertune_bridge_ibkr.trade_report_store import ERSTLAUF_TAGE
+
+    assert ERSTLAUF_TAGE == 14

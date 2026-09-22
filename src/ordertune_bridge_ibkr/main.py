@@ -902,6 +902,20 @@ def _archiv_fuellungen(
             lesung.fremde,
         )
 
+    # Der stille Totalausfall: die Kennung, die IBKR am Draht meldet, passt
+    # nicht zu der in der Datei. Dann liest die Bridge brav jeden Tag ein
+    # Archiv, verwirft jede Zeile, und die Bereitschaftspruefung sagt trotzdem
+    # „ok". Genau dieser Zustand muss laut sein.
+    if lesung.fremdes_konto and not lesung.fuellungen and not lesung.fremde:
+        log.warning(
+            "TWS trade reports: %s execution(s) found, but none belong to "
+            "account %s. Either this Bridge is connected to a different "
+            "account than the one TWS exports, or two accounts share the "
+            "folder. No fill can be recovered while this is the case.",
+            lesung.fremdes_konto,
+            mask_account(konto),
+        )
+
     report_store.vermerken(lesung.neuester_dateitag)
     if lesung.fuellungen:
         log.debug(
@@ -2450,7 +2464,6 @@ def main() -> int:
     # T1-207: wie weit das Archiv der TWS gelesen ist. Ueberlebt den
     # Neustart, weil der Neustart der Normalfall ist.
     trade_report_store = TradeReportStore()
-    _pruefe_export(config.tws_export_dir)
     if not submitted.schreibbar:
         log.warning(
             "The bridge cannot remember which orders it already sent. Trading "

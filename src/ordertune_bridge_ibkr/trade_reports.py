@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -259,9 +260,16 @@ def _zahl(roh: str) -> float | None:
     if not text:
         return None
     try:
-        return float(text)
+        wert = float(text)
     except ValueError:
         return None
+    # `float()` nimmt "nan", "inf" und "1e400" anstandslos an. Eine Menge von
+    # `nan` haette jeden Vergleich bestanden — `nan <= 0` ist falsch — und waere
+    # als Bestand ins Buch gewandert, wo sie jede weitere Rechnung vergiftet.
+    # Gefunden in der Selbst-QA am 2026-09-22, nicht in der Produktion.
+    if not math.isfinite(wert):
+        return None
+    return wert
 
 
 def _zeitpunkt(tag: str, zeit: str) -> datetime | None:
@@ -410,7 +418,14 @@ def lies_archiv(
 
     basis = Path(verzeichnis)
     for tag, pfad in dateien(basis, seit_tag=seit_tag):
+        vorher = lesung.gelesene_dateien
         lies_datei(pfad, konto, lesung=lesung)
+        if lesung.gelesene_dateien == vorher:
+            # Abgelehnt oder unlesbar. Die Marke darf daran NICHT vorbeiziehen:
+            # sonst ist der Tag endgueltig weg, sobald der Kunde seine
+            # Spaltenauswahl repariert. Dasselbe gilt fuer eine Datei, die
+            # gerade geschrieben wurde und deren Kopfzeile noch fehlte.
+            continue
         if lesung.neuester_dateitag is None or tag > lesung.neuester_dateitag:
             lesung.neuester_dateitag = tag
     return lesung
