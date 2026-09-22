@@ -126,6 +126,34 @@ Die Bridge sagt es auch selbst: sie prüft den Ordner beim Start und bei jeder
 neuen Sitzung und benennt im Protokoll und im Bridge-Fenster, **was** fehlt —
 Ordner nicht da, keine Datei, fester Dateiname, oder Archiv veraltet.
 
+## 2b. Die ersten sieben Tage nachholen (einmalig)
+
+Das Archiv entsteht erst ab dem Moment, in dem Sie den Export einschalten. Für
+die Tage davor gibt es aber einen Weg, und er ist einmalig zu gehen.
+
+Die TWS führt in der Classic-Ansicht einen **Handelsverlauf** (`Trading-Tools →
+Handelsverlauf`, Fenster `TRADES`). Er zeigt bis zu **sieben Tage** zurück, mit
+Konto, Menge, Kurs, Uhrzeit, Order-Referenz und Provision — dieselben Spalten,
+die auch der automatische Export schreibt.
+
+Über `Datei → Export Today's / Previous Day's Reports` lässt sich daraus eine
+Datei schreiben. Legen Sie sie in `C:\IBExport` ab und geben Sie ihr einen
+Namen mit dem Handelstag darin, etwa `trades.20260918.csv`. Die Bridge liest
+sie beim nächsten Abgleich wie jede andere: sie prüft die Kopfzeile, nicht den
+Absender.
+
+Damit sind die sieben Tage vor der Einrichtung abgedeckt. Was älter ist, ist
+älter als das Fenster, in dem die Plattform überhaupt noch nach Aufträgen
+fragt — dort wäre auch nichts mehr nachzutragen.
+
+**Warum die Bridge das nicht selbst holt:** der Handelsverlauf ist ein Fenster
+der TWS, keine Schnittstelle. `reqExecutions` verlässt den laufenden Tag auch
+mit Zeitfilter nicht — am 22.09. an genau diesen fünf Füllungen vom 18.09.
+gemessen, die im Fenster standen und über die Schnittstelle nicht kamen. Die
+TWS zeigt sie aus einer internen Quelle, an die ein API-Client nicht
+herankommt. Der manuelle Export ist die einzige Brücke dorthin, und deshalb ist
+er ein Setup-Schritt und keine Funktion.
+
 ## 3. Paper vs. Live
 
 - **Paper**: Fantasiekonto, perfekt für erste Tests. Port 7497
