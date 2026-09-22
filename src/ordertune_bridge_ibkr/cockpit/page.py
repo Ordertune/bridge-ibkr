@@ -552,6 +552,11 @@ function heartbeatStale(s) {
   return s.tws_connected && secondsSince(s.last_heartbeat_at) > HEARTBEAT_STALE_S;
 }
 
+function exportBroken(s) {
+  // "unknown" heisst „noch nicht nachgesehen" und ist keine Stoerung.
+  return s.trade_export && s.trade_export !== "ok" && s.trade_export !== "unknown";
+}
+
 function verdict(s) {
   if (s.failure_headline) return [s.failure_headline, "bad"];
   if (!s.tws_connected) return ["Not connected to TWS", "bad"];
@@ -562,6 +567,11 @@ function verdict(s) {
   if (s.write_access === "read_only_suspected")
     return ["TWS did not answer the open-orders request. Orders may be rejected.", "warn"];
   if (!s.ordertune_ok) return ["Not reporting to Ordertune", "warn"];
+  // T1-207: zuletzt, damit es nie eine schwerere Stoerung verdeckt. Es ist
+  // kein Ausfall - es heisst, dass eine Fuellung waehrend einer Auszeit der
+  // Bridge nicht mehr nachgetragen werden kann.
+  if (exportBroken(s))
+    return ["TWS trade reports are not being read - fills may be lost", "warn"];
   return ["Connected - waiting for releases", ""];
 }
 
@@ -602,13 +612,14 @@ function renderPositions(s) {
 function renderCard(s) {
   const card = q("card");
   const readOnly = s.write_access === "read_only_confirmed";
-  if (!s.failure_headline && !readOnly) { card.hidden = true; return; }
+  const exportKaputt = exportBroken(s);
+  if (!s.failure_headline && !readOnly && !exportKaputt) { card.hidden = true; return; }
   card.hidden = false;
   if (s.failure_headline) {
     q("card-title").textContent = s.failure_headline;
     q("card-detail").textContent = (s.failure_detail || []).join("\\n");
     q("card-action").textContent = (s.failure_action || []).join("\\n");
-  } else {
+  } else if (readOnly) {
     q("card-title").textContent = "Read-Only API is switched on in TWS";
     q("card-detail").textContent = s.write_access_detail || "";
     q("card-action").textContent =
@@ -617,6 +628,19 @@ function renderCard(s) {
       + "In TWS: File -> Global Configuration -> API -> Settings.\\n"
       + "Turn OFF 'Read-Only API', then restart TWS.\\n"
       + "TWS may also be showing a dialog box that nobody sees on a VPS.";
+  } else {
+    // T1-207. Der Text kommt aus der Bridge, nicht von hier: er benennt, WELCHE
+    // Bedingung fehlt, und diese Flaeche soll ihn nicht zu "something is wrong"
+    // eindampfen.
+    q("card-title").textContent = "TWS is not writing trade reports";
+    q("card-detail").textContent = s.trade_export_detail || "";
+    q("card-action").textContent =
+      "Trading still works. What does not work is recovery: if an order fills\n"
+      + "while the Bridge is off, nobody can tell Ordertune about it afterwards.\n\n"
+      + "In TWS: File -> Global Configuration -> Export Reports.\n"
+      + "Switch on 'Export trade reports periodically', set an interval of 1\n"
+      + "minute, pick a folder - and leave 'Export filename' EMPTY, so TWS\n"
+      + "writes one dated file per trading day instead of overwriting one.";
   }
 }
 

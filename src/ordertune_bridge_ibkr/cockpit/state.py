@@ -86,6 +86,14 @@ class CockpitState:
     # Anzeige — die Entscheidung faellt am Fehlercode.
     write_access_detail: str | None = None
 
+    # ── Handelsberichte der TWS (T1-207) ─────────────────────────────────
+    # "unknown" heisst „noch nicht nachgesehen" und ist etwas anderes als
+    # „nicht vorhanden" — dieselbe Unterscheidung wie oben beim Konto.
+    trade_export: str = "unknown"
+    #: Der Satz fuer den Nutzer. Er benennt, WAS fehlt: eine Warnung, die nur
+    #: „export not found" sagt, laesst ihn glauben, geschuetzt zu sein.
+    trade_export_detail: str | None = None
+
     # ── Einrichtung (T1-101 C) ───────────────────────────────────────────
     # Der Assistent laeuft, wenn `bridge.env` fehlt oder nicht laedt. Dann ist
     # ausser diesem Feld praktisch nichts belegt — es gibt ja noch nichts.

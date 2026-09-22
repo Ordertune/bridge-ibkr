@@ -8,7 +8,11 @@ Windows-Native Bridge-Client für Interactive Brokers. Holt vom User freigegeben
 
 - Windows-VPS (Windows Server 2019+ oder Windows 10/11 Pro)
 - Interactive Brokers Pro Individual Account (Retail-OAuth wird von IBKR nicht angeboten — Bridge ist der einzige Weg)
-- Installiertes Trader Workstation (TWS) **oder** IB Gateway
+- Installiertes **Trader Workstation (TWS)** mit eingeschalteten Handelsberichten
+  (`Global Configuration → Export Reports`). **IB Gateway wird seit 0.25.0 nicht mehr
+  unterstützt** — es hat keine Berichtsfunktion, und ohne sie lässt sich eine Füllung,
+  die während einer Auszeit der Bridge passiert, nicht mehr nachtragen. Siehe
+  [SETUP_TWS_GATEWAY.md](docs/SETUP_TWS_GATEWAY.md)
 - Empfohlen: IBC (Interactive Brokers Controller) für tägliche Auto-Login nach 05:00 CET Force-Logout
 - Ordertune-Advanced- oder Institutional-Alpha-Subscription mit `allows_ibkr_bridge=true` (im aktuellen Tier-Setting)
 
@@ -17,7 +21,7 @@ Windows-Native Bridge-Client für Interactive Brokers. Holt vom User freigegeben
 1. Download der aktuellen Version aus [Releases](https://github.com/ordertune/bridge-ibkr/releases/latest)
 2. Zip entpacken auf dem Windows-VPS
 3. `bridge.env`-Datei (aus dem Ordertune-Settings-Wizard heruntergeladen) daneben legen
-4. TWS oder IB Gateway starten und einloggen (API aktiviert, Read-Only-API deaktiviert, Trusted-IP `127.0.0.1` erlaubt)
+4. TWS starten und einloggen (API aktiviert, Read-Only-API deaktiviert, Trusted-IP `127.0.0.1` erlaubt, Handelsberichte eingeschaltet)
 5. Doppelklick auf `ordertune-bridge-ibkr.exe`
 
 ## Konfiguration (`bridge.env`)
@@ -33,6 +37,8 @@ IBKR_GATEWAY_HOST=127.0.0.1
 IBKR_GATEWAY_PORT=7497
 IBKR_TRADING_MODE=paper
 IBKR_CLIENT_ID=17
+
+TWS_EXPORT_DIR=C:\IBExport
 
 ORDER_SUBMIT_DELAY_MS=100
 LOG_LEVEL=INFO
@@ -136,7 +142,7 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 ## Docs
 
 - [Windows-VPS-Setup](docs/SETUP_WINDOWS_VPS.md)
-- [TWS / IB Gateway Setup](docs/SETUP_TWS_GATEWAY.md)
+- [TWS Setup inklusive Handelsberichte](docs/SETUP_TWS_GATEWAY.md)
 - [IBC (Auto-Login)](docs/SETUP_IBC.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 

@@ -12,6 +12,8 @@ from typing import Literal
 from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .trade_reports import STANDARD_VERZEICHNIS as DEFAULT_TWS_EXPORT_DIR
+
 
 class BridgeConfig(BaseSettings):
     """Konfiguration aus bridge.env."""
@@ -53,6 +55,18 @@ class BridgeConfig(BaseSettings):
     ibkr_client_id: int = Field(
         default=17,
         description="IBKR API client id. Must be unique per connection to one TWS or Gateway instance.",
+    )
+
+    # ── TWS trade reports (T1-207) ──────────────────────────────────────
+    tws_export_dir: str = Field(
+        default=DEFAULT_TWS_EXPORT_DIR,
+        description=(
+            "Folder that TWS writes its trade reports to. Set it in TWS under "
+            "Global Configuration - Export Reports, and leave 'Export "
+            "filename' EMPTY there so TWS writes one dated file per trading "
+            "day. Without this archive a fill that happens while the Bridge is "
+            "off cannot be recovered. IB Gateway has no such function."
+        ),
     )
 
     # ── Optional overrides ──────────────────────────────────────────────
