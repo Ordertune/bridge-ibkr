@@ -31,7 +31,7 @@ zweiter Echtauftrag.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from .order_vocabulary import (
@@ -72,6 +72,17 @@ class DispatchFill:
     price: float | None
     #: Summe der gemeldeten Gebuehren, oder None wenn IBKR keine geliefert hat.
     commission: float | None
+    # T1-207 — WANN die Ausfuehrung stattfand.
+    #
+    # Bis hierher meldete der Abgleich `datetime.now()` als Fuellzeitpunkt. Bei
+    # einer Fuellung aus dem laufenden Tag waren das Sekunden daneben; bei einer
+    # nachgetragenen aus dem Archiv der TWS waeren es Tage, und der Kalendertag
+    # einer Buchung haengt daran. Die spaeteste Teilausfuehrung gewinnt — sie
+    # ist der Zeitpunkt, zu dem der Auftrag fertig war.
+    #
+    # `None` heisst weiterhin „keine Angabe"; dann faellt der Aufrufer auf sein
+    # bisheriges Verhalten zurueck.
+    filled_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +102,9 @@ class ReconcileAction:
     fill_qty: float | None = None
     fill_price: float | None = None
     commission_usd: float | None = None
+    # T1-207 — der gemessene Fuellzeitpunkt, wenn es einen gibt. Siehe
+    # `DispatchFill.filled_at`.
+    filled_at: datetime | None = None
     # T1-137 — steht das Ende dieses Auftrags beim Broker fest?
     #
     # `None` heisst „keine Aussage" und laesst den Riegel der Plattform zu.
@@ -312,6 +326,9 @@ def _from_open(
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),
+            # T1-207: der abgeschlossene Auftrag traegt keinen Zeitpunkt, den
+            # wir brauchen koennten — der kommt aus dem Ausfuehrungsbericht.
+            filled_at=(fill.filled_at if fill is not None else None),
         )
 
     return ReconcileAction(
@@ -338,6 +355,7 @@ def _from_fill(d: UnresolvedDispatch, fill: DispatchFill) -> ReconcileAction:
         fill_qty=fill.qty,
         fill_price=fill.price,
         commission_usd=fill.commission,
+        filled_at=fill.filled_at,
     )
 
 
@@ -442,6 +460,9 @@ def _from_completed(
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),
+            # T1-207: der abgeschlossene Auftrag traegt keinen Zeitpunkt, den
+            # wir brauchen koennten — der kommt aus dem Ausfuehrungsbericht.
+            filled_at=(fill.filled_at if fill is not None else None),
         )
 
     if status in ("Cancelled", "ApiCancelled"):
@@ -647,9 +668,15 @@ def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:
         kurs = _num(getattr(ex, "price", None))
 
         eintrag = roh.setdefault(
-            kennung, {"qty": 0.0, "wert": 0.0, "bewertet": 0.0, "gebuehr": None}
+            kennung,
+            {"qty": 0.0, "wert": 0.0, "bewertet": 0.0, "gebuehr": None, "wann": None},
         )
         eintrag["qty"] += menge
+
+        # T1-207: der Zeitpunkt der spaetesten Teilausfuehrung.
+        wann = _als_utc(getattr(ex, "time", None))
+        if wann is not None and (eintrag["wann"] is None or wann > eintrag["wann"]):
+            eintrag["wann"] = wann
         if kurs is not None and kurs > 0:
             eintrag["wert"] += menge * kurs
             eintrag["bewertet"] += menge
@@ -671,5 +698,22 @@ def fills_by_dispatch(fills: Iterable[Any]) -> dict[str, DispatchFill]:
             qty=e["qty"],
             price=(e["wert"] / e["bewertet"]) if e["bewertet"] > 0 else None,
             commission=e["gebuehr"],
+            filled_at=e["wann"],
         )
     return ergebnis
+
+
+def _als_utc(wert: Any) -> datetime | None:
+    """Einen Zeitpunkt vergleichbar machen, oder gar nicht.
+
+    ib_insync liefert `Execution.time` mit Zeitzone; der Leser aus T1-207
+    ebenfalls. Ein naiver Wert waere trotzdem moeglich (aeltere Fassung,
+    Attrappe in einer Zusicherung) — und naiv gegen bewusst zu vergleichen
+    wirft. Naiv gilt deshalb als UTC: das ist die Annahme, die ib_insync
+    ohnehin trifft.
+    """
+    if not isinstance(wert, datetime):
+        return None
+    if wert.tzinfo is None:
+        return wert.replace(tzinfo=timezone.utc)
+    return wert.astimezone(timezone.utc)

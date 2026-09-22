@@ -1,6 +1,8 @@
 # IBC (Interactive Brokers Controller) — Auto-Login
 
-IBC automatisiert den täglichen Login in TWS oder Gateway. Ohne IBC müssen Sie jeden Morgen manuell einloggen, sonst schlagen alle Trades fehl (IBKR zwingt Gateway/TWS um 05:00 CET zu einem Force-Logout).
+IBC automatisiert den täglichen Login in die TWS. Ohne IBC müssen Sie jeden Morgen manuell einloggen, sonst schlagen alle Trades fehl (IBKR zwingt die TWS um 05:00 CET zu einem Force-Logout).
+
+**Nur TWS.** Seit Fassung 0.25.0 verlangt die Bridge die TWS — das IB Gateway hat keine Berichtsfunktion und kann eine verpasste Füllung nicht nachtragen. Siehe [SETUP_TWS_GATEWAY.md](SETUP_TWS_GATEWAY.md).
 
 ## Installation
 
@@ -10,11 +12,11 @@ IBC automatisiert den täglichen Login in TWS oder Gateway. Ohne IBC müssen Sie
    - `IbLoginId=your-ibkr-username`
    - `IbPassword=your-ibkr-password`
    - `TradingMode=paper` (oder `live`)
-4. IBC via `StartGateway.bat` oder `StartTWS.bat` starten
+4. IBC via `StartTWS.bat` starten
 
 ## Auto-Start bei Windows-Login
 
-Windows Task Scheduler → Basic Task → **At log on** → `C:\IBC\StartGateway.bat`
+Windows Task Scheduler → Basic Task → **At log on** → `C:\IBC\StartTWS.bat`
 
 ## Sicherheit
 
@@ -23,6 +25,6 @@ Windows Task Scheduler → Basic Task → **At log on** → `C:\IBC\StartGateway
 
 ## Verifikation
 
-Nach IBC-Start sollte das Gateway/TWS-Fenster automatisch erscheinen und eingeloggt sein. In den IBC-Logs (`C:\IBC\logs\`) steht der Login-Status.
+Nach IBC-Start sollte das TWS-Fenster automatisch erscheinen und eingeloggt sein. In den IBC-Logs (`C:\IBC\logs\`) steht der Login-Status.
 
 Nach dem Login: Bridge starten. Sie sollte den Socket-Connect erfolgreich abschließen.

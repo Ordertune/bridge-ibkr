@@ -49,7 +49,7 @@ from zoneinfo import ZoneInfo
 
 from . import __version__, console, failures, order_vocabulary, port_probe
 from .api_client import OrdertuneApiClient
-from . import paths
+from . import paths, trade_reports
 from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
 from .fingerprint import compute_fingerprint
@@ -61,6 +61,7 @@ from .external_executions import (
 from .logging_setup import setup_logging
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
+from .trade_report_store import TradeReportStore
 from .order_reconcile import (
     fills_by_dispatch,
     UnresolvedDispatch,
@@ -102,19 +103,22 @@ HEARTBEAT_INTERVAL_S = 60.0
 PENDING_INTERVAL_MARKET_S = 5.0
 PENDING_INTERVAL_OFF_S = 60.0
 
-# T1-203 — wie weit der Abgleich beim Wiederverbinden zurueckfragt und wie lange
-# nach dem Verbinden er das tut.
+# T1-207 — hier standen `RECONCILE_LOOKBACK_DAYS` und
+# `DEEP_RECONCILE_WINDOW_S` aus T1-203.
 #
-# Sieben Tage: dieselbe Spanne wie die Sonde (`probe.PROBE_LOOKBACK_DAYS`) und
-# deckt jeden Fall ab, an dem eine verpasste Fuellung noch heilbar ist
-# (FREEZE_MAX_AGE_MS der Plattform ist groesser, aber IBKR gibt nicht beliebig
-# weit zurueck).
-RECONCILE_LOOKBACK_DAYS = 7
-# Der 7-Tage-`reqExecutions` laeuft NUR in diesem Fenster nach dem Verbinden —
-# `_handle_order_reconcile` selbst laeuft in jedem Herzschlag, und ein solcher
-# Abruf je Minute reizte IBKRs Ratenlimit. Drei Minuten decken zwei bis drei
-# Herzschlaege ab; danach traegt der laufende Tag alles.
-DEEP_RECONCILE_WINDOW_S = 180.0
+# Beide sind weg, weil der Abruf weg ist, den sie steuerten: `reqExecutions`
+# verlaesst den laufenden Tag auch MIT Zeitfilter nicht. Am 2026-09-22 mit
+# `probe.py` gemessen — fuenf Fuellungen vom 18.09. lagen im Fenster, die Sonde
+# bekam null zurueck. Die Sonde behaelt ihre eigene Spanne; sie misst ja genau
+# diese Grenze.
+#
+# Was ueber den Tageswechsel reicht, liest jetzt `trade_reports` aus dem Archiv,
+# das die TWS selbst schreibt.
+
+# Wie viele unbrauchbare Zeilen aus einer Berichtsdatei einzeln ins Protokoll
+# kommen. Eine Datei, die durchgehend nicht passt, soll den Befund nennen und
+# nicht das Protokoll fuellen.
+MAX_QUARANTAENE_ZEILEN = 20
 
 # Wie fein die Schleife tickt. Klein genug, dass ein 5-Sekunden-Abruf nicht
 # merklich spaeter kommt; gross genug, dass Leerlauf nichts kostet. Waehrend
@@ -834,10 +838,87 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
             )
 
 
+def _pruefe_export(export_dir: str | None, cockpit: Any | None = None) -> Any:
+    """T1-207 — taugt das Archiv der TWS als Quelle, und sagt es laut.
+
+    Laeuft beim Start und bei jedem Wiederverbinden. Der Befund geht ins
+    Protokoll UND in den Zustandsblock: ein Kunde, der die Bridge als Fenster
+    offen hat, soll nicht erst im Protokoll suchen muessen.
+    """
+    bereit = trade_reports.pruefe(export_dir or "")
+    if bereit.ok:
+        log.info("%s", bereit.text)
+    else:
+        log.warning("%s", bereit.text)
+    if cockpit is not None:
+        try:
+            cockpit.store.update(
+                trade_export=bereit.zustand, trade_export_detail=bereit.text
+            )
+        except Exception as exc:  # pragma: no cover - Beiwerk
+            log.debug("Could not update the cockpit state: %s", exc)
+    return bereit
+
+
+def _archiv_fuellungen(
+    export_dir: str | None,
+    report_store: Any | None,
+    konto: str | None,
+) -> list[Any]:
+    """T1-207 — was das Archiv der TWS zu diesem Konto hergibt.
+
+    Faengt alles ab und gibt im Zweifel eine leere Liste zurueck. Ein
+    unlesbares Archiv ist ein Befund, kein Abbruch.
+
+    Ohne scharfes Konto wird nichts gelesen: auf einer Maschine koennen Papier-
+    und Echtkonto denselben Ordner beschreiben, und eine Fuellung dem falschen
+    Buch zuzuschlagen waere genau der Fehler, gegen den dieser Vorgang gebaut
+    ist.
+    """
+    if not export_dir or report_store is None or not konto:
+        return []
+    try:
+        lesung = trade_reports.lies_archiv(
+            export_dir, konto, seit_tag=report_store.seit_tag()
+        )
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.warning("Could not read the TWS trade reports: %s", exc)
+        return []
+
+    for zeile in lesung.abgelehnt:
+        log.warning("TWS trade report skipped - %s", zeile)
+    for zeile in lesung.quarantaene[:MAX_QUARANTAENE_ZEILEN]:
+        log.warning("TWS trade report line skipped - %s", zeile)
+    uebrig = len(lesung.quarantaene) - MAX_QUARANTAENE_ZEILEN
+    if uebrig > 0:
+        log.warning("TWS trade reports: %s more unusable line(s).", uebrig)
+    if lesung.fremde:
+        # T1-208 bucht sie; bis dahin soll wenigstens sichtbar sein, dass hier
+        # etwas liegt. Eine unerklaerte Bestandsaenderung ist der Anfang jeder
+        # Fehlzuordnung.
+        log.info(
+            "TWS trade reports: %s execution(s) in this account were not "
+            "placed through Ordertune. They are not booked.",
+            lesung.fremde,
+        )
+
+    report_store.vermerken(lesung.neuester_dateitag)
+    if lesung.fuellungen:
+        log.debug(
+            "TWS trade reports: %s execution(s) from %s file(s).",
+            len(lesung.fuellungen),
+            lesung.gelesene_dateien,
+        )
+    return list(lesung.fuellungen)
+
+
 def _handle_order_reconcile(
     api: OrdertuneApiClient,
     ibkr: IbkrClient,
     session_connected_at: datetime,
+    *,
+    export_dir: str | None = None,
+    report_store: Any | None = None,
 ) -> None:
     """T1-98 — was die Plattform als offen fuehrt, gegen das, was IBKR kennt.
 
@@ -903,52 +984,52 @@ def _handle_order_reconcile(
     # der abgeschlossene Auftrag nicht traegt — gemessen am 2026-08-19 an drei
     # echten Ausfuehrungen. Derselbe Abruf, den `external_executions` fuer die
     # FREMDEN Handel macht; hier wird die andere Haelfte gelesen.
-    fills_by_ref: dict[str, Any] = {}
-    try:
-        heutige = list(ibkr.fills())
-        # ── T1-203: der 7-Tage-Abruf, nur kurz nach dem Verbinden ────────────
-        #
-        # `ib.fills()` haelt nur den LAUFENDEN Tag. Eine Fuellung von gestern,
-        # deren Bridge damals aus war, faellt sonst durch und muss aus dem
-        # Depotbestand hergeleitet werden (T1-191) statt exakt gebucht — obwohl
-        # der Auftragsvermerk `ot-<dispatchId>` sie eindeutig zuordnen wuerde.
-        # `reqExecutions` MIT Zeitfilter reicht weiter zurueck (in der Sonde
-        # gemessen).
-        #
-        # Nur im ersten Fenster nach dem Verbinden: `_handle_order_reconcile`
-        # laeuft in JEDEM Herzschlag, und ein 7-Tage-`reqExecutions` je Minute
-        # reizte IBKRs Ratenlimit. Die Heilung zaehlt genau dann, wenn die
-        # Bridge gerade zurueckkam — danach traegt der laufende Tag alles.
-        aeltere: list[Any] = []
-        seit_verbunden = (datetime.now(timezone.utc) - session_connected_at).total_seconds()
-        if seit_verbunden < DEEP_RECONCILE_WINDOW_S:
-            try:
-                seit = ibkr.utc_minus_days(RECONCILE_LOOKBACK_DAYS)
-                aeltere = list(ibkr.executions_since(seit))
-            except Exception as exc:
-                # Rein additiv: faellt der Zeitfilter aus (aeltere TWS-Version,
-                # IBKR liefert nichts), bleibt es beim laufenden Tag.
-                log.warning("Could not read prior-day executions (7d): %s", exc)
-        # Der laufende Tag ZUERST: `fills_by_dispatch` dedupt ueber `execId`,
-        # und so gewinnt seine Gebuehr, die der reqExecutions-Abruf nicht traegt.
-        fills_by_ref = fills_by_dispatch(heutige + aeltere)
-    except Exception as exc:
-        # Ohne sie faellt der Abgleich auf das Verhalten von 0.9.1 zurueck:
-        # ein Auftrag ohne Mengenangabe bleibt ungeklaert. Schwaecher, nie
-        # falsch.
-        log.warning("Could not read executions for reconcile: %s", exc)
-
     # T1-119 — mit welchem Depot diese Sitzung verbunden ist.
     #
     # `None` bei mehreren verwalteten Konten; dann wird nicht entschieden und
     # der Abgleich laeuft wie vor T1-119. Faengt alles ab: ein Fehlschlag hier
     # darf den Abgleich nicht mitreissen, und ohne Kennung ist er weiterhin
     # gueltig, nur weniger genau.
+    #
+    # T1-207 hat diesen Block nach VORNE gezogen: das Archiv der TWS wird ohne
+    # scharfes Konto gar nicht erst gelesen.
     try:
         verbundenes_konto = ibkr.trading_account()
     except Exception as exc:  # pragma: no cover - defensiv
         log.debug("Could not resolve the connected account: %s", exc)
         verbundenes_konto = None
+
+    heutige: list[Any] = []
+    try:
+        heutige = list(ibkr.fills())
+    except Exception as exc:
+        # Ohne sie faellt der Abgleich auf das Verhalten von 0.9.1 zurueck:
+        # ein Auftrag ohne Mengenangabe bleibt ungeklaert. Schwaecher, nie
+        # falsch.
+        log.warning("Could not read executions for reconcile: %s", exc)
+
+    # ── T1-207: der vierte Zeuge ─────────────────────────────────────────────
+    #
+    # Hier stand der 7-Tage-Abruf aus T1-203. Er ist entfernt, und zwar nicht
+    # aus Aufraeumlust: am 2026-09-22 mit einer eigenen Sonde gemessen, verlaesst
+    # `reqExecutions` auch MIT Zeitfilter den laufenden Tag nicht. Fuenf
+    # Fuellungen vom 18.09. lagen im Sieben-Tage-Fenster, die Sonde bekam null
+    # zurueck. Der Abruf kostete eine Anfrage je Wiederverbinden und stand als
+    # Beleg fuer eine Heilung im Code, die es nie gab — teurer als kein Code.
+    #
+    # Was es wirklich kann, schreibt die TWS selbst auf die Platte. Absichtlich
+    # unabhaengig vom Abruf oben: ein Fehler beim Broker darf das Archiv nicht
+    # mitreissen, und umgekehrt.
+    aus_archiv = _archiv_fuellungen(export_dir, report_store, verbundenes_konto)
+
+    fills_by_ref: dict[str, Any] = {}
+    try:
+        # Der laufende Tag ZUERST: `fills_by_dispatch` dedupt ueber `execId`,
+        # und so gewinnt der Live-Bericht mit seiner Gebuehr gegen die Zeile
+        # aus der Datei, falls beide dieselbe Ausfuehrung tragen.
+        fills_by_ref = fills_by_dispatch(heutige + aus_archiv)
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.warning("Could not group executions for reconcile: %s", exc)
 
     actions = reconcile_open_dispatches(
         unresolved=unresolved,
@@ -973,10 +1054,19 @@ def _handle_order_reconcile(
                 fill_qty=action.fill_qty,
                 fill_price=action.fill_price,
                 commission_usd=action.commission_usd,
+                # T1-207: der gemessene Zeitpunkt, wenn es einen gibt.
+                # `datetime.now()` war hier fuer eine Fuellung des laufenden
+                # Tages ein paar Sekunden daneben — fuer eine aus dem Archiv
+                # nachgetragene waeren es Tage, und der Kalendertag der
+                # Buchung haengt daran.
                 filled_at=(
-                    datetime.now(timezone.utc).isoformat()
-                    if action.fill_qty
-                    else None
+                    action.filled_at.isoformat()
+                    if action.filled_at is not None
+                    else (
+                        datetime.now(timezone.utc).isoformat()
+                        if action.fill_qty
+                        else None
+                    )
                 ),
                 reason_code=action.reason_code,
                 error_message=action.error_message,
@@ -2357,6 +2447,10 @@ def main() -> int:
     # ersten Abruf stehen und ueberlebt als Datei den Neustart, gegen den er
     # schuetzt.
     submitted = SubmittedStore()
+    # T1-207: wie weit das Archiv der TWS gelesen ist. Ueberlebt den
+    # Neustart, weil der Neustart der Normalfall ist.
+    trade_report_store = TradeReportStore()
+    _pruefe_export(config.tws_export_dir)
     if not submitted.schreibbar:
         log.warning(
             "The bridge cannot remember which orders it already sent. Trading "
@@ -2395,6 +2489,10 @@ def main() -> int:
         session_connected_at=session_connected_at,
         write_access=ibkr.write_access(),
     )
+    # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
+    # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und
+    # der Kunde saehe die Warnung nur im Protokoll.
+    _pruefe_export(config.tws_export_dir, cockpit)
 
     # T1-177 D: wenn der Zugang entzogen wurde, haelt sich die Bridge selbst
     # an — und der Grund ueberlebt die Schleife, damit er danach im gerahmten
@@ -2427,7 +2525,13 @@ def main() -> int:
             # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
             # Fremdsicht — er ist die langsamste der drei Aufgaben und die
             # einzige, deren Ausbleiben nichts kaputt macht.
-            _handle_order_reconcile(api, ibkr, session_connected_at)
+            _handle_order_reconcile(
+                api,
+                ibkr,
+                session_connected_at,
+                export_dir=config.tws_export_dir,
+                report_store=trade_report_store,
+            )
             # Ganz zuletzt, und nur lesend: der Zustandsblock. Er darf keinen
             # der drei Wege oben aufhalten.
             report_heartbeat(
@@ -2454,6 +2558,10 @@ def main() -> int:
             # faende ein Storno seinen Auftrag nicht — die Ursache des
             # Phantom-Stornos vom 2026-08-13.
             rebuild_dispatch_map(ibkr, dispatch_id_map)
+            # T1-207: eine TWS, die zwischendurch neu gestartet wurde, kann den
+            # Export verloren haben — die Einstellung haengt am Profil, nicht an
+            # der Bridge. Also bei jeder neuen Sitzung erneut nachsehen.
+            _pruefe_export(config.tws_export_dir, cockpit)
             report_reconnect(cockpit, session_connected_at)
 
         # T1-152d: der Rueckruf fuer Auftragszustaende wird hier bewusst NICHT
