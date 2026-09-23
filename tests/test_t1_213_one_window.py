@@ -112,11 +112,57 @@ def test_headless_never_gets_a_dialog(monkeypatch) -> None:
     assert gezeigt == []
 
 
-def test_outside_windows_the_dialog_falls_back_quietly(capsys) -> None:
-    ergebnis = windows_ui.message_box("etwas", title="T")
-    if sys.platform != "win32":
-        assert ergebnis is False
-        assert "etwas" in capsys.readouterr().err
+def test_the_dialog_falls_back_quietly_without_windows(monkeypatch, capsys) -> None:
+    """Der Rueckfallweg — und dieser Test ruft NIE das echte `MessageBoxW`.
+
+    ## Warum das hier ausdruecklich steht
+
+    Die erste Fassung rief `message_box()` ungeschuetzt auf und prueste das
+    Ergebnis nur ausserhalb von Windows. Lokal auf macOS lief sie durch. Auf
+    dem Windows-Laeufer des Release-Workflows oeffnete sie einen echten
+    modalen Dialog — und `MessageBoxW` kehrt erst zurueck, wenn jemand klickt.
+
+    Gemessen am 2026-09-23: der Lauf stand **zehn Minuten** im Schritt „Run
+    tests", bis er von Hand abgebrochen wurde. Ein Vorgang, der auf eine
+    Eingabe wartet, die nie kommt — also genau die Fehlerklasse, gegen die
+    T1-213 gebaut ist, eingeschleppt durch dessen eigene Zusicherung.
+
+    Deshalb wird die Plattformfrage hier **gestellt und beantwortet**, statt
+    sie der Wirklichkeit zu ueberlassen: so laeuft derselbe Zweig auf jedem
+    System, und keiner oeffnet ein Fenster.
+    """
+    monkeypatch.setattr(windows_ui, "is_windows", lambda: False)
+    assert windows_ui.message_box("etwas", title="T") is False
+    assert "etwas" in capsys.readouterr().err
+
+
+def test_no_assertion_ever_opens_a_real_window() -> None:
+    """Die Regel, die den Fall von oben kuenftig faengt.
+
+    Wer in dieser Datei `message_box` oder `allocate_console` wirklich aufruft,
+    muss im selben Test vorher festgelegt haben, auf welcher Plattform er sich
+    befindet. Sonst oeffnet der Aufruf auf einem Windows-Laeufer ein Fenster,
+    und der Lauf steht.
+
+    Eine Zusicherung ueber Zusicherungen — und sie ist billiger als ein zweiter
+    Lauf, der zehn Minuten haengt.
+    """
+    quelle = Path(__file__).read_text("utf-8")
+    # Je Testfunktion ein Rumpf. `split` auf die Definitionszeile reicht: die
+    # Datei enthaelt keine verschachtelten Testfunktionen.
+    for rumpf in quelle.split("\ndef test_")[1:]:
+        name = rumpf.split("(", 1)[0]
+        ruft = any(
+            aufruf in rumpf
+            for aufruf in ("windows_ui.message_box(", "windows_ui.allocate_console(")
+        )
+        if not ruft:
+            continue
+        assert '"is_windows"' in rumpf, (
+            f"`{name}` ruft das echte Fenster, ohne die Plattformfrage zu "
+            "klaeren. Auf einem Windows-Laeufer haelt das den Lauf an — genau "
+            "so ist der Release-Lauf am 2026-09-23 stehengeblieben."
+        )
 
 
 # ── D — das Protokoll ist die einzige Quelle, die bleibt ─────────────────────
