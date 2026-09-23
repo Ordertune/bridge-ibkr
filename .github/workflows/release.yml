@@ -169,6 +169,14 @@ jobs:
           Write-Host "--- log file ---"
           Write-Host $log
 
+          # T1-213: dieselbe Datei zum Mitnehmen. Sie liegt unter dem
+          # Nutzerprofil (T1-176 B) und damit ausserhalb des Arbeitsbereichs;
+          # ohne diese Kopie waere sie nach dem Lauf fort. Bei einem ROTEN
+          # Lauf ist sie das Einzige, woran sich die Ursache ablesen laesst —
+          # eine fensterlose Anwendung sagt sonst nichts.
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\smoke" -Force | Out-Null
+          Copy-Item $logFile "$env:GITHUB_WORKSPACE\smoke\bridge.log" -Force
+
           # Dieselben drei Fragen wie vorher, nur an der Quelle, die es noch
           # gibt. `$out` wird mitgeprueft: in einem Build, der doch wieder eine
           # Konsole bekommt, steht der Traceback dort, und dann soll er auch
@@ -318,6 +326,40 @@ jobs:
           $name = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
           Compress-Archive -Path dist/ordertune-bridge-ibkr.exe,dist/README.txt `
             -DestinationPath "dist/ordertune-bridge-ibkr-$name.zip"
+
+      # T1-213 — die gebaute Datei zum Mitnehmen, ohne sie zu veroeffentlichen.
+      #
+      # ## Warum es das braucht
+      #
+      # Bis hierher verliess die EXE diese Werkstatt auf genau einem Weg: dem
+      # Release-Schritt, und der haengt an `refs/tags/v*`. Wer sie nur
+      # ausprobieren wollte, musste also eine Fassung veroeffentlichen — und
+      # damit genau den Schritt tun, den ein Probelauf vermeiden soll.
+      #
+      # Der `workflow_dispatch`, den diese Datei ausdruecklich anbietet, baute
+      # die EXE und warf sie anschliessend weg.
+      #
+      # ## `always()`, und das ist der Punkt
+      #
+      # Gebraucht wird das Artefakt am dringendsten, wenn der Lauf ROT ist:
+      # der Smoke-Test steht vor dem Signieren, ein Fehlschlag ueberspringt
+      # alles Weitere, und ohne diese Bedingung gaebe es dann gar nichts zum
+      # Nachsehen. `if-no-files-found: warn` faengt den Fall, in dem schon der
+      # Build gescheitert ist und es wirklich nichts gibt.
+      #
+      # Kurze Vorhaltung: das hier ist ein Probeergebnis, keine Auslieferung.
+      # Was ausgeliefert wird, haengt weiterhin am Tag.
+      - name: Artefakt zum Mitnehmen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            dist/ordertune-bridge-ibkr.exe
+            dist/*.zip
+            smoke/bridge.log
 
       # Eine unsignierte Datei muss sich als solche zu erkennen geben.
       #
