@@ -87,13 +87,25 @@ def test_the_message_text_survives_a_missing_log() -> None:
     assert text == "Kaputt."
 
 
-def test_the_abort_shows_a_message_box(monkeypatch) -> None:
+def _dialoge(monkeypatch) -> list[str]:
+    """Faengt die Dialoge ab, statt sie zu oeffnen.
+
+    `m.windows_ui` und `windows_ui` sind dasselbe Modulobjekt — ein `setattr`
+    genuegt. Es steht hier gebuendelt, damit kein Test aus Versehen das echte
+    Fenster ruft; auf einem Windows-Laeufer haelt das den Lauf an.
+    """
     gezeigt: list[str] = []
     monkeypatch.setattr(
         windows_ui, "message_box", lambda text, *a, **k: gezeigt.append(text) or True
     )
-    monkeypatch.setattr(m.windows_ui, "message_box", windows_ui.message_box)
     monkeypatch.setattr(console, "hold", lambda argv=None: None)
+    return gezeigt
+
+
+def test_the_abort_shows_a_message_box(monkeypatch) -> None:
+    """Der Doppelklick-Fall: gepackt, kein `--headless`, also ein Fenster."""
+    gezeigt = _dialoge(monkeypatch)
+    monkeypatch.setattr(console, "is_frozen", lambda: True)
 
     code = m._abort(Failure(code="c", headline="Keine Verbindung."), None, [])
     assert code == 1
@@ -102,14 +114,33 @@ def test_the_abort_shows_a_message_box(monkeypatch) -> None:
 
 def test_headless_never_gets_a_dialog(monkeypatch) -> None:
     """Ein Dialog, den niemand wegklicken kann, ist ein haengender Vorgang."""
-    gezeigt: list[str] = []
-    monkeypatch.setattr(
-        m.windows_ui, "message_box", lambda text, *a, **k: gezeigt.append(text) or True
-    )
-    monkeypatch.setattr(console, "hold", lambda argv=None: None)
+    gezeigt = _dialoge(monkeypatch)
+    monkeypatch.setattr(console, "is_frozen", lambda: True)
 
     m._abort(Failure(code="c", headline="Keine Verbindung."), None, ["--headless"])
     assert gezeigt == []
+
+
+def test_running_from_source_never_gets_a_dialog(monkeypatch) -> None:
+    """Und der Fall, der zwei Release-Laeufe gekostet hat.
+
+    Aus dem Quelltext gestartet — beim Entwickeln, in der Zusicherungssuite, in
+    der CI — sitzt eine Konsole davor. Dort ist der gerahmte Block die richtige
+    Auskunft; ein modaler Dialog ist keine zusaetzliche Hilfe, sondern ein
+    Anhalten.
+
+    Am 2026-09-23 stand der Lauf zweimal im Schritt „Run tests", weil
+    `test_launcher_starts_and_reaches_configuration` den Launcher ohne
+    `bridge.env` als Unterprozess startet und der Abbruchweg dort auf Windows
+    ein Fenster oeffnete.
+    """
+    gezeigt = _dialoge(monkeypatch)
+    monkeypatch.setattr(console, "is_frozen", lambda: False)
+
+    m._abort(Failure(code="c", headline="Keine Verbindung."), None, [])
+    assert gezeigt == []
+    assert console.dialog_wanted([]) is False
+    assert console.dialog_wanted(["--headless"]) is False
 
 
 def test_the_dialog_falls_back_quietly_without_windows(monkeypatch, capsys) -> None:

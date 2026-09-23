@@ -124,6 +124,36 @@ def setup_wanted(argv: list[str]) -> bool:
     return is_frozen()
 
 
+def dialog_wanted(argv: list[str]) -> bool:
+    """T1-213 — soll bei einem Startfehler ueberhaupt ein Fenster aufgehen?
+
+    ## Warum das nicht „nicht headless" heisst
+
+    Die erste Fassung fragte genau das, und sie war falsch. Ein Meldungsfenster
+    ist der Ersatz fuer eine Konsole, die es nicht gibt — es gehoert zum
+    Doppelklick auf die gepackte EXE und **nur** dorthin.
+
+    Laeuft derselbe Vorgang aus dem Quelltext, sitzt eine Konsole davor: beim
+    Entwickeln, in der Zusicherungssuite, in der CI. Dort ist der gerahmte
+    Block die richtige Auskunft, und ein modaler Dialog ist keine
+    zusaetzliche Hilfe, sondern ein Anhalten. `MessageBoxW` kehrt erst zurueck,
+    wenn jemand klickt.
+
+    ## Gemessen, nicht ueberlegt
+
+    Am 2026-09-23 ist der Release-Lauf zweimal im Schritt „Run tests" stehen
+    geblieben, jeweils bis zum Abbruch von Hand. Ursache beim zweiten Mal:
+    `test_launcher_starts_and_reaches_configuration` startet `launcher.py`
+    ohne `bridge.env` als Unterprozess — ohne Zeitgrenze. Auf einem
+    Windows-Laeufer oeffnete der Abbruchweg dort einen echten Dialog.
+
+    Es ist dieselbe Bedingung wie in `should_hold`, und das ist kein Zufall:
+    beide beantworten „steht hier ein Mensch vor einem Fenster, das gleich
+    verschwindet".
+    """
+    return is_frozen() and not headless_requested(argv)
+
+
 def hold(argv: list[str] | None = None) -> None:
     """Wartet auf eine Eingabe — sofern das ueberhaupt sinnvoll ist.
 

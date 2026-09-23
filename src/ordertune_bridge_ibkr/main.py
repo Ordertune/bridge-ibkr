@@ -2045,7 +2045,7 @@ def start_cockpit(
         # T1-213 — „url_only" heisst: der Kern laeuft, und der Kunde hat keinen
         # Weg zu ihm. Bis zum 2026-09-23 stand die Adresse in der Konsole, und
         # das war ausreichend. Ohne Konsole ist es das nicht mehr.
-        if stufe == "url_only" and not console.headless_requested(argv):
+        if stufe == "url_only" and console.dialog_wanted(argv):
             windows_ui.message_box(
                 "The Ordertune Bridge is running, but no browser window could "
                 f"be opened.\n\nOpen this address yourself:\n{url}",
@@ -2356,7 +2356,7 @@ def _abort(
     # Unter `--headless` ausdruecklich NICHT: ein Dialog, den niemand
     # wegklicken kann, ist genau der haengende Vorgang, gegen den die Zusage
     # des Dauerbetriebs gebaut ist.
-    if not console.headless_requested(argv):
+    if console.dialog_wanted(argv):
         windows_ui.message_box(_meldungstext(failure, log_file))
     console.hold(argv)
     return 1
@@ -2478,7 +2478,7 @@ def main() -> int:
             # Zeile, ein Vorgang, der sich sofort beendet. Genau der Zustand,
             # der „ich klicke drauf und es passiert nichts" erzeugt.
             notfall_log = _protokoll_fuer_startfehler(failure)
-            if not console.headless_requested(argv):
+            if console.dialog_wanted(argv):
                 windows_ui.message_box(_meldungstext(failure, notfall_log))
             console.hold(argv)
             return 1
