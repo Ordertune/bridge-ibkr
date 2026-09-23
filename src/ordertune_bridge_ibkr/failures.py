@@ -99,8 +99,42 @@ def _redacted(field_name: str, value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
+# T1-214 — ein Feld, zwei erlaubte Schreibweisen.
+#
+# Seit `IBKR_TWS_PORT` die neue und `IBKR_GATEWAY_PORT` die weiterhin gueltige
+# alte Schreibweise ist, entscheidet **Pydantic**, welche der beiden im
+# Fehlerblock landet — und das faellt nicht ueberall gleich aus. Gemessen am
+# 2026-09-23 am selben Datensatz: macOS nannte die Schreibweise aus der Datei,
+# der Windows-Laeufer die kanonische.
+#
+# Damit war die Zusage im Kommentar unten — „Name wie in der Datei" — keine
+# mehr. Ein Kunde mit `IBKR_GATEWAY_PORT` in seiner Datei haette nach einer
+# Zeile gesucht, die dort nicht steht.
+#
+# Statt zu raten, welche gemeint ist, nennt die Zeile **beide**. Das ist
+# plattformunabhaengig richtig und beantwortet die Frage, die der Kunde
+# wirklich hat: welche Zeile fasse ich an.
+ALIAS_GESCHWISTER: dict[str, str] = {
+    "IBKR_TWS_PORT": "IBKR_GATEWAY_PORT",
+    "IBKR_GATEWAY_PORT": "IBKR_TWS_PORT",
+    "IBKR_TWS_HOST": "IBKR_GATEWAY_HOST",
+    "IBKR_GATEWAY_HOST": "IBKR_TWS_HOST",
+}
+
+
+def _feldname(roh: str) -> str:
+    """Der Name fuer den Block — bei zwei Schreibweisen beide."""
+    name = roh.upper()
+    geschwister = ALIAS_GESCHWISTER.get(name)
+    return f"{name} (or {geschwister})" if geschwister else name
+
+
 def _pydantic_lines(errors: Iterable[dict[str, Any]]) -> tuple[str, ...]:
-    """Je Feld eine Zeile: Name wie in der Datei, Erwartung, gelesener Wert."""
+    """Je Feld eine Zeile: Name wie in der Datei, Erwartung, gelesener Wert.
+
+    Traegt ein Feld zwei erlaubte Schreibweisen, stehen beide da — siehe
+    `ALIAS_GESCHWISTER`.
+    """
     lines: list[str] = []
     for err in errors:
         loc = err.get("loc") or ("<unknown>",)
@@ -110,10 +144,10 @@ def _pydantic_lines(errors: Iterable[dict[str, Any]]) -> tuple[str, ...]:
             # Bei `missing` ist `input` der ganze gelesene Datensatz, nicht der
             # Wert des Feldes. Ihn auszugeben waere irrefuehrend — und bei einem
             # Datensatz mit Token auch noch gefaehrlich.
-            lines.append(f"  {field_name.upper()}: missing")
+            lines.append(f"  {_feldname(field_name)}: missing")
             continue
         got = _redacted(field_name, err.get("input"))
-        lines.append(f"  {field_name.upper()}: {msg} (got: {got})")
+        lines.append(f"  {_feldname(field_name)}: {msg} (got: {got})")
     return tuple(lines)
 
 
