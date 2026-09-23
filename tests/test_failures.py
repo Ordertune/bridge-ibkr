@@ -323,3 +323,31 @@ def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path
 
     # Und die fehlende Datei nennt den Weg, der wirklich gilt.
     assert "pair" in fehlt.lower()
+
+
+def test_no_token_failure_tells_the_customer_to_download_a_bridge_env() -> None:
+    """Owner-Befund vom 2026-09-23, ZWEITER Probelauf — und eine Lehre ueber
+    Zusicherungen.
+
+    Die Zusicherung darueber deckte nur die zwei Konfigurationsfaelle ab, weil
+    das die zwei Stellen waren, die der erste Probelauf gezeigt hat. Sechs
+    weitere standen in der Token-Familie, darunter der 401-Fall — und den hat
+    der Owner beim naechsten Lauf als Meldungsfenster fotografiert.
+
+    Eine Zusicherung, die genau den gemeldeten Fall prueft und nicht seine
+    Gattung, findet den naechsten nicht. Diese hier geht ueber ALLE
+    Handschlag-Stoerungen.
+
+    Ausnahme mit Grund: `missing_fingerprint`. Dort ist die BRIDGE zu alt, und
+    die will wirklich heruntergeladen werden.
+    """
+    from ordertune_bridge_ibkr.failures import _HANDSHAKE_BY_CODE
+
+    for schluessel, (code, headline, detail, _) in _HANDSHAKE_BY_CODE.items():
+        if code == "fingerprint_missing":
+            continue
+        text = " ".join(detail).lower()
+        for form in ("download the", "download a", "download new"):
+            assert form not in text, (
+                f"{schluessel} fordert zum Herunterladen auf ({form!r}): {detail}"
+            )

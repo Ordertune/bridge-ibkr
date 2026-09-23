@@ -186,3 +186,51 @@ def test_a_genuinely_refused_api_still_says_so() -> None:
     )
     assert failure.code == "tws_api_refused"
     assert "ActiveX" in failures.render(failure)
+
+
+# ── F — der Text verspricht nichts, was es nicht gibt ────────────────────────
+
+
+def test_the_message_does_not_promise_controls_that_do_not_exist() -> None:
+    """Owner-Befund vom 2026-09-23, zweiter Probelauf.
+
+    Die erste Fassung dieser Meldung sagte „close the running one first (its
+    window has the controls)". Das Cockpit hat keine. Ein Grep nach Stop, Quit
+    oder Shutdown findet in `page.py` nichts.
+
+    Dahinter liegt eine Folge von T1-213, die beim Entwurf niemand
+    ausgesprochen hat: bis dahin beendete der Kunde die Bridge, indem er ihr
+    Konsolenfenster schloss. Das Fenster gibt es nicht mehr, ein Ersatz wurde
+    nie gebaut — gemessen hat es der Owner, indem er beide Browserfenster
+    schloss und der Herzschlag weiterlief.
+
+    ## Warum diese Zusicherung BEIDE Seiten misst
+
+    Sie verlangt den Verweis auf den Task-Manager **nur so lange**, wie das
+    Cockpit wirklich keinen Knopf hat. Sobald jemand einen baut, wird sie rot
+    und zwingt dazu, den Text mitzuziehen. Ein Text und eine Oberflaeche, die
+    auseinanderlaufen koennen, ohne dass es jemand merkt, sind genau die Sorte
+    Drift, gegen die dieses Projekt an einem Dutzend Stellen gebaut hat.
+    """
+    seite = (WURZEL / "src/ordertune_bridge_ibkr/cockpit/page.py").read_text("utf-8")
+    hat_knopf = any(
+        wort in seite
+        for wort in ('id="stop"', 'id="quit"', "/shutdown", '"stopBridge"')
+    )
+    text = failures.render(failures.bridge_laeuft_bereits("http://127.0.0.1:1/?t=x"))
+
+    if hat_knopf:
+        assert "Task Manager" not in text, (
+            "Das Cockpit hat jetzt einen Knopf — die Meldung muss ihn nennen "
+            "statt den Task-Manager."
+        )
+    else:
+        assert "Task Manager" in text, (
+            "Ohne Knopf im Cockpit ist der Task-Manager der einzige wahre Weg."
+        )
+        assert "has the controls" not in text, (
+            "Das war das falsche Versprechen vom 2026-09-23."
+        )
+
+    # Und die Aussage, die der Owner sich erarbeiten musste, steht jetzt da.
+    assert "does not stop the Bridge" in text

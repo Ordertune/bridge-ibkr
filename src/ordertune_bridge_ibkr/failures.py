@@ -247,8 +247,24 @@ def bridge_laeuft_bereits(url: str) -> Failure:
         action=(
             "The running Bridge keeps working -- you do not need to do anything.",
             "",
-            "To restart it, close the running one first (its window has the",
-            "controls), then start this program again.",
+            # T1-213, Owner-Befund 2026-09-23: hier stand „close the running
+            # one first (its window has the controls)". Das Cockpit hat KEINE
+            # Bedienelemente zum Beenden — ein Grep nach Stop, Quit oder
+            # Shutdown findet in `page.py` nichts. Der Satz versprach etwas,
+            # das es nicht gibt.
+            #
+            # Dahinter liegt eine Folge von T1-213, die beim Entwurf niemand
+            # ausgesprochen hat: bis dahin beendete der Kunde die Bridge, indem
+            # er ihr Konsolenfenster schloss. Das Fenster gibt es nicht mehr,
+            # und ein Ersatz wurde nie gebaut. Der Owner hat es gemessen — er
+            # schloss beide Browserfenster, und der Herzschlag lief weiter.
+            #
+            # Bis es einen Knopf gibt, sagt dieser Text die Wahrheit, so
+            # unbequem sie ist. Die Zusicherung darunter haelt beides zusammen.
+            "To stop it: end ordertune-bridge-ibkr.exe in Task Manager.",
+            "",
+            "Closing the browser window does not stop the Bridge. The window is",
+            "a view of it, not the program itself.",
         ),
     )
 
@@ -392,6 +408,16 @@ def gateway_statt_tws(port: int, answering: tuple[tuple[int, str], ...]) -> Fail
 # gilt fuer jeden Code ausserhalb von `RENEWABLE_AUTH_CODES`, und dort bleibt
 # der heutige Wortlaut samt Website unveraendert stehen.
 #
+# T1-213, Owner-Befund 2026-09-23 am zweiten Probelauf: sechs dieser Texte
+# forderten noch zum Herunterladen einer `bridge.env` auf — darunter der
+# 401-Fall, den der Owner als Meldungsfenster fotografiert hat. Seit T1-178
+# legt die Kopplung die Datei selbst an, und seit T1-181 oeffnet ausgerechnet
+# ein wertloses Token den Assistenten: der Satz forderte also einen Umweg,
+# waehrend der kurze Weg im selben Augenblick aufging.
+#
+# `missing_fingerprint` behaelt seinen Download — dort ist die BRIDGE zu alt,
+# und die will wirklich heruntergeladen werden.
+#
 # Die Texte hier nennen bewusst KEINE Handlung. Der Knopf darunter ist die
 # Handlung; ein Satz, der dasselbe noch einmal sagt, muss mitgepflegt werden
 # und widerspricht ihm beim ersten Mal, wo das jemand vergisst. Genau so ist
@@ -401,8 +427,8 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "token_invalid",
         "Ordertune rejected the access token.",
         (
-            "Generate a fresh token in Ordertune and download the new",
-            "bridge.env. The plain token is shown only once.",
+            "Pair this machine again: the assistant opens in a moment and",
+            "fetches a fresh token for you.",
         ),
         ("This access token is no longer valid.",),
     ),
@@ -411,7 +437,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "The request carried no access token.",
         (
             "ORDERTUNE_BRIDGE_TOKEN is empty or malformed in bridge.env.",
-            "Download a fresh pre-filled file.",
+            "Pair this machine again to write a working one.",
         ),
         ("This machine has no usable access token.",),
     ),
@@ -419,8 +445,8 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "connection_revoked",
         "This bridge connection was revoked in Ordertune.",
         (
-            "Create a new connection in Ordertune, download the new",
-            "bridge.env and replace the old one.",
+            "Create a new connection in Ordertune, then pair this machine",
+            "with it.",
         ),
         ("This connection was revoked, so its token no longer works.",),
     ),
@@ -447,7 +473,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "fingerprint_already_set",
         "This token already belongs to another machine.",
         (
-            "Rotate the token in Ordertune and download the new bridge.env.",
+            "Pair this machine again -- that issues it a token of its own.",
             "Do not run two bridges from one token -- give each machine its own.",
         ),
         # Der Zusatz gehoert hierher und nicht zum Knopf: die Kopplung rotiert
@@ -559,7 +585,7 @@ def classify_handshake_error(exc: Exception, api_base: str | None = None) -> Fai
         detail=(f"  {body[:200]}" if body else f"  {exc}",),
         action=(
             "Check the Broker tab in Ordertune. If the connection looks healthy",
-            "there, rotate the token and download a fresh bridge.env:",
+            "there, pair this machine again:",
             f"  {settings_url(api_base)}",
         ),
     )
