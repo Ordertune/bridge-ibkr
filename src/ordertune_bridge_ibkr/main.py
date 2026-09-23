@@ -2512,6 +2512,41 @@ def main() -> int:
     fingerprint = compute_fingerprint()
     log.info("Hardware fingerprint: %s...", fingerprint[:16])
 
+    # T1-222 — laeuft hier schon eine?
+    #
+    # VOR dem IBKR-Verbindungsversuch, und das ist der ganze Punkt: sonst
+    # kollidiert der zweite Start auf der Client-ID, und aus einem
+    # Socket-Fehler wird geraten. Gemessen am 2026-09-23 sah der Nutzer dann
+    # „'Enable ActiveX and Socket Clients' is off in TWS" — eine Einstellung,
+    # die in Ordnung war.
+    #
+    # Die Auskunft lag die ganze Zeit bereit: `cockpit/runfile.py` schreibt bei
+    # jedem Start Adresse und Prozesskennung. Gelesen hat sie nur nie jemand.
+    # Erst hier importiert, nicht oben: `cockpit/__init__.py` zieht Server und
+    # Aktionen mit, und die haben in einem `--headless`-Lauf nichts zu suchen.
+    # Dasselbe Muster wie bei `start_cockpit` und `run_setup_cockpit`.
+    from .cockpit import runfile as runfile_mod
+
+    laeuft_bereits = runfile_mod.laufende_instanz(config.ibkr_client_id)
+    if laeuft_bereits is not None:
+        stoerung = failures.bridge_laeuft_bereits(laeuft_bereits)
+        log.warning("%s Its window: %s", stoerung.headline, laeuft_bereits)
+        if not console.headless_requested(argv):
+            # Wer zweimal klickt, will die Bridge SEHEN. Also dasselbe Fenster
+            # wie beim regulaeren Start, nicht bloss eine Meldung.
+            from .cockpit import window as window_mod
+
+            window_mod.open_window(laeuft_bereits)
+            if console.dialog_wanted(argv):
+                windows_ui.message_box(
+                    _meldungstext(stoerung, log_file), error=False
+                )
+        # Ausgangscode 0, und das ist eine Entscheidung: der gewuenschte
+        # Zustand — „eine Bridge laeuft" — ist hergestellt. Eine 1 braechte
+        # eine geplante Aufgabe oder IBC dazu, es sofort wieder zu versuchen,
+        # in einer Schleife, die nie endet.
+        return 0
+
     ibkr = IbkrClient(
         host=config.ibkr_tws_host,
         port=config.ibkr_tws_port,

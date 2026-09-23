@@ -217,6 +217,42 @@ def classify_config_error(
     )
 
 
+# T1-222 — es laeuft bereits eine Bridge auf dieser Maschine.
+#
+# Eigener Text, weil der Zustand ein eigener ist: nichts ist kaputt, der
+# Nutzer hat zweimal geklickt. Bis zum 2026-09-23 lief der zweite Start bis
+# zum IBKR-Verbindungsversuch, kollidierte dort auf der Client-ID, und
+# `classify_connect_error` riet aus einem Socket-Fehler — mit
+# „'Enable ActiveX and Socket Clients' is off in TWS" an erster Stelle. Eine
+# Einstellung, die in Ordnung war, sonst haette die ERSTE Instanz nicht
+# verbunden.
+
+
+def bridge_laeuft_bereits(url: str) -> Failure:
+    """Die Auskunft fuer den Doppelstart. Kein Fehler, kein Verdacht.
+
+    Der Text nennt ausdruecklich keine TWS-Einstellung und keine Client-ID:
+    beide waeren hier eine falsche Faehrte, und eine falsche Faehrte schickt
+    den Nutzer in seinen Broker, um dort etwas umzustellen, das stimmt.
+    """
+    return Failure(
+        code="bridge_already_running",
+        headline="A Bridge is already running on this machine.",
+        detail=(
+            "  Its window: " + url,
+            "",
+            "  Nothing is wrong. The Bridge has no taskbar window of its own,",
+            "  so a second click looks like a first one.",
+        ),
+        action=(
+            "The running Bridge keeps working -- you do not need to do anything.",
+            "",
+            "To restart it, close the running one first (its window has the",
+            "controls), then start this program again.",
+        ),
+    )
+
+
 # ── IBKR TWS ─────────────────────────────────────────────────────────────────
 
 
