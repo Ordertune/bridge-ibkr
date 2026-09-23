@@ -281,3 +281,45 @@ def test_the_settings_link_follows_a_custom_server() -> None:
         "https://staging.example.com/settings?tab=broker"
     )
     assert failures.settings_url() == "https://t1.ordertune.com/settings?tab=broker"
+
+
+def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path) -> None:
+    """T1-213 — Owner-Befund vom 2026-09-23, am ersten Probelauf der EXE.
+
+    Der Assistent legt `bridge.env` seit T1-178 selbst an, sobald die Kopplung
+    steht. Eine Startmeldung, die stattdessen zum Herunterladen auffordert,
+    schickt den Kunden auf einen Umweg — und zwar an der auffaelligsten Stelle
+    der ganzen Anwendung, unmittelbar ueber dem Knopf, der den kurzen Weg geht.
+
+    Geprueft werden beide Faelle, die eine `bridge.env` betreffen: die fehlende
+    und die fehlerhafte. Der zweite war in der ersten Fassung dieser Korrektur
+    uebersehen worden.
+    """
+    fehlt = failures.render(
+        failures.classify_config_error(
+            _validation_error(), "C:\\ot\\bridge.env", env_exists=False
+        )
+    )
+    kaputt = failures.render(
+        failures.classify_config_error(
+            _fehler_aus_datei(tmp_path, "IBKR_TWS_PORT=nope\n"),
+            "C:\\ot\\bridge.env",
+            env_exists=True,
+        )
+    )
+
+    # Geprueft wird die AUFFORDERUNG, nicht das Wort: „nothing to download"
+    # ist genau die richtige Aussage und darf nicht mitgefangen werden.
+    aufforderungen = ("download the", "download a", "downloaden")
+    for block, fall in ((fehlt, "env_missing"), (kaputt, "env_invalid")):
+        unten = block.lower()
+        for form in aufforderungen:
+            assert form not in unten, (
+                f"{fall} fordert zum Herunterladen auf ({form!r}):\n{block}"
+            )
+        assert "settings?tab=broker" not in unten, (
+            f"{fall} verweist auf die Download-Flaeche:\n{block}"
+        )
+
+    # Und die fehlende Datei nennt den Weg, der wirklich gilt.
+    assert "pair" in fehlt.lower()

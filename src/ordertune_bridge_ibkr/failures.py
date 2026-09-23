@@ -170,13 +170,22 @@ def classify_config_error(
             headline="bridge.env was not found.",
             detail=(f"  Looked for: {env_path}",),
             action=(
-                "Download the pre-filled bridge.env from Ordertune and place it",
-                "in the same folder as this program:",
-                f"  {settings_url()}",
+                # T1-213 (Owner-Befund 2026-09-23 am ersten Probelauf der
+                # fensterlosen EXE): hier stand „Download the pre-filled
+                # bridge.env from Ordertune and place it in the same folder".
+                #
+                # Der Satz war ueberholt und stand an der auffaelligsten Stelle
+                # der ganzen Anwendung. Unmittelbar darunter oeffnet sich der
+                # Assistent, dessen erster Schritt genau das ueberfluessig
+                # macht: Code holen, in Ordertune eintippen, fertig — die
+                # Datei entsteht dabei von selbst (T1-178). Der Kunde wurde
+                # also zu einem Umweg aufgefordert, waehrend der kurze Weg
+                # unter der Meldung auf ihn wartete.
+                "This window is the setup assistant. Step 1 pairs this machine",
+                "with Ordertune: fetch a code, type it into the Broker tab, and",
+                "the Bridge writes bridge.env for you.",
                 "",
-                "The file must be named exactly bridge.env. Windows hides known",
-                "file extensions by default, so a file shown as 'bridge' may",
-                "actually be bridge.env.txt.",
+                "Nothing to download, nothing to copy between windows.",
             ),
         )
 
@@ -196,8 +205,14 @@ def classify_config_error(
         headline="bridge.env was found, but a value is missing or invalid.",
         detail=detail,
         action=(
-            "Fix the listed line, or download a fresh pre-filled bridge.env:",
-            f"  {settings_url()}",
+            # T1-213: auch hier stand ein Download. Bei einer vorhandenen,
+            # aber fehlerhaften Datei ist die richtige Auskunft ohnehin „die
+            # genannte Zeile richtigstellen" — der zweite Weg ist eine neue
+            # Kopplung, nicht ein Dateitransport.
+            "Fix the line named above.",
+            "",
+            "If you would rather start over: delete bridge.env, start the",
+            "Bridge again, and pair this machine in the assistant that opens.",
         ),
     )
 

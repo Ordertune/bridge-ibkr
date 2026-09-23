@@ -288,3 +288,70 @@ def test_headless_behaves_exactly_as_before(monkeypatch) -> None:
         )
         is False
     )
+
+
+# ── G — die Aktualisierungspruefung sagt nur, was stimmt ─────────────────────
+
+
+def test_an_older_release_is_not_an_update() -> None:
+    """T1-213 — Owner-Befund vom 2026-09-23 am ersten Probelauf.
+
+    Das Protokoll meldete „A newer Bridge version is available: v0.25.2 (you
+    have v0.26.0)". Die Bedingung lautete `latest != current` und hielt damit
+    jede Abweichung fuer eine Aktualisierung — auch eine aeltere.
+
+    Der Fall ist kein Kunstprodukt: er tritt bei jedem Vorabbau auf, also genau
+    dann, wenn jemand eine noch nicht veroeffentlichte Fassung prueft. Die
+    Meldung empfiehlt dort, auf einen aelteren Stand zurueckzugehen.
+    """
+    from ordertune_bridge_ibkr import update_check
+
+    assert update_check._als_zahlen("0.26.0") > update_check._als_zahlen("0.25.2")
+    assert update_check._als_zahlen("0.26.0") > update_check._als_zahlen("0.9.9")
+    assert update_check._als_zahlen("1.0.0") > update_check._als_zahlen("0.99.0")
+    assert update_check._als_zahlen("nicht-lesbar") == ()
+
+
+def test_the_update_check_only_speaks_when_there_is_something_newer(monkeypatch) -> None:
+    from ordertune_bridge_ibkr import update_check
+
+    def antwortet(fassung: str):
+        class _Antwort:
+            @staticmethod
+            def raise_for_status() -> None:
+                return None
+
+            @staticmethod
+            def json() -> dict:
+                return {"tag_name": f"v{fassung}"}
+
+        class _Client:
+            # Die Zeitgrenze MUSS angenommen werden. Ohne `**_` warf der
+            # Aufruf, `check_for_update` fing den Fehler still — und der erste
+            # Fall dieses Tests bestand aus genau diesem Grund, nicht wegen
+            # der Fassungsrechnung. Aufgefallen ist es nur am zweiten Fall.
+            def __init__(self, **_) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            @staticmethod
+            def get(_url: str):
+                return _Antwort()
+
+        return _Client
+
+    monkeypatch.setattr(update_check.httpx, "Client", antwortet("0.25.2"))
+    assert update_check.check_for_update("0.26.0") is None, (
+        "eine aeltere Veroeffentlichung ist keine Aktualisierung"
+    )
+
+    monkeypatch.setattr(update_check.httpx, "Client", antwortet("0.27.0"))
+    assert update_check.check_for_update("0.26.0") == "0.27.0"
+
+    monkeypatch.setattr(update_check.httpx, "Client", antwortet("0.26.0"))
+    assert update_check.check_for_update("0.26.0") is None
