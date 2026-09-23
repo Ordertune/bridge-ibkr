@@ -153,7 +153,16 @@ jobs:
           Pop-Location
 
           Write-Host "--- exit code: $code ---"
-          Write-Host "--- stdout (expected to be empty for a windowed build) ---"
+          # Am 2026-09-23 gemessen: hier steht der gerahmte Block, obwohl die
+          # EXE fensterlos gebaut ist. Das ist kein Widerspruch — PyInstaller
+          # nimmt dem Vorgang die eigene Konsole, nicht die GEERBTEN Handles.
+          # Wird die Datei aus einer Shell mit Umleitung gestartet, wie hier,
+          # sind `stdout` und `stderr` echte Kanaele.
+          #
+          # Der wirklich kanallose Fall ist der Doppelklick, und den kann
+          # dieser Schritt nicht nachstellen. Deshalb bleibt die
+          # Protokolldatei das Mass — sie ist in BEIDEN Faellen da.
+          Write-Host "--- stdout (beim Doppelklick leer, hier nicht — siehe oben) ---"
           Write-Host $out
 
           $logFile = Join-Path $logDir "bridge.log"
