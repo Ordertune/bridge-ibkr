@@ -28,9 +28,18 @@ def test_the_page_has_a_stop_button_where_actions_live() -> None:
     assert "Stop the Bridge" in seite
     # AC-A2: er fragt zurueck.
     assert "confirm(" in seite.split('q("stop").onclick', 1)[1][:400]
-    # AC-A3: nicht zwischen den Statuswerten, sondern in einem eigenen
-    # Abschnitt mit den uebrigen Handlungen.
+    # AC-A3, Owner-Befund 2026-09-23: er steht auf der STARTSEITE.
+    #
+    # Zuerst lag er unter „Details", mit der Begruendung „was berichtet, und
+    # was handelt, sind zwei verschiedene Dinge". Das Ordnungsprinzip stimmt,
+    # die Folge war trotzdem falsch: der Owner hat ihn als „etwas unglueglich
+    # versteckt" gefunden. Die einzige Handlung, die ein Kunde an dieser
+    # Anwendung ueberhaupt vornimmt, gehoert auf die Seite, die er sieht.
     assert "<h2>Stop</h2>" in seite
+    status = seite.split('<div id="pane-status">', 1)[1].split('<div id="pane-settings"', 1)[0]
+    assert 'id="stop"' in status, "Der Knopf gehoert auf die Startseite."
+    details = seite.split('<div id="pane-details"', 1)[1]
+    assert 'id="stop"' not in details, "Und nicht zusaetzlich unter Details."
 
 
 def test_the_surface_stops_claiming_connected() -> None:

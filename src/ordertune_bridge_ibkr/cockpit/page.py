@@ -433,6 +433,22 @@ summary:hover { color: var(--fg-1); }
         <dt>Equity</dt><dd id="equity">-</dd>
       </dl>
     </section>
+    <!-- T1-223 — der Weg, die Bridge zu beenden.
+         Owner-Befund 2026-09-23: er stand zuerst unter „Details", und dort
+         hat ihn der Owner als „etwas unglueklich versteckt" bezeichnet. Das
+         Urteil ist richtig, und die Begruendung fuer den alten Ort war es
+         nicht: „was berichtet, und was handelt, sind zwei verschiedene Dinge"
+         ist ein Ordnungsprinzip — aber es hilft niemandem, der ein Programm
+         beenden will, das keinen Eintrag in der Taskleiste hat.
+         Die einzige Handlung, die ein Kunde an dieser Anwendung ueberhaupt
+         vornimmt, gehoert auf die Seite, die er sieht. -->
+    <section>
+      <h2>Stop</h2>
+      <p class="muted">Closing this browser window does not stop the Bridge --
+      the window is a view of it, not the program itself.</p>
+      <p><button class="action" id="stop">Stop the Bridge</button>
+      <span id="stopmsg" class="note"></span></p>
+    </section>
     <section>
       <h2>Positions</h2>
       <div id="positions" class="scroll muted">No position data yet.</div>
@@ -495,18 +511,6 @@ summary:hover { color: var(--fg-1); }
       </dl>
       <p style="margin-top:1rem"><button class="action" id="copy">Copy diagnostics</button>
       <span id="copied" class="muted"></span></p>
-    </section>
-    <!-- T1-223 — der Weg, die Bridge zu beenden.
-         Bis T1-213 schloss der Kunde dafuer das Konsolenfenster. Das gibt es
-         nicht mehr, und uebrig blieb der Task-Manager. Der Knopf steht hier
-         und nicht bei den Statuswerten: was berichtet, und was handelt, sind
-         zwei verschiedene Dinge (AC-A3). -->
-    <section>
-      <h2>Stop</h2>
-      <p class="muted">Closing this browser window does not stop the Bridge --
-      the window is a view of it, not the program itself.</p>
-      <p><button class="action" id="stop">Stop the Bridge</button>
-      <span id="stopmsg" class="note"></span></p>
     </section>
     <section>
       <h2>Log</h2>

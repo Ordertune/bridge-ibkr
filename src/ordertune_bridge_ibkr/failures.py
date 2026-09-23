@@ -255,7 +255,11 @@ def bridge_laeuft_bereits(url: str) -> Failure:
             # Versprechen auf Bedienelemente, die es nicht gab. Dann der
             # Task-Manager, wahr, aber unbequem. Erst T1-223 hat das gebaut,
             # was der erste Satz schon behauptet hatte.
-            "To stop it: open its window and use Details -> Stop the Bridge.",
+            # Der Knopf wird beim Namen genannt, nicht umschrieben: der Kunde
+            # sucht die Beschriftung, die er sieht. Die Zusicherung in
+            # T1-222 haelt genau das fest — sie ist rot geworden, als hier
+            # „the Stop button" stand.
+            "To stop it: open its window and press \"Stop the Bridge\".",
             "",
             "Closing the browser window does not stop the Bridge. The window is",
             "a view of it, not the program itself.",
