@@ -59,6 +59,7 @@ from .external_executions import (
     order_types_by_perm_id,
 )
 from .logging_setup import setup_logging
+from . import windows_ui
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
@@ -2034,7 +2035,17 @@ def start_cockpit(
         )
         url = server.start()
         runfile.write(config.ibkr_client_id, url)
-        log.info("Cockpit window: %s", window_mod.open_window(url))
+        stufe = window_mod.open_window(url)
+        log.info("Cockpit window: %s", stufe)
+        # T1-213 — „url_only" heisst: der Kern laeuft, und der Kunde hat keinen
+        # Weg zu ihm. Bis zum 2026-09-23 stand die Adresse in der Konsole, und
+        # das war ausreichend. Ohne Konsole ist es das nicht mehr.
+        if stufe == "url_only" and not console.headless_requested(argv):
+            windows_ui.message_box(
+                "The Ordertune Bridge is running, but no browser window could "
+                f"be opened.\n\nOpen this address yourself:\n{url}",
+                error=False,
+            )
         return server
     except Exception as exc:
         log.warning("Cockpit could not start (the bridge keeps running): %s", exc)
@@ -2334,8 +2345,72 @@ def _abort(
         # Nur Kennung und Satz, nicht der ganze Block: die Wurzel haengt an der
         # Konsole, sonst stuende alles doppelt auf dem Bildschirm.
         log.error("Startup aborted (%s): %s", failure.code, failure.headline)
+    # T1-213 B — das Meldungsfenster tritt an die Stelle des wartenden
+    # Konsolenfensters.
+    #
+    # Unter `--headless` ausdruecklich NICHT: ein Dialog, den niemand
+    # wegklicken kann, ist genau der haengende Vorgang, gegen den die Zusage
+    # des Dauerbetriebs gebaut ist.
+    if not console.headless_requested(argv):
+        windows_ui.message_box(_meldungstext(failure, log_file))
     console.hold(argv)
     return 1
+
+
+def _protokoll_fuer_startfehler(failure: failures.Failure) -> Path | None:
+    """T1-213 — eine Spur hinterlassen, bevor der Start ueberhaupt begonnen hat.
+
+    ## Der Befund
+
+    Scheitert die Konfiguration, bricht `main()` ab, **bevor** `setup_logging`
+    laeuft — der Protokollordner gehoert zum Umzug aus T1-176 und wird erst
+    danach eingerichtet. Bis zum 2026-09-23 war das folgenlos: der gerahmte
+    Block stand in der Konsole, und wer ihn brauchte, konnte ihn lesen.
+
+    Ohne Konsole hinterlaesst genau dieser Fall **nichts**. Keine Zeile, keine
+    Datei, kein Ort, an dem der Support nachsehen koennte — bei der haeufigsten
+    Stoerung ueberhaupt, der fehlenden oder verbrauchten `bridge.env`.
+
+    Deshalb wird das Protokoll hier nachgeholt. Der Aufruf ist unbedenklich:
+    er geschieht ausschliesslich auf dem Abbruchweg, also nie zusammen mit dem
+    regulaeren `setup_logging` weiter unten — zwei Datei-Handler auf derselben
+    Datei waeren jede Zeile doppelt.
+
+    Scheitert auch das, kommt `None` zurueck. Ein Fehler beim Festhalten eines
+    Fehlers darf den Ausgang nicht noch einmal verdecken.
+    """
+    try:
+        paths.migrate_legacy()
+        log_file = setup_logging()
+        log.error("Startup aborted (%s): %s", failure.code, failure.headline)
+        for zeile in failure.detail:
+            log.error("  %s", zeile)
+        return log_file
+    except Exception as exc:  # noqa: BLE001 - defensiv, siehe Docstring
+        log.debug("Could not set up logging for the startup failure: %s", exc)
+        return None
+
+
+def _meldungstext(failure: failures.Failure, log_file: Path | None) -> str:
+    """Der Text des Meldungsfensters: Ueberschrift, Rat, Protokollpfad.
+
+    Bewusst nicht der gerahmte Block aus `failures.render` — der ist fuer eine
+    Konsole mit fester Zeichenbreite gesetzt und saehe in einem Dialog wie ein
+    Unfall aus.
+
+    Der Protokollpfad stammt aus DERSELBEN Quelle wie die Datei selbst
+    (`setup_logging` gibt ihn zurueck, T1-101 A-4). Ihn hier ein zweites Mal
+    herzuleiten waere die Sorte Doppelspur, die in diesem Projekt schon
+    mehrfach auseinandergelaufen ist.
+    """
+    teile = [failure.headline]
+    if failure.detail:
+        teile.append("\n".join(failure.detail))
+    if failure.action:
+        teile.append("\n".join(failure.action))
+    if log_file is not None:
+        teile.append(f"Log file:\n{log_file}")
+    return "\n\n".join(t for t in teile if t)
 
 
 def _handshake_or_none(
@@ -2368,6 +2443,15 @@ def _token_changed(alter_token: str) -> bool:
 def main() -> int:
     argv = sys.argv[1:]
 
+    # T1-213 D-1 — der Owner holt sich die Konsole zurueck.
+    #
+    # Als Allererstes und vor jeder Ausgabe: die EXE wird fensterlos gebaut,
+    # `sys.stdout` steht dann auf `None`, und alles, was vor diesem Aufruf
+    # geschrieben wuerde, waere verloren. Auch `setup_logging` weiter unten
+    # fragt den Kanal ab — er muss bis dahin stehen.
+    if windows_ui.console_requested(argv):
+        windows_ui.allocate_console()
+
     # Aufgeloest, bevor irgendetwas schiefgeht: bei einem Doppelklick ist das
     # Arbeitsverzeichnis nicht zwingend der Ordner der EXE, und „Datei nicht
     # gefunden" ohne Suchort ist keine Auskunft.
@@ -2384,6 +2468,13 @@ def main() -> int:
         # dieselbe Auskunft bekommen.
         print(failures.render(failure), file=sys.stderr, flush=True)
         if not run_setup_cockpit(failure, env_path, argv):
+            # T1-213 B — hier ist das Cockpit NICHT aufgegangen. Ohne Konsole
+            # saehe der Kunde an dieser Stelle gar nichts: kein Fenster, keine
+            # Zeile, ein Vorgang, der sich sofort beendet. Genau der Zustand,
+            # der „ich klicke drauf und es passiert nichts" erzeugt.
+            notfall_log = _protokoll_fuer_startfehler(failure)
+            if not console.headless_requested(argv):
+                windows_ui.message_box(_meldungstext(failure, notfall_log))
             console.hold(argv)
             return 1
         try:

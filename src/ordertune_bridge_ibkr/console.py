@@ -1,8 +1,21 @@
 """T1-101 A-1 — ein Startfehler haelt das Fenster.
 
-## Warum
+## T1-213, 2026-09-23 — die Konsole ist fort, die Aufgabe geblieben
 
-Die EXE wird mit `--console` gebaut. Windows schliesst das Konsolenfenster
+Die EXE wird seit dem 2026-09-23 mit `--windowed` gebaut: ein Doppelklick
+oeffnet genau ein Fenster, und das ist das Cockpit. Damit entfaellt das
+Warten auf eine Eingabe — es gibt kein Konsolenfenster mehr, das man
+offenhalten koennte, und eine Aufforderung an ein Fenster, das es nicht gibt,
+waere eine Anweisung, die nicht stimmt. Genau dagegen ist dieser Vorgang
+gebaut.
+
+An die Stelle des Wartens tritt `windows_ui.message_box`. `hold()` bleibt als
+Funktion stehen und tut ausserhalb einer echten Konsole nichts; sie greift
+noch, wenn der Owner die Bridge mit `--console` startet.
+
+## Warum es das Warten ueberhaupt gab
+
+Die EXE wurde mit `--console` gebaut. Windows schliesst das Konsolenfenster
 zusammen mit dem Vorgang, sobald er endet. Bei einem Doppelklick heisst das:
 jede Startmeldung, auch die sorgfaeltigste, ist nach einem Sekundenbruchteil
 fort. Genau das erzeugt „ich klicke drauf und es passiert nichts".
@@ -73,40 +86,51 @@ def is_interactive() -> bool:
 def setup_wanted(argv: list[str]) -> bool:
     """Soll bei fehlender `bridge.env` der Assistent aufgehen?
 
-    Drei Bedingungen, und die dritte ist teuer erkauft:
+    Zwei Bedingungen, seit T1-213:
 
       * nicht `--headless`,
-      * gepackte EXE (oder ausdruecklich `--setup` fuer die Entwicklung),
-      * **und eine interaktive Konsole.**
+      * gepackte EXE (oder ausdruecklich `--setup` fuer die Entwicklung).
 
-    ## Warum die dritte dazukam
+    ## Warum die dritte weggefallen ist
 
-    Der Assistent wartet, bis jemand etwas eintraegt — in einer Schleife, ohne
-    Ende. Ist niemand da, ist das kein Assistent, sondern ein haengender
-    Vorgang: er meldet keinen Herzschlag und ist fuer die Plattform von einem
-    Absturz nicht zu unterscheiden.
+    Hier stand zusaetzlich `is_interactive()` — **und eine interaktive
+    Konsole**. Der Grund war teuer erkauft: zweimal hing ein Lauf, weil der
+    Assistent auf eine Eingabe wartete, die niemand tippte. Zuerst der
+    Paket-Testlauf, dann der Smoke-Test des Release-Workflows, der die fertige
+    EXE in einem leeren Verzeichnis startet.
 
-    Das ist beim Bauen zweimal passiert, und beim zweiten Mal an der
-    gefaehrlichen Stelle. Zuerst hing der Testlauf des Pakets, weil er den
-    Launcher ohne `bridge.env` startet — dagegen kam `is_frozen()`. Dann hing
-    der Smoke-Test des **Release-Workflows**, der die fertige EXE in einem
-    leeren Verzeichnis startet: dort ist `is_frozen()` wahr, und der Assistent
-    lief endlos. Der Schritt heisst „Smoke-test the built EXE" und existiert
-    genau fuer diese Sorte Fehler.
+    Beide Faelle betrafen einen Assistenten, der in der **Konsole** lief. Seit
+    T1-101 C laeuft er im Cockpit: `run_setup_cockpit` startet einen lokalen
+    Server und oeffnet ein Fenster, getippt wird im Browser. Die Bedingung
+    schuetzt damit einen Vorgang, den es nicht mehr gibt.
 
-    Dahinter steht der Fall, der nicht nur die Bauumgebung trifft: eine
-    geplante Aufgabe oder ein Dienst-Wrapper startet die EXE ohne Konsole. Ohne
-    diese Bedingung wartete sie dort bis zum Neustart der Maschine.
+    Sie stehenzulassen waere nicht nur ueberfluessig, sondern schaedlich: eine
+    fensterlos gebaute Anwendung hat **nie** eine interaktive Konsole. Der
+    Assistent ginge dann bei keinem Kunden mehr auf, und der erste Start
+    endete mit einem Meldungsfenster statt mit einer Einrichtung.
+
+    ## Was an ihre Stelle tritt
+
+    Die Gefahr, gegen die sie gebaut war, bleibt echt: ein Vorgang, der auf
+    eine Eingabe wartet, die nie kommt, meldet keinen Herzschlag und ist fuer
+    die Plattform von einem Absturz nicht zu unterscheiden. Der Schutz dagegen
+    ist jetzt `--headless` — die ausdrueckliche Zusage an den Dauerbetrieb —,
+    und der Smoke-Test des Release-Workflows setzt ihn (T1-213 AC-E1).
     """
     if headless_requested(argv):
         return False
     if SETUP_FLAG in argv:
         return True
-    return is_frozen() and is_interactive()
+    return is_frozen()
 
 
 def hold(argv: list[str] | None = None) -> None:
     """Wartet auf eine Eingabe — sofern das ueberhaupt sinnvoll ist.
+
+    T1-213: in der ausgelieferten, fensterlosen Fassung ist das nie der Fall —
+    `is_interactive()` ist dort falsch, und die Funktion kehrt still zurueck.
+    Sie greift noch, wenn der Owner mit `--console` startet. Die Auskunft fuer
+    den Kunden uebernimmt `windows_ui.message_box`, aufgerufen in `_abort`.
 
     Kein Eingabekanal, geschlossener Eingabekanal oder ein Abbruch durch den
     Nutzer beenden das Warten still. Ein Fehler beim Anzeigen eines Fehlers
