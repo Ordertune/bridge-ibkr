@@ -949,10 +949,9 @@ def _archiv_fuellungen(
     """
     if not export_dir or report_store is None or not konto:
         return []
+    seit = report_store.seit_tag()
     try:
-        lesung = trade_reports.lies_archiv(
-            export_dir, konto, seit_tag=report_store.seit_tag()
-        )
+        lesung = trade_reports.lies_archiv(export_dir, konto, seit_tag=seit)
     except Exception as exc:  # pragma: no cover - defensiv
         log.warning("Could not read the TWS trade reports: %s", exc)
         return []
@@ -989,12 +988,22 @@ def _archiv_fuellungen(
         )
 
     report_store.vermerken(lesung.neuester_dateitag)
-    if lesung.fuellungen:
-        log.debug(
-            "TWS trade reports: %s execution(s) from %s file(s).",
-            len(lesung.fuellungen),
-            lesung.gelesene_dateien,
-        )
+
+    # Diese Zeile stand bis 0.25.1 auf DEBUG — und damit unsichtbar, weil das
+    # Standard-Protokoll auf INFO laeuft. Am 23.09. hat genau das eine Stunde
+    # gekostet: das Protokoll belegte, wie viele FREMDE Zeilen gefunden wurden,
+    # und schwieg darueber, wie viele eigene. Ob der Leser nichts fand oder der
+    # Abgleich nichts damit anfing, war von aussen nicht zu unterscheiden.
+    #
+    # Eine Null ist hier die wichtigere Zahl als jede andere: sie heisst, dass
+    # in diesem Archiv nichts liegt, was der Bridge gehoert.
+    log.info(
+        "TWS trade reports: %s of our execution(s) in %s file(s), read from "
+        "day %s onward.",
+        len(lesung.fuellungen),
+        lesung.gelesene_dateien,
+        seit,
+    )
     return list(lesung.fuellungen)
 
 
