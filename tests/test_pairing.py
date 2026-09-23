@@ -160,13 +160,23 @@ def test_a_missing_file_is_written_complete(tmp_path: Path) -> None:
         "ORDERTUNE_API_BASE",
         "ORDERTUNE_BRIDGE_TOKEN",
         "ORDERTUNE_BRIDGE_CONNECTION_ID",
-        "IBKR_GATEWAY_HOST",
-        "IBKR_GATEWAY_PORT",
+        # T1-214: eine frisch geschriebene Datei traegt die TWS-Schreibweise.
+        # Die alte bleibt gueltig, wird aber nicht mehr erzeugt — sonst legte
+        # jede neue Installation wieder den Namen an, den wir loswerden wollen.
+        "IBKR_TWS_HOST",
+        "IBKR_TWS_PORT",
         "IBKR_CLIENT_ID",
         "LOG_LEVEL",
     ):
         assert schluessel in werte, schluessel
     assert werte["ORDERTUNE_BRIDGE_TOKEN"] == "tok"
+    assert "IBKR_GATEWAY_PORT" not in werte, (
+        "Die alte Schreibweise wird gelesen, aber nicht mehr geschrieben."
+    )
+    assert "IB Gateway" in p.read_text(encoding="utf-8"), (
+        "Der Kopf sagt, WARUM es die TWS sein muss — das ist die Begruendung "
+        "aus T1-207 und nicht ein Angebot."
+    )
 
 
 # ── Der Vorgang ──────────────────────────────────────────────────────────────

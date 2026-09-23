@@ -557,6 +557,13 @@ function exportBroken(s) {
   return s.trade_export && s.trade_export !== "ok" && s.trade_export !== "unknown";
 }
 
+// T1-214: die Bridge haengt an einem IB Gateway statt an der TWS. Kein
+// Ausfall - der Handel laeuft. Es erklaert aber, WARUM die Berichte fehlen,
+// und steht deshalb vor dem Export-Befund.
+function gatewayInstead(s) {
+  return !!s.gateway_instead_of_tws;
+}
+
 function verdict(s) {
   if (s.failure_headline) return [s.failure_headline, "bad"];
   if (!s.tws_connected) return ["Not connected to TWS", "bad"];
@@ -567,6 +574,11 @@ function verdict(s) {
   if (s.write_access === "read_only_suspected")
     return ["TWS did not answer the open-orders request. Orders may be rejected.", "warn"];
   if (!s.ordertune_ok) return ["Not reporting to Ordertune", "warn"];
+  // T1-214 vor T1-207: wer auf dem Gateway sitzt, bekommt die URSACHE genannt
+  // und nicht ihre Folge. "Export nicht gefunden" schickt ihn sonst in eine
+  // Einstellung, die es auf seinem Programm gar nicht gibt.
+  if (gatewayInstead(s))
+    return ["Running on IB Gateway - fills cannot be recovered", "warn"];
   // T1-207: zuletzt, damit es nie eine schwerere Stoerung verdeckt. Es ist
   // kein Ausfall - es heisst, dass eine Fuellung waehrend einer Auszeit der
   // Bridge nicht mehr nachgetragen werden kann.
@@ -613,7 +625,10 @@ function renderCard(s) {
   const card = q("card");
   const readOnly = s.write_access === "read_only_confirmed";
   const exportKaputt = exportBroken(s);
-  if (!s.failure_headline && !readOnly && !exportKaputt) { card.hidden = true; return; }
+  const gateway = gatewayInstead(s);
+  if (!s.failure_headline && !readOnly && !exportKaputt && !gateway) {
+    card.hidden = true; return;
+  }
   card.hidden = false;
   if (s.failure_headline) {
     q("card-title").textContent = s.failure_headline;
@@ -628,6 +643,22 @@ function renderCard(s) {
       + "In TWS: File -> Global Configuration -> API -> Settings.\\n"
       + "Turn OFF 'Read-Only API', then restart TWS.\\n"
       + "TWS may also be showing a dialog box that nobody sees on a VPS.";
+  } else if (gateway) {
+    // T1-214. Vor dem Export-Befund, weil es dessen Ursache ist.
+    q("card-title").textContent =
+      "You are running IB Gateway. Ordertune Bridge needs TWS.";
+    q("card-detail").textContent =
+      "The Bridge reads the trade reports that TWS writes to disk. That file is\\n"
+      + "what lets a fill be recovered when the Bridge was off at the moment it\\n"
+      + "happened - the reason you no longer have to keep the Bridge open until\\n"
+      + "the closing bell.\\n\\n"
+      + "IB Gateway has no export function: its configuration tree ends before\\n"
+      + "'Export Reports'. Everything else works, this one thing cannot.";
+    q("card-action").textContent =
+      "Install Trader Workstation, log in with the same account, and set\\n"
+      + "Global Configuration -> Export Reports (leave 'Export filename' empty).\\n\\n"
+      + "Until you do, the Bridge keeps trading - you are missing the recovery,\\n"
+      + "not the execution.";
   } else {
     // T1-207. Der Text kommt aus der Bridge, nicht von hier: er benennt, WELCHE
     // Bedingung fehlt, und diese Flaeche soll ihn nicht zu "something is wrong"
@@ -745,7 +776,7 @@ function loadConfig() {
     const sel = q("f-portsel");
     sel.innerHTML = "<option value=''>custom</option>" + (c.ports || []).map(p =>
       "<option value='" + p.port + "'>" + p.port + " - " + esc(p.label) + "</option>").join("");
-    q("f-port").value = v.IBKR_GATEWAY_PORT || "7497";
+    q("f-port").value = v.IBKR_TWS_PORT || v.IBKR_GATEWAY_PORT || "7497";
     sel.value = (c.ports || []).some(p => String(p.port) === q("f-port").value)
       ? q("f-port").value : "";
     q("f-cid").value = v.IBKR_CLIENT_ID || "17";
@@ -773,7 +804,7 @@ q("f-probe").addEventListener("click", () => {
 });
 q("f-save").addEventListener("click", () => {
   post("/settings", {baseline: baseline, changes: {
-    IBKR_GATEWAY_PORT: q("f-port").value,
+    IBKR_TWS_PORT: q("f-port").value,
     IBKR_CLIENT_ID: q("f-cid").value,
     LOG_LEVEL: q("f-log").value,
     UPDATE_CHECK_ENABLED: q("f-upd").checked ? "true" : "false",
@@ -878,7 +909,7 @@ q("s2").addEventListener("click", () => {
     const gefunden = r.answering || [];
     note("s2msg", {ok: gefunden.length > 0, message: gefunden.length
       ? "Found " + gefunden.length + " answering port(s)."
-      : "Nothing answers. Start TWS or IB Gateway and log in."});
+      : "Nothing answers. Start TWS and log in."});
     q("s2ports").innerHTML = gefunden.map(a =>
       "<p>" + a.port + " - " + esc(a.label)
       + " <button class='action' onclick=\\"takePort(" + a.port + ")\\">Use this</button></p>"
@@ -886,12 +917,12 @@ q("s2").addEventListener("click", () => {
   });
 });
 function takePort(port) {
-  post("/settings", {baseline: "", changes: {IBKR_GATEWAY_PORT: String(port)}})
+  post("/settings", {baseline: "", changes: {IBKR_TWS_PORT: String(port)}})
     .then(r => note("s2msg", r));
 }
 q("s3").addEventListener("click", () => {
   fetch(withToken("/config")).then(r => r.json()).then(c =>
-    post("/probe", {port: (c.values || {}).IBKR_GATEWAY_PORT || 7497})
+    post("/probe", {port: (c.values || {}).IBKR_TWS_PORT || (c.values || {}).IBKR_GATEWAY_PORT || 7497})
   ).then(r => note("s3msg", r));
 });
 q("s4").addEventListener("click", () => {

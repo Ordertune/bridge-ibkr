@@ -17,7 +17,7 @@ Empfehlung: mindestens 2 vCPU, 4 GB RAM, 40 GB SSD. Standort Frankfurt oder Amst
    - **Ausgehend**: HTTPS zu `t1.ordertune.com` (443), IBKR-Server (typisch 4001/4002)
    - **Arbeitsspeicher**: mindestens 4 GB. Die Bridge verlangt seit 0.25.0 die TWS, und
      die braucht deutlich mehr als das frühere IB Gateway — siehe
-     [SETUP_TWS_GATEWAY.md](SETUP_TWS_GATEWAY.md)
+     [SETUP_TWS.md](SETUP_TWS.md)
    - **Eingehend**: nur RDP (3389) für Admin-Zugang, sonst zu
 5. Optional: TeamViewer oder AnyDesk statt RDP für bequemeren Remote-Zugang
 

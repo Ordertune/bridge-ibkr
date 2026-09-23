@@ -2,14 +2,26 @@
 
 ## Warum
 
-`IBKR_GATEWAY_PORT` ist in der erzeugten `bridge.env` fest auf 7497 vorbelegt.
-Der richtige Wert steht in den API-Einstellungen von TWS und **folgt nicht aus
-dem Kontotyp** — wer IB Gateway benutzt oder Echtgeld handelt, muss die Zeile
-aendern und weiss das nicht. Ein Verbindungsfehler sagt dann nur, dass nichts
-antwortet, und nicht, dass daneben sehr wohl etwas antwortet.
+`IBKR_TWS_PORT` ist in der erzeugten `bridge.env` fest auf 7497 vorbelegt. Der
+richtige Wert steht in den API-Einstellungen der TWS und **folgt nicht aus dem
+Kontotyp** — wer Echtgeld handelt, muss die Zeile aendern und weiss das nicht.
+Ein Verbindungsfehler sagt dann nur, dass nichts antwortet, und nicht, dass
+daneben sehr wohl etwas antwortet.
 
-Diese Sonde klopft die vier IBKR-Standardports ab und macht aus der Frage „warum
+Diese Sonde klopft die IBKR-Standardports ab und macht aus der Frage „warum
 geht es nicht" eine Aussage mit zwei Zahlen darin.
+
+## T1-214 — zwei Listen, und der Unterschied ist die ganze Spec
+
+Seit T1-207 wird die Bridge **mit der TWS** betrieben: das IB Gateway hat keine
+Berichtsfunktion, und ohne sie gibt es keinen Ausfallschutz. Angeboten werden
+deshalb nur noch die TWS-Ports (`TWS_PORTS`, und `KNOWN_PORTS` ist genau das).
+
+Die Gateway-Ports verschwinden trotzdem **nicht** aus der Suche. Sie wandern in
+`GATEWAY_PORTS` und werden weiter abgeklopft — aber um zu **erklaeren**, nicht
+um vorgeschlagen zu werden. Wer heute auf dem Gateway laeuft, soll erfahren,
+was ihm fehlt; ihn einfach nichts mehr finden zu lassen waere ein Riegel, der
+den Kunden haerter trifft als das Problem.
 
 ## Was sie tut, und was ausdruecklich nicht
 
@@ -28,16 +40,27 @@ import socket
 
 log = logging.getLogger(__name__)
 
-# Die vier Standardports von IBKR, je mit der Beschriftung, die der Nutzer in
-# TWS wiedererkennt. Gegenstueck auf der Plattform: `tws-setup-shared.ts`
-# (`BRIDGE_SOCKET_PORTS`). Zwei bewusste Kopien ueber eine Repo-Grenze hinweg,
-# jede an genau einer Stelle — siehe T1-101 Tech Design E-7.
-KNOWN_PORTS: tuple[tuple[int, str], ...] = (
+# Die Ports, die wir ANBIETEN. Beschriftet so, wie der Nutzer sie in der TWS
+# wiedererkennt.
+TWS_PORTS: tuple[tuple[int, str], ...] = (
     (7497, "TWS paper"),
     (7496, "TWS live"),
+)
+
+# Die Ports, die wir nur noch ERKENNEN — siehe Kopf. Sie stehen in keiner
+# Auswahl und in keinem Vorschlag.
+GATEWAY_PORTS: tuple[tuple[int, str], ...] = (
     (4002, "IB Gateway paper"),
     (4001, "IB Gateway live"),
 )
+
+# Was der Nutzer angeboten bekommt. Gegenstueck auf der Plattform:
+# `tws-setup-shared.ts`. Seit T1-214 fuehrt die Plattform gar keine Portliste
+# mehr — die lebende Anleitung steht auf docs.ordertune.com (DOCS-9).
+KNOWN_PORTS: tuple[tuple[int, str], ...] = TWS_PORTS
+
+# Was abgeklopft wird. Die Reihenfolge ist die Aussage: was wir anbieten zuerst.
+SCANNED_PORTS: tuple[tuple[int, str], ...] = TWS_PORTS + GATEWAY_PORTS
 
 # Auf der Rueckschleife antwortet ein offener Port praktisch sofort. Eine halbe
 # Sekunde je Port haelt die gesamte Suche unter zwei Sekunden — sie laeuft auf
@@ -64,8 +87,24 @@ def scan(host: str, timeout: float = PROBE_TIMEOUT_S) -> tuple[tuple[int, str], 
     """
     found = tuple(
         (port, label)
-        for port, label in KNOWN_PORTS
+        for port, label in SCANNED_PORTS
         if port_answers(host, port, timeout)
     )
     log.debug("port probe on %s: %s", host, found or "nothing answered")
     return found
+
+
+def nur_gateway(gefunden: tuple[tuple[int, str], ...]) -> bool:
+    """T1-214 — antwortet ein Gateway und sonst nichts?
+
+    Genau dieser Zustand verlangt eine eigene Auskunft: der Kunde hat etwas
+    Laufendes vor sich, es funktioniert sogar, und trotzdem fehlt ihm der
+    Ausfallschutz aus T1-207. Ihm nur „nichts gefunden" zu sagen waere falsch,
+    ihm „falscher Port" zu sagen waere die halbe Wahrheit.
+
+    Leer heisst `False` — ohne Antwort gibt es nichts zu erklaeren.
+    """
+    if not gefunden:
+        return False
+    gateway = {p for p, _ in GATEWAY_PORTS}
+    return all(p in gateway for p, _ in gefunden)

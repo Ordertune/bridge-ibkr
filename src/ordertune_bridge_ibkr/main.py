@@ -1970,6 +1970,7 @@ def start_cockpit(
     log_file: Path | None,
     session_connected_at: datetime,
     write_access: Any,
+    gateway_instead_of_tws: bool = False,
 ) -> Any | None:
     """Startet das Cockpit — ausser unter `--headless`."""
     if console.headless_requested(argv):
@@ -1992,6 +1993,10 @@ def start_cockpit(
                 session_connected_at=session_connected_at.isoformat(),
                 write_access=write_access.state,
                 write_access_detail=write_access.detail,
+                # T1-214 — der Hinweis gehoert auf die Flaeche und nicht nur
+                # ins Protokoll. Ohne Konsole (T1-213) liest das Protokoll
+                # ohnehin niemand im Vorbeigehen.
+                gateway_instead_of_tws=gateway_instead_of_tws,
             )
         )
         from .cockpit import journal as journal_mod
@@ -2508,10 +2513,29 @@ def main() -> int:
     log.info("Hardware fingerprint: %s...", fingerprint[:16])
 
     ibkr = IbkrClient(
-        host=config.ibkr_gateway_host,
-        port=config.ibkr_gateway_port,
+        host=config.ibkr_tws_host,
+        port=config.ibkr_tws_port,
         client_id=config.ibkr_client_id,
     )
+
+    # T1-214 — laeuft die Bridge an einem IB Gateway?
+    #
+    # Entschieden am eingetragenen Port, nicht an einer Nachfrage: die IBKR-API
+    # verraet nicht, welches der beiden Programme am anderen Ende sitzt. Der
+    # Port ist der beste verfuegbare Anhaltspunkt und eine reine Ableitung.
+    #
+    # Das hier ist ein HINWEIS und keine Sperre. Wer heute auf dem Gateway
+    # handelt, handelt morgen weiter; ihm fehlt der Ausfallschutz, nicht die
+    # Ausfuehrung. Ein Riegel, der den Kunden haerter trifft als das Problem,
+    # ist keine Verbesserung.
+    auf_gateway = config.ibkr_tws_port in {p for p, _ in port_probe.GATEWAY_PORTS}
+    if auf_gateway:
+        log.warning(
+            "%s Port %d is an IB Gateway port. Trading works; recovering a fill "
+            "that happened while the Bridge was off does not.",
+            failures.GATEWAY_HEADLINE,
+            config.ibkr_tws_port,
+        )
     try:
         ibkr.connect()
         # T1-98: der Zeitpunkt, ab dem diese Sitzung die Ereignisse von IBKR
@@ -2521,18 +2545,22 @@ def main() -> int:
     except Exception as exc:
         # T1-101 A-3: die Portsuche laeuft ausschliesslich hier — im
         # Normalbetrieb wird kein zusaetzlicher Socket geoeffnet.
-        answering = port_probe.scan(config.ibkr_gateway_host)
-        return _abort(
-            failures.classify_connect_error(
-                config.ibkr_gateway_host,
-                config.ibkr_gateway_port,
+        answering = port_probe.scan(config.ibkr_tws_host)
+        # T1-214 — antwortet ausschliesslich ein Gateway, ist „falscher Port"
+        # die halbe Wahrheit. Der Kunde hat etwas Laufendes vor sich; was ihm
+        # fehlt, ist die Berichtsfunktion, und die gibt es dort nicht.
+        stoerung = (
+            failures.gateway_statt_tws(config.ibkr_tws_port, answering)
+            if port_probe.nur_gateway(answering)
+            else failures.classify_connect_error(
+                config.ibkr_tws_host,
+                config.ibkr_tws_port,
                 exc,
                 answering,
                 config.ibkr_client_id,
-            ),
-            log_file,
-            argv,
+            )
         )
+        return _abort(stoerung, log_file, argv)
 
     # T1-94-Sonde: nur lesen, nichts absenden, dann beenden. Steht hier und
     # nicht frueher, weil sie die Verbindung braucht — und hier, weil ab der
@@ -2674,6 +2702,7 @@ def main() -> int:
         log_file=log_file,
         session_connected_at=session_connected_at,
         write_access=ibkr.write_access(),
+        gateway_instead_of_tws=auf_gateway,
     )
     # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
     # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und

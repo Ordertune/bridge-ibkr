@@ -69,16 +69,71 @@ def test_the_token_value_is_never_printed() -> None:
     assert f"<{len(secret)} characters>" in rendered
 
 
-def test_the_field_is_named_the_way_it_appears_in_the_file() -> None:
-    exc = _validation_error(
-        ordertune_bridge_token="x" * 40,
-        ordertune_bridge_connection_id="c0ffee",
-        ibkr_gateway_port="not-a-number",
+def _fehler_aus_datei(tmp_path, zeilen: str) -> ValidationError:
+    """Ein Pydantic-Fehler aus einer ECHTEN Datei.
+
+    T1-214: seit der Port zwei Schreibweisen hat (`IBKR_TWS_PORT` und das alte
+    `IBKR_GATEWAY_PORT`), liest Pydantic ihn ueber einen `validation_alias`.
+    Ein Schluesselwort-Argument mit dem Feldnamen erreicht ihn dann nicht mehr
+    — und ein Test, der den Wert gar nicht erst zustellt, prueft nichts.
+    """
+    f = tmp_path / "bridge.env"
+    f.write_text(
+        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
+        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n" + zeilen,
+        encoding="utf-8",
     )
-    rendered = failures.render(
-        failures.classify_config_error(exc, "bridge.env", env_exists=True)
+    with pytest.raises(ValidationError) as caught:
+        BridgeConfig(_env_file=str(f))  # type: ignore[call-arg]
+    return caught.value
+
+
+def test_the_field_is_named_the_way_it_appears_in_the_file(tmp_path) -> None:
+    """Der Name im Block ist der Name, den der Nutzer wirklich geschrieben hat.
+
+    Beide Schreibweisen, beide Male die eigene: wer `IBKR_TWS_PORT` in der Datei
+    stehen hat, darf nicht angewiesen werden, `IBKR_GATEWAY_PORT` zu suchen —
+    und umgekehrt genauso.
+    """
+    for zeile, erwartet in (
+        ("IBKR_TWS_PORT=not-a-number\n", "IBKR_TWS_PORT"),
+        ("IBKR_GATEWAY_PORT=not-a-number\n", "IBKR_GATEWAY_PORT"),
+    ):
+        exc = _fehler_aus_datei(tmp_path, zeile)
+        rendered = failures.render(
+            failures.classify_config_error(exc, "bridge.env", env_exists=True)
+        )
+        assert erwartet in rendered, rendered
+
+
+def test_both_spellings_of_the_port_are_accepted(tmp_path) -> None:
+    """T1-214 C-2/C-3 — die alte Schreibweise bleibt unbefristet gueltig.
+
+    Jede ausgelieferte `bridge.env` traegt sie. Eine Installation durch eine
+    Umbenennung stehenzulassen waere ein schlechterer Ausgang als ein Feldname,
+    der an eine alte Entscheidung erinnert.
+    """
+    kopf = (
+        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
+        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n"
     )
-    assert "IBKR_GATEWAY_PORT" in rendered
+
+    def lade(zeilen: str) -> BridgeConfig:
+        f = tmp_path / "b.env"
+        f.write_text(kopf + zeilen, encoding="utf-8")
+        return BridgeConfig(_env_file=str(f))  # type: ignore[call-arg]
+
+    assert lade("IBKR_GATEWAY_PORT=7496\n").ibkr_tws_port == 7496
+    assert lade("IBKR_TWS_PORT=7496\n").ibkr_tws_port == 7496
+    assert lade("IBKR_GATEWAY_HOST=1.2.3.4\n").ibkr_tws_host == "1.2.3.4"
+    assert lade("IBKR_TWS_HOST=1.2.3.4\n").ibkr_tws_host == "1.2.3.4"
+
+    beide = lade("IBKR_GATEWAY_PORT=7496\nIBKR_TWS_PORT=7497\n")
+    assert beide.ibkr_tws_port == 7497, "Stehen beide da, gewinnt die neue."
+
+    # Der alte Feldname bleibt als Lesezugriff, damit nichts im Baum zweimal
+    # umgestellt werden muss — dieselbe Zahl, keine zweite Quelle.
+    assert beide.ibkr_gateway_port == beide.ibkr_tws_port
 
 
 # ── TWS / Gateway ────────────────────────────────────────────────────────────

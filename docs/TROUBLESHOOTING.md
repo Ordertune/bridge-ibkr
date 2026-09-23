@@ -5,13 +5,13 @@
 Fehlende oder ungültige Felder. Prüfen Sie:
 - `ORDERTUNE_BRIDGE_TOKEN` ist mindestens 32 Zeichen lang
 - `ORDERTUNE_BRIDGE_CONNECTION_ID` ist gesetzt (aus dem Setup-Wizard kopiert)
-- `IBKR_GATEWAY_PORT` ist eine gültige Portnummer
+- `IBKR_TWS_PORT` ist eine gültige Portnummer (die alte Schreibweise `IBKR_GATEWAY_PORT` wird weiterhin gelesen)
 
-## `Failed to connect to IBKR TWS/Gateway`
+## `Failed to connect to IBKR TWS`
 
-- TWS oder Gateway ist nicht gestartet, oder auf einem anderen Port
-- API in TWS/Gateway-Settings nicht aktiviert
-- Socket-Port stimmt nicht überein (7497 Paper / 7496 Live Gateway)
+- TWS ist nicht gestartet, oder lauscht auf einem anderen Port
+- API in den TWS-Settings nicht aktiviert
+- Socket-Port stimmt nicht überein (TWS: 7497 Paper / 7496 Live)
 - Trusted-IP `127.0.0.1` nicht in der TWS-Whitelist
 
 ## `Handshake failed: 409 fingerprint_already_set`
@@ -56,7 +56,7 @@ Zeitueberlauf — im Log als `account updates for U... request timed out` —,
 meldete sie ein leeres Depot bei vollem Konto. Am 2026-08-18 wurden daraufhin
 zwei echte Positionen als extern verkauft gebucht.
 
-Abhilfe: TWS oder Gateway neu starten und pruefen, dass die API-Einstellungen
+Abhilfe: TWS neu starten und pruefen, dass die API-Einstellungen
 Lese-Zugriff auf Konto und Positionen erlauben. Haelt es an, bitte die letzten
 200 Zeilen des Logs an den Support schicken.
 

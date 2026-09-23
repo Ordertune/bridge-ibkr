@@ -168,7 +168,7 @@ def classify_config_error(
     )
 
 
-# ── IBKR TWS / Gateway ───────────────────────────────────────────────────────
+# ── IBKR TWS ─────────────────────────────────────────────────────────────────
 
 
 def classify_connect_error(
@@ -206,11 +206,10 @@ def classify_connect_error(
                 "  - Client id "
                 + (f"{client_id} is " if client_id is not None else "is ")
                 + "already used by another API connection",
-                "    to the same TWS or Gateway.",
+                "    to the same TWS.",
             ),
             action=(
                 "In TWS: File -> Global Configuration -> API -> Settings.",
-                "In IB Gateway: Configure -> Settings -> API.",
                 "Enable 'ActiveX and Socket Clients', keep 'Read-Only API' off,",
                 "and allow 127.0.0.1 as a trusted IP. Restart TWS afterwards.",
                 "",
@@ -225,7 +224,7 @@ def classify_connect_error(
             code="tws_wrong_port",
             headline=f"Nothing answers on port {port}, but something does elsewhere.",
             detail=(
-                f"  bridge.env says:  IBKR_GATEWAY_PORT={port}",
+                f"  bridge.env says:  IBKR_TWS_PORT={port}",
                 f"  Answering ports:  {listed}",
                 "",
                 "  An open port is not proof that TWS is behind it, but on this",
@@ -233,30 +232,71 @@ def classify_connect_error(
             ),
             action=(
                 "Check the socket port in TWS (File -> Global Configuration ->",
-                "API -> Settings) and set IBKR_GATEWAY_PORT in bridge.env to",
+                "API -> Settings) and set IBKR_TWS_PORT in bridge.env to",
                 "that number.",
                 "",
-                "IBKR defaults: TWS 7497 paper / 7496 live,",
-                "               IB Gateway 4002 paper / 4001 live.",
+                "IBKR defaults: TWS 7497 paper / 7496 live.",
                 "The port is a setting -- it does not follow from the account.",
             ),
         )
 
     return Failure(
         code="tws_unreachable",
-        headline=f"No connection to TWS or IB Gateway at {host}:{port}.",
+        headline=f"No connection to TWS at {host}:{port}.",
         detail=(
             f"  {exc}",
             "",
-            "  None of the four IBKR default ports answered on this machine,",
-            "  so TWS or IB Gateway is most likely not running.",
+            "  None of the IBKR default ports answered on this machine,",
+            "  so TWS is most likely not running.",
         ),
         action=(
-            "Start TWS or IB Gateway and log in, then start the Bridge again.",
+            "Start TWS and log in, then start the Bridge again.",
             "",
             "Note that IBKR logs TWS out daily around 05:00 CET. For unattended",
             "operation use IBC so it logs back in automatically.",
         ),
+    )
+
+
+# T1-214 — der Kunde sitzt auf einem IB Gateway.
+#
+# Ein eigener Text, weil der Zustand ein eigener ist: es laeuft etwas, es
+# funktioniert sogar, und trotzdem fehlt der Ausfallschutz. „Nichts gefunden"
+# waere falsch, „falscher Port" waere die halbe Wahrheit.
+GATEWAY_HEADLINE = "You are running IB Gateway. Ordertune Bridge needs TWS."
+
+GATEWAY_DETAIL: tuple[str, ...] = (
+    "  The Bridge reads the trade reports that TWS writes to disk. That file",
+    "  is what lets a fill be recovered when the Bridge was off at the moment",
+    "  it happened -- the reason you no longer have to keep the Bridge open",
+    "  until the closing bell.",
+    "",
+    "  IB Gateway has no export function: its configuration tree ends before",
+    "  'Export Reports'. Everything else works, this one thing cannot.",
+)
+
+GATEWAY_ACTION: tuple[str, ...] = (
+    "Install Trader Workstation, log in with the same account, and set",
+    "Global Configuration -> Export Reports (leave 'Export filename' empty).",
+    "",
+    "Until you do, the Bridge keeps trading -- you are missing the recovery,",
+    "not the execution.",
+)
+
+
+def gateway_statt_tws(port: int, answering: tuple[tuple[int, str], ...]) -> Failure:
+    """Die Auskunft fuer ein erkanntes Gateway. **Kein Abbruch.**
+
+    Ein Riegel waere hier die falsche Antwort: wer heute laeuft, soll
+    weiterlaufen. Er bekommt einen Hinweis, keine Sperre — ein Riegel, der den
+    Kunden haerter trifft als das Problem, ist keine Verbesserung.
+    """
+    listed = ", ".join(f"{p} ({label})" for p, label in answering)
+    return Failure(
+        code="gateway_not_tws",
+        headline=GATEWAY_HEADLINE,
+        detail=(f"  Answering ports:  {listed}", "", *GATEWAY_DETAIL),
+        action=GATEWAY_ACTION,
     )
 
 

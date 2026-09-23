@@ -41,7 +41,7 @@ Verifizieren:
 Test-NetConnection -ComputerName 127.0.0.1 -Port 7497
 ```
 
-Der Port in `bridge.env` (`IBKR_GATEWAY_PORT`) muss mit dem hier eingestellten
+Der Port in `bridge.env` (`IBKR_TWS_PORT`; die alte Schreibweise `IBKR_GATEWAY_PORT` bleibt gültig) muss mit dem hier eingestellten
 übereinstimmen. Stimmen sie nicht überein, läuft die Bridge in einen
 Verbindungs-Timeout — die Meldung sagt nicht, welche der beiden Zahlen falsch
 ist.
@@ -160,7 +160,7 @@ er ein Setup-Schritt und keine Funktion.
 - **Live**: echte Trades mit echtem Geld. Port 7496
 
 ```
-IBKR_GATEWAY_PORT=7497
+IBKR_TWS_PORT=7497
 IBKR_TRADING_MODE=paper
 ```
 
