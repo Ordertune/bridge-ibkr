@@ -28,18 +28,25 @@ def test_the_page_has_a_stop_button_where_actions_live() -> None:
     assert "Stop the Bridge" in seite
     # AC-A2: er fragt zurueck.
     assert "confirm(" in seite.split('q("stop").onclick', 1)[1][:400]
-    # AC-A3, Owner-Befund 2026-09-23: er steht auf der STARTSEITE.
+    # AC-A3, Owner-Befund 2026-09-23 — in drei Fassungen gewandert:
     #
-    # Zuerst lag er unter „Details", mit der Begruendung „was berichtet, und
-    # was handelt, sind zwei verschiedene Dinge". Das Ordnungsprinzip stimmt,
-    # die Folge war trotzdem falsch: der Owner hat ihn als „etwas unglueglich
-    # versteckt" gefunden. Die einzige Handlung, die ein Kunde an dieser
-    # Anwendung ueberhaupt vornimmt, gehoert auf die Seite, die er sieht.
-    assert "<h2>Stop</h2>" in seite
-    status = seite.split('<div id="pane-status">', 1)[1].split('<div id="pane-settings"', 1)[0]
-    assert 'id="stop"' in status, "Der Knopf gehoert auf die Startseite."
-    details = seite.split('<div id="pane-details"', 1)[1]
-    assert 'id="stop"' not in details, "Und nicht zusaetzlich unter Details."
+    #   1. unter „Details", nach dem Prinzip „was berichtet und was handelt,
+    #      sind zwei verschiedene Dinge". Urteil des Owners: versteckt.
+    #   2. unten auf der Startseite. Immer noch zu suchen.
+    #   3. im KOPF, rechts aussen auf Hoehe der Statuspillen.
+    #
+    # Das Prinzip aus (1) stimmt weiterhin — es steht jetzt im Abstand statt im
+    # Reiter: der Knopf sitzt in derselben Zeile wie die Pillen, aber nicht in
+    # ihrer Reihe. Wer beides verwechselt, klickt aus Versehen.
+    kopf = seite.split('<div class="statusline">', 1)[1].split("</div>\n\n", 1)[0]
+    assert 'id="stop"' in kopf, "Der Knopf gehoert in den Kopfbereich."
+    assert 'class="stopbox"' in kopf, (
+        "Und in eine eigene Gruppe — nicht als fuenfte Statuspille."
+    )
+    assert "chips" in kopf, "Auf derselben Zeile wie die Pillen."
+    for reiter in ('<div id="pane-details"', '<div id="pane-settings"'):
+        rest = seite.split(reiter, 1)[1]
+        assert 'id="stop"' not in rest, f"Nicht zusaetzlich in {reiter}."
 
 
 def test_the_surface_stops_claiming_connected() -> None:

@@ -178,6 +178,14 @@ header .ver { margin-left: auto; font-size: 12px; color: var(--fg-3);
                        border-top: 1px solid rgba(255,255,255,0.12); }
 
 /* ── Statuspunkte: Lime oder idle. Die Bedeutung traegt das Wort. ──── */
+/* T1-223: Urteil, Pillen und der Knopf in einer Zeile. Der Abstand zwischen
+   Pillen und Knopf ist die Aussage — er trennt das, was berichtet, von dem,
+   was handelt. Auf schmalen Fenstern bricht der Knopf unter die Pillen, statt
+   sie zu quetschen. */
+.statusline { display: flex; align-items: flex-start; justify-content: space-between;
+              gap: 24px; flex-wrap: wrap; margin-bottom: 44px; }
+.statusline .chips { margin-bottom: 0; }
+.stopbox { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 44px; }
 .chip { display: inline-flex; align-items: center; gap: 8px;
         padding: 6px 14px 6px 12px; background: var(--surface);
@@ -335,11 +343,25 @@ summary:hover { color: var(--fg-1); }
   </div>
 
   <p class="verdict" id="verdict">Connecting...</p>
-  <div class="chips">
-    <span class="chip"><span class="dot" id="d-tws"></span><span id="l-tws">TWS</span></span>
-    <span class="chip"><span class="dot" id="d-ot"></span><span id="l-ot">Ordertune</span></span>
-    <span class="chip"><span class="dot" id="d-acct"></span><span id="l-acct">Account</span></span>
-    <span class="chip"><span class="dot" id="d-write"></span><span id="l-write">Order access</span></span>
+  <!-- T1-223, Owner-Befund 2026-09-23 (dritte Fassung dieses Knopfes).
+       Erst unter "Details" — versteckt. Dann unten auf der Startseite — immer
+       noch zu suchen. Jetzt hier: auf Augenhoehe mit dem Urteil, rechts
+       aussen, wo das Auge nach dem Lesen der Ueberschrift ohnehin ankommt.
+       Er sitzt in derselben Zeile wie die Statuspillen, aber NICHT in ihrer
+       Reihe: die Pillen berichten, der Knopf handelt, und wer das verwechselt,
+       klickt aus Versehen. Deshalb eine eigene Gruppe mit Abstand, nicht die
+       fuenfte Pille. -->
+  <div class="statusline">
+    <div class="chips">
+      <span class="chip"><span class="dot" id="d-tws"></span><span id="l-tws">TWS</span></span>
+      <span class="chip"><span class="dot" id="d-ot"></span><span id="l-ot">Ordertune</span></span>
+      <span class="chip"><span class="dot" id="d-acct"></span><span id="l-acct">Account</span></span>
+      <span class="chip"><span class="dot" id="d-write"></span><span id="l-write">Order access</span></span>
+    </div>
+    <div class="stopbox">
+      <button class="action" id="stop">Stop the Bridge</button>
+      <span id="stopmsg" class="note"></span>
+    </div>
   </div>
 
   <div class="statement" id="card" hidden>
@@ -432,22 +454,6 @@ summary:hover { color: var(--fg-1); }
         <dt>Cash</dt><dd id="cash">-</dd>
         <dt>Equity</dt><dd id="equity">-</dd>
       </dl>
-    </section>
-    <!-- T1-223 — der Weg, die Bridge zu beenden.
-         Owner-Befund 2026-09-23: er stand zuerst unter „Details", und dort
-         hat ihn der Owner als „etwas unglueklich versteckt" bezeichnet. Das
-         Urteil ist richtig, und die Begruendung fuer den alten Ort war es
-         nicht: „was berichtet, und was handelt, sind zwei verschiedene Dinge"
-         ist ein Ordnungsprinzip — aber es hilft niemandem, der ein Programm
-         beenden will, das keinen Eintrag in der Taskleiste hat.
-         Die einzige Handlung, die ein Kunde an dieser Anwendung ueberhaupt
-         vornimmt, gehoert auf die Seite, die er sieht. -->
-    <section>
-      <h2>Stop</h2>
-      <p class="muted">Closing this browser window does not stop the Bridge --
-      the window is a view of it, not the program itself.</p>
-      <p><button class="action" id="stop">Stop the Bridge</button>
-      <span id="stopmsg" class="note"></span></p>
     </section>
     <section>
       <h2>Positions</h2>
