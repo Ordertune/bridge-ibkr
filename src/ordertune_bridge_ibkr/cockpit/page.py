@@ -496,6 +496,18 @@ summary:hover { color: var(--fg-1); }
       <p style="margin-top:1rem"><button class="action" id="copy">Copy diagnostics</button>
       <span id="copied" class="muted"></span></p>
     </section>
+    <!-- T1-223 — der Weg, die Bridge zu beenden.
+         Bis T1-213 schloss der Kunde dafuer das Konsolenfenster. Das gibt es
+         nicht mehr, und uebrig blieb der Task-Manager. Der Knopf steht hier
+         und nicht bei den Statuswerten: was berichtet, und was handelt, sind
+         zwei verschiedene Dinge (AC-A3). -->
+    <section>
+      <h2>Stop</h2>
+      <p class="muted">Closing this browser window does not stop the Bridge --
+      the window is a view of it, not the program itself.</p>
+      <p><button class="action" id="stop">Stop the Bridge</button>
+      <span id="stopmsg" class="note"></span></p>
+    </section>
     <section>
       <h2>Log</h2>
       <pre id="loglines" class="muted">Loading...</pre>
@@ -565,6 +577,9 @@ function gatewayInstead(s) {
 }
 
 function verdict(s) {
+  // T1-223 zuerst: waehrend des Beendens ist „Connected - waiting for releases"
+  // eine Aussage ueber einen Zustand, der gerade endet.
+  if (s.stopping) return ["Stopping - finishing the current tick", "warn"];
   if (s.failure_headline) return [s.failure_headline, "bad"];
   if (!s.tws_connected) return ["Not connected to TWS", "bad"];
   if (heartbeatStale(s))
@@ -768,6 +783,24 @@ function note(id, res) {
   el.className = "note " + (res.ok ? "ok" : "bad");
   return res;
 }
+
+// T1-223 — der Knopf fragt zurueck (AC-A2) und schickt dann einen Wunsch.
+//
+// Was danach geschieht, entscheidet der Kern: er fuehrt seinen laufenden
+// Durchgang zu Ende und raeumt im `finally` auf. Diese Flaeche wartet nicht
+// darauf und behauptet nichts ueber den Ausgang — sie sagt, dass sie gefragt
+// hat.
+q("stop").onclick = () => {
+  if (!confirm("Stop the Bridge?\\n\\nOrders already at the broker stay there. "
+      + "Ordertune will not be able to send new ones until you start it again."))
+    return;
+  q("stop").disabled = true;
+  post("/stop", {}).then(res => note("stopmsg", res)).catch(() => {
+    // Der Vorgang kann waehrend der Antwort schon beendet sein — dann bricht
+    // die Verbindung ab, und genau das war der Zweck. Kein Fehler.
+    note("stopmsg", {ok: true, message: "Stopping the Bridge."});
+  });
+};
 
 function loadConfig() {
   fetch(withToken("/config")).then(r => r.json()).then(c => {

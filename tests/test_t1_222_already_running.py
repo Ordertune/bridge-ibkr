@@ -221,16 +221,21 @@ def test_the_message_does_not_promise_controls_that_do_not_exist() -> None:
 
     if hat_knopf:
         assert "Task Manager" not in text, (
-            "Das Cockpit hat jetzt einen Knopf — die Meldung muss ihn nennen "
-            "statt den Task-Manager."
+            "Das Cockpit hat einen Knopf — die Meldung muss ihn nennen statt "
+            "den Task-Manager."
+        )
+        assert "Stop the Bridge" in text, (
+            "Und sie muss sagen, wo er steht."
         )
     else:
         assert "Task Manager" in text, (
             "Ohne Knopf im Cockpit ist der Task-Manager der einzige wahre Weg."
         )
-        assert "has the controls" not in text, (
-            "Das war das falsche Versprechen vom 2026-09-23."
-        )
+    assert "has the controls" not in text, (
+        "Das war das falsche Versprechen vom 2026-09-23: ein Verweis auf "
+        "Bedienelemente, ohne zu sagen, welche. T1-223 hat sie gebaut — der "
+        "Text nennt sie jetzt beim Namen."
+    )
 
     # Und die Aussage, die der Owner sich erarbeiten musste, steht jetzt da.
     assert "does not stop the Bridge" in text

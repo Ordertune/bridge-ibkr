@@ -247,21 +247,15 @@ def bridge_laeuft_bereits(url: str) -> Failure:
         action=(
             "The running Bridge keeps working -- you do not need to do anything.",
             "",
-            # T1-213, Owner-Befund 2026-09-23: hier stand „close the running
-            # one first (its window has the controls)". Das Cockpit hat KEINE
-            # Bedienelemente zum Beenden — ein Grep nach Stop, Quit oder
-            # Shutdown findet in `page.py` nichts. Der Satz versprach etwas,
-            # das es nicht gibt.
+            # T1-223 — jetzt gibt es den Knopf, und der Text zeigt darauf.
             #
-            # Dahinter liegt eine Folge von T1-213, die beim Entwurf niemand
-            # ausgesprochen hat: bis dahin beendete der Kunde die Bridge, indem
-            # er ihr Konsolenfenster schloss. Das Fenster gibt es nicht mehr,
-            # und ein Ersatz wurde nie gebaut. Der Owner hat es gemessen — er
-            # schloss beide Browserfenster, und der Herzschlag lief weiter.
-            #
-            # Bis es einen Knopf gibt, sagt dieser Text die Wahrheit, so
-            # unbequem sie ist. Die Zusicherung darunter haelt beides zusammen.
-            "To stop it: end ordertune-bridge-ibkr.exe in Task Manager.",
+            # Die Geschichte dieser vier Zeilen ist der Grund, warum die
+            # Zusicherung dazu BEIDE Seiten misst: zuerst stand hier „close
+            # the running one first (its window has the controls)" — ein
+            # Versprechen auf Bedienelemente, die es nicht gab. Dann der
+            # Task-Manager, wahr, aber unbequem. Erst T1-223 hat das gebaut,
+            # was der erste Satz schon behauptet hatte.
+            "To stop it: open its window and use Details -> Stop the Bridge.",
             "",
             "Closing the browser window does not stop the Bridge. The window is",
             "a view of it, not the program itself.",

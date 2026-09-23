@@ -147,6 +147,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._deny()
             return
 
+        # T1-223 — das Beenden haengt NICHT am Assistenten. Es steht vor der
+        # Pruefung auf `setup`, weil es auch dann gelten muss, wenn es keinen
+        # gibt; und es ist absichtlich nur ueber POST erreichbar (AC-C3): ein
+        # vorgeladener Link im Browserverlauf darf keine Bridge beenden.
+        if parsed.path == "/stop":
+            anhalten = self.deps.get("on_stop")
+            if anhalten is None:
+                self.send_error(404)
+                return
+            # Der Server setzt eine Fahne und sonst nichts. Die Verbindung zu
+            # IBKR fasst er nie an — die Richtungsregel aus T1-101, woertlich.
+            anhalten()
+            self._send_json({"ok": True, "message": "Stopping the Bridge."})
+            return
+
         setup = self.deps.get("setup")
         if setup is None:
             self.send_error(404)
@@ -291,11 +306,16 @@ class CockpitServer:
         journal: object | None = None,
         diagnostics: object | None = None,
         setup: object | None = None,
+        on_stop: object | None = None,
     ) -> None:
         self.store = store
         self.journal = journal
         self.diagnostics = diagnostics
         self.setup = setup
+        # T1-223: eine Funktion ohne Argumente, die den Wunsch vermerkt. Mehr
+        # darf der Server nicht koennen — er setzt eine Fahne, der Kern
+        # handelt.
+        self.on_stop = on_stop
         self.token = secrets.token_urlsafe(32)
         self._stopping = threading.Event()
         self._httpd: _QuietServer | None = None
@@ -321,6 +341,7 @@ class CockpitServer:
                     "journal": self.journal,
                     "diagnostics": self.diagnostics,
                     "setup": self.setup,
+                    "on_stop": self.on_stop,
                 },
             },
         )

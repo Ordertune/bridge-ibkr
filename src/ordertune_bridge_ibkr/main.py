@@ -1971,6 +1971,7 @@ def start_cockpit(
     session_connected_at: datetime,
     write_access: Any,
     gateway_instead_of_tws: bool = False,
+    stop_event: Any | None = None,
 ) -> Any | None:
     """Startet das Cockpit — ausser unter `--headless`."""
     if console.headless_requested(argv):
@@ -2027,10 +2028,24 @@ def start_cockpit(
 
         from .cockpit import SetupActions
 
+        def _halten() -> None:
+            """T1-223 — der Knopf. Er setzt eine Fahne und sonst nichts.
+
+            Kein `ibkr.disconnect()`, kein `api.close()`, kein `sys.exit()`.
+            Das Aufraeumen laeuft dort, wo es hingehoert: im `finally` der
+            Schleife, nachdem der laufende Durchgang zu Ende ist — derselbe
+            Grund, aus dem der Signalhandler es seit T1-152d so haelt.
+            """
+            log.info("Stop requested from the cockpit — finishing current tick.")
+            store.update(stopping=True)
+            if stop_event is not None:
+                stop_event.set()
+
         server = CockpitServer(
             store,
             journal=journal,
             diagnostics=diagnostics,
+            on_stop=_halten,
             setup=SetupActions(
                 Path(ENV_FILE).resolve(),
                 store=store,
@@ -2707,8 +2722,6 @@ def main() -> int:
             "it to Ordertune could send that order twice."
         )
 
-    stop = threading.Event()
-
     # Der Handler setzt nur eine Fahne. Frueher rief er `sys.exit(0)` und raeumte
     # gleich selbst auf — mitten in einem Signal, also potenziell mitten in einem
     # laufenden Absendevorgang. Jetzt laeuft das Aufraeumen dort, wo es hingehoert:
@@ -2729,6 +2742,17 @@ def main() -> int:
 
     # T1-101 B-1 — das Cockpit. Beiwerk, und wird auch so behandelt: ein
     # Fehler beim Starten kostet die Anzeige, nie den Handel.
+    # T1-223 — das Halte-Ereignis entsteht VOR dem Cockpit.
+    #
+    # Es gab es schon: `SIGINT`/`SIGTERM` setzen es, und aufgeraeumt wird im
+    # `finally` der Schleife, nachdem der laufende Durchgang zu Ende ist. Der
+    # Knopf im Cockpit erfindet deshalb nichts — er setzt dieselbe Fahne.
+    #
+    # Umgezogen ist nur die Zeile: bis zum 2026-09-23 entstand das Ereignis
+    # erst NACH `start_cockpit`, und dann haette der Server nichts zu setzen
+    # gehabt.
+    stop = threading.Event()
+
     cockpit = start_cockpit(
         argv,
         config=config,
@@ -2738,6 +2762,7 @@ def main() -> int:
         session_connected_at=session_connected_at,
         write_access=ibkr.write_access(),
         gateway_instead_of_tws=auf_gateway,
+        stop_event=stop,
     )
     # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
     # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und
