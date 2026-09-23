@@ -173,17 +173,20 @@ ORDERTUNE_BRIDGE_CONNECTION_ID={connection_id}
 # ----------------------------------------------------------------------------
 # IBKR local socket  (USER EDITABLE)
 # ----------------------------------------------------------------------------
-# The Bridge talks to Trader Workstation (TWS) or IB Gateway over a local
-# socket. It never sends your IBKR credentials anywhere -- TWS/Gateway must be
-# started and logged in separately.
+# The Bridge talks to Trader Workstation (TWS) over a local socket. It never
+# sends your IBKR credentials anywhere -- TWS must be started and logged in
+# separately.
 #
-#   TWS      paper 7497 / live 7496
-#   Gateway  paper 4002 / live 4001
-IBKR_GATEWAY_HOST=127.0.0.1
-IBKR_GATEWAY_PORT={port}
+#   TWS  paper 7497 / live 7496
+#
+# TWS and not IB Gateway: the Bridge reads the trade reports TWS writes to
+# disk, which is what lets a fill be recovered when the Bridge was off at the
+# moment it happened. IB Gateway has no such export function.
+IBKR_TWS_HOST=127.0.0.1
+IBKR_TWS_PORT={port}
 IBKR_TRADING_MODE=paper
 
-# Each program connected to one TWS/Gateway needs a unique id.
+# Each program connected to one TWS needs a unique id.
 IBKR_CLIENT_ID={client_id}
 
 # ----------------------------------------------------------------------------
@@ -209,8 +212,10 @@ def write_credentials(
     **Datei existiert schon** — dann werden NUR die drei Identitaetszeilen
     ersetzt, ueber `env_file.apply_changes`. Alles andere bleibt, wie es ist:
     Port, Client-ID, Protokollstufe, und jeder Kommentar, den der Nutzer
-    hineingeschrieben hat. Wer seinen Gateway-Port auf 4001 gestellt hat, soll
-    ihn nach einer erneuten Kopplung nicht wieder suchen muessen.
+    hineingeschrieben hat. Wer seinen Port auf 7496 gestellt hat, soll ihn nach
+    einer erneuten Kopplung nicht wieder suchen muessen — und wer noch die alte
+    Schreibweise `IBKR_GATEWAY_PORT` in der Datei stehen hat, behaelt sie: sie
+    bleibt unbefristet gueltig (T1-214 C-2).
 
     **Datei existiert nicht** — dann eine frische Vorlage mit den Vorgaben.
 

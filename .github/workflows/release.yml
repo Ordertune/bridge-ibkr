@@ -115,33 +115,93 @@ jobs:
       # proves the program got past its imports and into its own error
       # handling. An ImportError or a bare traceback means we would be
       # publishing a binary that cannot start.
+      # T1-213, 2026-09-23 — dieser Schritt musste umgebaut werden, und das war
+      # der gefaehrlichste Teil des ganzen Vorgangs.
+      #
+      # Bis dahin las er die STANDARDAUSGABE der gestarteten EXE und suchte
+      # darin nach `ImportError`, `Traceback` und der Kennung `env_missing`.
+      # Die EXE wird seit T1-213 fensterlos gebaut und schreibt nichts mehr
+      # dorthin. `$out` waere leer gewesen — und eine Suche in einer leeren
+      # Zeichenkette findet nie etwas. Der Schritt, der jeden Startfehler seit
+      # 0.1.0 gefunden hat, waere still gruen geblieben.
+      #
+      # Geprueft wird jetzt an zwei Dingen, die es weiterhin gibt:
+      #
+      #   1. dem Ausgangscode,
+      #   2. der PROTOKOLLDATEI, die der Lauf hinterlaesst.
+      #
+      # Die Datei wird in jedem Fall geschrieben (`logging_setup`, 30 Tage
+      # Vorhaltung) und liegt unter dem Nutzerprofil (T1-176 B). Sie ist der
+      # einzige Ort, an dem eine fensterlose Anwendung noch spricht.
+      #
+      # `--headless` ist neu und Pflicht: seit T1-213 haengt der
+      # Erst-Start-Assistent nicht mehr an einer interaktiven Konsole, sondern
+      # allein an dieser Zusage. Ohne sie ginge hier ein Cockpit auf, auf das
+      # niemand wartet — genau der Hang, den dieser Schritt schon zweimal
+      # gefunden hat.
       - name: Smoke-test the built EXE
         shell: pwsh
         run: |
           $probe = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP "bridge-smoke") -Force
           $exe = Join-Path $PWD "dist\ordertune-bridge-ibkr.exe"
+          $logDir = Join-Path $env:LOCALAPPDATA "Ordertune\Bridge\logs"
+          if (Test-Path $logDir) { Remove-Item -Recurse -Force $logDir }
+
           Push-Location $probe
-          $out = & $exe 2>&1 | Out-String
+          $out = & $exe --headless 2>&1 | Out-String
           $code = $LASTEXITCODE
           Pop-Location
 
           Write-Host "--- exit code: $code ---"
+          # Am 2026-09-23 gemessen: hier steht der gerahmte Block, obwohl die
+          # EXE fensterlos gebaut ist. Das ist kein Widerspruch — PyInstaller
+          # nimmt dem Vorgang die eigene Konsole, nicht die GEERBTEN Handles.
+          # Wird die Datei aus einer Shell mit Umleitung gestartet, wie hier,
+          # sind `stdout` und `stderr` echte Kanaele.
+          #
+          # Der wirklich kanallose Fall ist der Doppelklick, und den kann
+          # dieser Schritt nicht nachstellen. Deshalb bleibt die
+          # Protokolldatei das Mass — sie ist in BEIDEN Faellen da.
+          Write-Host "--- stdout (beim Doppelklick leer, hier nicht — siehe oben) ---"
           Write-Host $out
 
-          if ($out -match "ImportError" -or $out -match "Traceback \(most recent call last\)") {
+          $logFile = Join-Path $logDir "bridge.log"
+          if (-not (Test-Path $logFile)) {
+            Write-Error "The EXE left no log file at $logFile. A run that leaves nothing behind is not a passed run — and with no console, the log is the only thing that still speaks."
+            exit 1
+          }
+          $log = Get-Content $logFile -Raw
+          if ([string]::IsNullOrWhiteSpace($log)) {
+            Write-Error "The log file at $logFile is empty. Same verdict as a missing one."
+            exit 1
+          }
+          Write-Host "--- log file ---"
+          Write-Host $log
+
+          # T1-213: dieselbe Datei zum Mitnehmen. Sie liegt unter dem
+          # Nutzerprofil (T1-176 B) und damit ausserhalb des Arbeitsbereichs;
+          # ohne diese Kopie waere sie nach dem Lauf fort. Bei einem ROTEN
+          # Lauf ist sie das Einzige, woran sich die Ursache ablesen laesst —
+          # eine fensterlose Anwendung sagt sonst nichts.
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\smoke" -Force | Out-Null
+          Copy-Item $logFile "$env:GITHUB_WORKSPACE\smoke\bridge.log" -Force
+
+          # Dieselben drei Fragen wie vorher, nur an der Quelle, die es noch
+          # gibt. `$out` wird mitgeprueft: in einem Build, der doch wieder eine
+          # Konsole bekommt, steht der Traceback dort, und dann soll er auch
+          # dort gefunden werden.
+          $beides = "$out`n$log"
+          if ($beides -match "ImportError" -or $beides -match "Traceback \(most recent call last\)") {
             Write-Error "The built EXE fails to start. Publishing this would ship a binary that dies on launch."
             exit 1
           }
-          # T1-101 A-2: der Text heisst nicht mehr `bridge.env invalid`, sondern
-          # ist ein gerahmter Block mit einer stabilen Kennung. Geprueft wird
-          # die Kennung — sie ist der Teil, der Umformulierungen ueberleben
-          # soll. Zusaetzlich, dass der Assistent hier NICHT aufgeht: er wartet
-          # ohne Ende, und in diesem Schritt sitzt niemand davor.
-          if ($out -notmatch "Reference: env_missing") {
+          # T1-101 A-2: geprueft wird die stabile Kennung, nicht der Wortlaut.
+          if ($beides -notmatch "env_missing") {
             Write-Error "Expected the configuration check to run and reject the missing bridge.env. It did not — the startup path changed."
             exit 1
           }
-          if ($out -match "A setup window has opened") {
+          # T1-213 C-3: unter --headless geht der Assistent NICHT auf.
+          if ($beides -match "A setup window has opened") {
             Write-Error "The packed EXE opened the setup assistant with nobody there. It waits forever — that is a hang, not a prompt."
             exit 1
           }
@@ -149,7 +209,7 @@ jobs:
             Write-Error "Expected exit code 1 from a missing configuration, got $code."
             exit 1
           }
-          Write-Host "EXE starts, reaches its configuration check, and exits cleanly."
+          Write-Host "EXE starts, reaches its configuration check, writes its log, and exits cleanly."
 
           # `exit 0` is required, not decoration. GitHub appends
           # `exit $LASTEXITCODE` to every pwsh step, and $LASTEXITCODE is still
@@ -275,6 +335,40 @@ jobs:
           $name = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
           Compress-Archive -Path dist/ordertune-bridge-ibkr.exe,dist/README.txt `
             -DestinationPath "dist/ordertune-bridge-ibkr-$name.zip"
+
+      # T1-213 — die gebaute Datei zum Mitnehmen, ohne sie zu veroeffentlichen.
+      #
+      # ## Warum es das braucht
+      #
+      # Bis hierher verliess die EXE diese Werkstatt auf genau einem Weg: dem
+      # Release-Schritt, und der haengt an `refs/tags/v*`. Wer sie nur
+      # ausprobieren wollte, musste also eine Fassung veroeffentlichen — und
+      # damit genau den Schritt tun, den ein Probelauf vermeiden soll.
+      #
+      # Der `workflow_dispatch`, den diese Datei ausdruecklich anbietet, baute
+      # die EXE und warf sie anschliessend weg.
+      #
+      # ## `always()`, und das ist der Punkt
+      #
+      # Gebraucht wird das Artefakt am dringendsten, wenn der Lauf ROT ist:
+      # der Smoke-Test steht vor dem Signieren, ein Fehlschlag ueberspringt
+      # alles Weitere, und ohne diese Bedingung gaebe es dann gar nichts zum
+      # Nachsehen. `if-no-files-found: warn` faengt den Fall, in dem schon der
+      # Build gescheitert ist und es wirklich nichts gibt.
+      #
+      # Kurze Vorhaltung: das hier ist ein Probeergebnis, keine Auslieferung.
+      # Was ausgeliefert wird, haengt weiterhin am Tag.
+      - name: Artefakt zum Mitnehmen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            dist/ordertune-bridge-ibkr.exe
+            dist/*.zip
+            smoke/bridge.log
 
       # Eine unsignierte Datei muss sich als solche zu erkennen geben.
       #

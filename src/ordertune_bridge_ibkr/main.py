@@ -59,6 +59,7 @@ from .external_executions import (
     order_types_by_perm_id,
 )
 from .logging_setup import setup_logging
+from . import windows_ui
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
@@ -1969,6 +1970,8 @@ def start_cockpit(
     log_file: Path | None,
     session_connected_at: datetime,
     write_access: Any,
+    gateway_instead_of_tws: bool = False,
+    stop_event: Any | None = None,
 ) -> Any | None:
     """Startet das Cockpit — ausser unter `--headless`."""
     if console.headless_requested(argv):
@@ -1991,6 +1994,10 @@ def start_cockpit(
                 session_connected_at=session_connected_at.isoformat(),
                 write_access=write_access.state,
                 write_access_detail=write_access.detail,
+                # T1-214 — der Hinweis gehoert auf die Flaeche und nicht nur
+                # ins Protokoll. Ohne Konsole (T1-213) liest das Protokoll
+                # ohnehin niemand im Vorbeigehen.
+                gateway_instead_of_tws=gateway_instead_of_tws,
             )
         )
         from .cockpit import journal as journal_mod
@@ -2021,10 +2028,24 @@ def start_cockpit(
 
         from .cockpit import SetupActions
 
+        def _halten() -> None:
+            """T1-223 — der Knopf. Er setzt eine Fahne und sonst nichts.
+
+            Kein `ibkr.disconnect()`, kein `api.close()`, kein `sys.exit()`.
+            Das Aufraeumen laeuft dort, wo es hingehoert: im `finally` der
+            Schleife, nachdem der laufende Durchgang zu Ende ist — derselbe
+            Grund, aus dem der Signalhandler es seit T1-152d so haelt.
+            """
+            log.info("Stop requested from the cockpit — finishing current tick.")
+            store.update(stopping=True)
+            if stop_event is not None:
+                stop_event.set()
+
         server = CockpitServer(
             store,
             journal=journal,
             diagnostics=diagnostics,
+            on_stop=_halten,
             setup=SetupActions(
                 Path(ENV_FILE).resolve(),
                 store=store,
@@ -2034,7 +2055,17 @@ def start_cockpit(
         )
         url = server.start()
         runfile.write(config.ibkr_client_id, url)
-        log.info("Cockpit window: %s", window_mod.open_window(url))
+        stufe = window_mod.open_window(url)
+        log.info("Cockpit window: %s", stufe)
+        # T1-213 — „url_only" heisst: der Kern laeuft, und der Kunde hat keinen
+        # Weg zu ihm. Bis zum 2026-09-23 stand die Adresse in der Konsole, und
+        # das war ausreichend. Ohne Konsole ist es das nicht mehr.
+        if stufe == "url_only" and console.dialog_wanted(argv):
+            windows_ui.message_box(
+                "The Ordertune Bridge is running, but no browser window could "
+                f"be opened.\n\nOpen this address yourself:\n{url}",
+                error=False,
+            )
         return server
     except Exception as exc:
         log.warning("Cockpit could not start (the bridge keeps running): %s", exc)
@@ -2334,8 +2365,72 @@ def _abort(
         # Nur Kennung und Satz, nicht der ganze Block: die Wurzel haengt an der
         # Konsole, sonst stuende alles doppelt auf dem Bildschirm.
         log.error("Startup aborted (%s): %s", failure.code, failure.headline)
+    # T1-213 B — das Meldungsfenster tritt an die Stelle des wartenden
+    # Konsolenfensters.
+    #
+    # Unter `--headless` ausdruecklich NICHT: ein Dialog, den niemand
+    # wegklicken kann, ist genau der haengende Vorgang, gegen den die Zusage
+    # des Dauerbetriebs gebaut ist.
+    if console.dialog_wanted(argv):
+        windows_ui.message_box(_meldungstext(failure, log_file))
     console.hold(argv)
     return 1
+
+
+def _protokoll_fuer_startfehler(failure: failures.Failure) -> Path | None:
+    """T1-213 — eine Spur hinterlassen, bevor der Start ueberhaupt begonnen hat.
+
+    ## Der Befund
+
+    Scheitert die Konfiguration, bricht `main()` ab, **bevor** `setup_logging`
+    laeuft — der Protokollordner gehoert zum Umzug aus T1-176 und wird erst
+    danach eingerichtet. Bis zum 2026-09-23 war das folgenlos: der gerahmte
+    Block stand in der Konsole, und wer ihn brauchte, konnte ihn lesen.
+
+    Ohne Konsole hinterlaesst genau dieser Fall **nichts**. Keine Zeile, keine
+    Datei, kein Ort, an dem der Support nachsehen koennte — bei der haeufigsten
+    Stoerung ueberhaupt, der fehlenden oder verbrauchten `bridge.env`.
+
+    Deshalb wird das Protokoll hier nachgeholt. Der Aufruf ist unbedenklich:
+    er geschieht ausschliesslich auf dem Abbruchweg, also nie zusammen mit dem
+    regulaeren `setup_logging` weiter unten — zwei Datei-Handler auf derselben
+    Datei waeren jede Zeile doppelt.
+
+    Scheitert auch das, kommt `None` zurueck. Ein Fehler beim Festhalten eines
+    Fehlers darf den Ausgang nicht noch einmal verdecken.
+    """
+    try:
+        paths.migrate_legacy()
+        log_file = setup_logging()
+        log.error("Startup aborted (%s): %s", failure.code, failure.headline)
+        for zeile in failure.detail:
+            log.error("  %s", zeile)
+        return log_file
+    except Exception as exc:  # noqa: BLE001 - defensiv, siehe Docstring
+        log.debug("Could not set up logging for the startup failure: %s", exc)
+        return None
+
+
+def _meldungstext(failure: failures.Failure, log_file: Path | None) -> str:
+    """Der Text des Meldungsfensters: Ueberschrift, Rat, Protokollpfad.
+
+    Bewusst nicht der gerahmte Block aus `failures.render` — der ist fuer eine
+    Konsole mit fester Zeichenbreite gesetzt und saehe in einem Dialog wie ein
+    Unfall aus.
+
+    Der Protokollpfad stammt aus DERSELBEN Quelle wie die Datei selbst
+    (`setup_logging` gibt ihn zurueck, T1-101 A-4). Ihn hier ein zweites Mal
+    herzuleiten waere die Sorte Doppelspur, die in diesem Projekt schon
+    mehrfach auseinandergelaufen ist.
+    """
+    teile = [failure.headline]
+    if failure.detail:
+        teile.append("\n".join(failure.detail))
+    if failure.action:
+        teile.append("\n".join(failure.action))
+    if log_file is not None:
+        teile.append(f"Log file:\n{log_file}")
+    return "\n\n".join(t for t in teile if t)
 
 
 def _handshake_or_none(
@@ -2368,6 +2463,15 @@ def _token_changed(alter_token: str) -> bool:
 def main() -> int:
     argv = sys.argv[1:]
 
+    # T1-213 D-1 — der Owner holt sich die Konsole zurueck.
+    #
+    # Als Allererstes und vor jeder Ausgabe: die EXE wird fensterlos gebaut,
+    # `sys.stdout` steht dann auf `None`, und alles, was vor diesem Aufruf
+    # geschrieben wuerde, waere verloren. Auch `setup_logging` weiter unten
+    # fragt den Kanal ab — er muss bis dahin stehen.
+    if windows_ui.console_requested(argv):
+        windows_ui.allocate_console()
+
     # Aufgeloest, bevor irgendetwas schiefgeht: bei einem Doppelklick ist das
     # Arbeitsverzeichnis nicht zwingend der Ordner der EXE, und „Datei nicht
     # gefunden" ohne Suchort ist keine Auskunft.
@@ -2384,6 +2488,13 @@ def main() -> int:
         # dieselbe Auskunft bekommen.
         print(failures.render(failure), file=sys.stderr, flush=True)
         if not run_setup_cockpit(failure, env_path, argv):
+            # T1-213 B — hier ist das Cockpit NICHT aufgegangen. Ohne Konsole
+            # saehe der Kunde an dieser Stelle gar nichts: kein Fenster, keine
+            # Zeile, ein Vorgang, der sich sofort beendet. Genau der Zustand,
+            # der „ich klicke drauf und es passiert nichts" erzeugt.
+            notfall_log = _protokoll_fuer_startfehler(failure)
+            if console.dialog_wanted(argv):
+                windows_ui.message_box(_meldungstext(failure, notfall_log))
             console.hold(argv)
             return 1
         try:
@@ -2416,11 +2527,65 @@ def main() -> int:
     fingerprint = compute_fingerprint()
     log.info("Hardware fingerprint: %s...", fingerprint[:16])
 
+    # T1-222 — laeuft hier schon eine?
+    #
+    # VOR dem IBKR-Verbindungsversuch, und das ist der ganze Punkt: sonst
+    # kollidiert der zweite Start auf der Client-ID, und aus einem
+    # Socket-Fehler wird geraten. Gemessen am 2026-09-23 sah der Nutzer dann
+    # „'Enable ActiveX and Socket Clients' is off in TWS" — eine Einstellung,
+    # die in Ordnung war.
+    #
+    # Die Auskunft lag die ganze Zeit bereit: `cockpit/runfile.py` schreibt bei
+    # jedem Start Adresse und Prozesskennung. Gelesen hat sie nur nie jemand.
+    # Erst hier importiert, nicht oben: `cockpit/__init__.py` zieht Server und
+    # Aktionen mit, und die haben in einem `--headless`-Lauf nichts zu suchen.
+    # Dasselbe Muster wie bei `start_cockpit` und `run_setup_cockpit`.
+    from .cockpit import runfile as runfile_mod
+
+    laeuft_bereits = runfile_mod.laufende_instanz(config.ibkr_client_id)
+    if laeuft_bereits is not None:
+        stoerung = failures.bridge_laeuft_bereits(laeuft_bereits)
+        log.warning("%s Its window: %s", stoerung.headline, laeuft_bereits)
+        if not console.headless_requested(argv):
+            # Wer zweimal klickt, will die Bridge SEHEN. Also dasselbe Fenster
+            # wie beim regulaeren Start, nicht bloss eine Meldung.
+            from .cockpit import window as window_mod
+
+            window_mod.open_window(laeuft_bereits)
+            if console.dialog_wanted(argv):
+                windows_ui.message_box(
+                    _meldungstext(stoerung, log_file), error=False
+                )
+        # Ausgangscode 0, und das ist eine Entscheidung: der gewuenschte
+        # Zustand — „eine Bridge laeuft" — ist hergestellt. Eine 1 braechte
+        # eine geplante Aufgabe oder IBC dazu, es sofort wieder zu versuchen,
+        # in einer Schleife, die nie endet.
+        return 0
+
     ibkr = IbkrClient(
-        host=config.ibkr_gateway_host,
-        port=config.ibkr_gateway_port,
+        host=config.ibkr_tws_host,
+        port=config.ibkr_tws_port,
         client_id=config.ibkr_client_id,
     )
+
+    # T1-214 — laeuft die Bridge an einem IB Gateway?
+    #
+    # Entschieden am eingetragenen Port, nicht an einer Nachfrage: die IBKR-API
+    # verraet nicht, welches der beiden Programme am anderen Ende sitzt. Der
+    # Port ist der beste verfuegbare Anhaltspunkt und eine reine Ableitung.
+    #
+    # Das hier ist ein HINWEIS und keine Sperre. Wer heute auf dem Gateway
+    # handelt, handelt morgen weiter; ihm fehlt der Ausfallschutz, nicht die
+    # Ausfuehrung. Ein Riegel, der den Kunden haerter trifft als das Problem,
+    # ist keine Verbesserung.
+    auf_gateway = config.ibkr_tws_port in {p for p, _ in port_probe.GATEWAY_PORTS}
+    if auf_gateway:
+        log.warning(
+            "%s Port %d is an IB Gateway port. Trading works; recovering a fill "
+            "that happened while the Bridge was off does not.",
+            failures.GATEWAY_HEADLINE,
+            config.ibkr_tws_port,
+        )
     try:
         ibkr.connect()
         # T1-98: der Zeitpunkt, ab dem diese Sitzung die Ereignisse von IBKR
@@ -2430,18 +2595,22 @@ def main() -> int:
     except Exception as exc:
         # T1-101 A-3: die Portsuche laeuft ausschliesslich hier — im
         # Normalbetrieb wird kein zusaetzlicher Socket geoeffnet.
-        answering = port_probe.scan(config.ibkr_gateway_host)
-        return _abort(
-            failures.classify_connect_error(
-                config.ibkr_gateway_host,
-                config.ibkr_gateway_port,
+        answering = port_probe.scan(config.ibkr_tws_host)
+        # T1-214 — antwortet ausschliesslich ein Gateway, ist „falscher Port"
+        # die halbe Wahrheit. Der Kunde hat etwas Laufendes vor sich; was ihm
+        # fehlt, ist die Berichtsfunktion, und die gibt es dort nicht.
+        stoerung = (
+            failures.gateway_statt_tws(config.ibkr_tws_port, answering)
+            if port_probe.nur_gateway(answering)
+            else failures.classify_connect_error(
+                config.ibkr_tws_host,
+                config.ibkr_tws_port,
                 exc,
                 answering,
                 config.ibkr_client_id,
-            ),
-            log_file,
-            argv,
+            )
         )
+        return _abort(stoerung, log_file, argv)
 
     # T1-94-Sonde: nur lesen, nichts absenden, dann beenden. Steht hier und
     # nicht frueher, weil sie die Verbindung braucht — und hier, weil ab der
@@ -2553,8 +2722,6 @@ def main() -> int:
             "it to Ordertune could send that order twice."
         )
 
-    stop = threading.Event()
-
     # Der Handler setzt nur eine Fahne. Frueher rief er `sys.exit(0)` und raeumte
     # gleich selbst auf — mitten in einem Signal, also potenziell mitten in einem
     # laufenden Absendevorgang. Jetzt laeuft das Aufraeumen dort, wo es hingehoert:
@@ -2575,6 +2742,17 @@ def main() -> int:
 
     # T1-101 B-1 — das Cockpit. Beiwerk, und wird auch so behandelt: ein
     # Fehler beim Starten kostet die Anzeige, nie den Handel.
+    # T1-223 — das Halte-Ereignis entsteht VOR dem Cockpit.
+    #
+    # Es gab es schon: `SIGINT`/`SIGTERM` setzen es, und aufgeraeumt wird im
+    # `finally` der Schleife, nachdem der laufende Durchgang zu Ende ist. Der
+    # Knopf im Cockpit erfindet deshalb nichts — er setzt dieselbe Fahne.
+    #
+    # Umgezogen ist nur die Zeile: bis zum 2026-09-23 entstand das Ereignis
+    # erst NACH `start_cockpit`, und dann haette der Server nichts zu setzen
+    # gehabt.
+    stop = threading.Event()
+
     cockpit = start_cockpit(
         argv,
         config=config,
@@ -2583,6 +2761,8 @@ def main() -> int:
         log_file=log_file,
         session_connected_at=session_connected_at,
         write_access=ibkr.write_access(),
+        gateway_instead_of_tws=auf_gateway,
+        stop_event=stop,
     )
     # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
     # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und

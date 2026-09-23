@@ -180,7 +180,13 @@ def test_something_that_is_not_a_bridge_env_is_refused(env) -> None:
 
 
 def test_the_assistant_only_opens_when_somebody_is_there(monkeypatch) -> None:
-    """Der Assistent wartet ohne Ende. Ist niemand da, ist das kein Assistent."""
+    """Gepackt ja, aus der Entwicklungsumgebung nur auf Zuruf.
+
+    T1-213: `is_interactive` spielt fuer diese Entscheidung keine Rolle mehr
+    (siehe den Test darunter). Die Fessel bleibt hier trotzdem gesetzt — faellt
+    die Regel je wieder darauf zurueck, soll dieser Test es merken und nicht
+    zufaellig richtig liegen.
+    """
     monkeypatch.setattr(console, "is_interactive", lambda: True)
 
     monkeypatch.setattr(console, "is_frozen", lambda: False)
@@ -195,25 +201,45 @@ def test_the_assistant_only_opens_when_somebody_is_there(monkeypatch) -> None:
     )
 
 
-def test_a_packed_exe_without_a_console_never_waits(monkeypatch) -> None:
-    """Der Fall, der den Release-Build zum Stehen gebracht hat.
+def test_a_packed_exe_without_a_console_still_opens_the_assistant(monkeypatch) -> None:
+    """T1-213 — dieselbe Gefahr, ein anderer Riegel.
 
-    Der Smoke-Test des Workflows startet die fertige EXE in einem leeren
-    Verzeichnis. Dort ist `is_frozen()` wahr, eine `bridge.env` gibt es nicht,
-    und eine Eingabe kommt nie — der Assistent lief endlos, der Lauf hing
-    zwoelf Minuten im Schritt „Smoke-test the built EXE".
+    ## Was hier bis zum 2026-09-23 stand
 
-    Dahinter der Fall, der nicht nur die Bauumgebung trifft: eine geplante
-    Aufgabe oder ein Dienst startet die EXE ohne Konsole.
+    „Gepackt, aber ohne Konsole: dort tippt niemand etwas ein." Der Assistent
+    ging nur auf, wenn `is_interactive()` wahr war. Der Anlass war echt: der
+    Smoke-Test des Release-Workflows startet die fertige EXE in einem leeren
+    Verzeichnis, und der Lauf hing zwoelf Minuten.
+
+    ## Warum die Erwartung sich umkehrt
+
+    Jener Assistent lief in der **Konsole** und wartete dort auf eine Eingabe.
+    Seit T1-101 C laeuft er im Cockpit — ein lokaler Server und ein Fenster,
+    getippt wird im Browser. Und seit T1-213 wird die EXE fensterlos gebaut:
+    `is_interactive()` ist dort **immer** falsch.
+
+    Bliebe die alte Bedingung stehen, ginge der Assistent bei **keinem** Kunden
+    mehr auf. Der erste Start endete mit einem Meldungsfenster statt mit einer
+    Einrichtung — aus einem Riegel gegen einen haengenden Lauf waere ein Riegel
+    gegen jeden Erstkunden geworden.
+
+    ## Was die Gefahr jetzt abwehrt
+
+    `--headless`. Der naechste Test haelt das fest, und der Smoke-Test des
+    Workflows setzt die Fahne seit T1-213 ausdruecklich.
     """
     monkeypatch.setattr(console, "is_frozen", lambda: True)
     monkeypatch.setattr(console, "is_interactive", lambda: False)
 
-    assert console.setup_wanted([]) is False, (
-        "Gepackt, aber ohne Konsole: dort tippt niemand etwas ein."
+    assert console.setup_wanted([]) is True, (
+        "Eine fensterlos gebaute EXE hat nie eine interaktive Konsole — der "
+        "Assistent muss trotzdem aufgehen, sonst kommt kein Kunde je hinein."
     )
     assert console.setup_wanted(["--setup"]) is True, (
         "Ausdruecklich angefordert bleibt ausdruecklich angefordert."
+    )
+    assert console.setup_wanted(["--headless"]) is False, (
+        "Und das ist der Riegel, der an die Stelle der Konsolenpruefung tritt."
     )
 
 

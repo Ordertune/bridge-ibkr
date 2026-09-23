@@ -94,6 +94,19 @@ class CockpitState:
     #: „export not found" sagt, laesst ihn glauben, geschuetzt zu sein.
     trade_export_detail: str | None = None
 
+    # ── T1-223 — der Kunde hat das Beenden angestossen ───────────────────
+    # Gesetzt, sobald der Knopf gedrueckt wurde. Der Vorgang laeuft dann noch
+    # seinen Durchgang zu Ende; die Flaeche soll in dieser Zeit nicht weiter
+    # „Connected" behaupten.
+    stopping: bool = False
+
+    # ── T1-214 — es laeuft, aber auf einem IB Gateway ────────────────────
+    # Kein Ausfall und ausdruecklich keine Sperre: der Handel geht weiter. Was
+    # fehlt, ist der Ausfallschutz aus T1-207 — das Gateway schreibt keine
+    # Handelsberichte, und ohne sie kann eine Fuellung, die bei ausgeschalteter
+    # Bridge geschieht, nicht nachgetragen werden.
+    gateway_instead_of_tws: bool = False
+
     # ── Einrichtung (T1-101 C) ───────────────────────────────────────────
     # Der Assistent laeuft, wenn `bridge.env` fehlt oder nicht laedt. Dann ist
     # ausser diesem Feld praktisch nichts belegt — es gibt ja noch nichts.

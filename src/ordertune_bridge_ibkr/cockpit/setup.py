@@ -41,11 +41,18 @@ HANDSHAKE_TIMEOUT_S = 10.0
 
 
 def probe_ports(host: str = "127.0.0.1") -> dict[str, Any]:
-    """C-1 Schritt 2 — welche der vier Standardports antworten?"""
+    """C-1 Schritt 2 — welche Standardports antworten?
+
+    T1-214: `known` ist die Liste, die der Assistent zur AUSWAHL stellt, und
+    sie fuehrt nur noch die TWS-Ports. `answering` bleibt die volle Messung —
+    antwortet ausschliesslich ein Gateway, soll der Assistent das sagen koennen
+    statt „nichts gefunden".
+    """
     gefunden = port_probe.scan(host)
     return {
         "answering": [{"port": p, "label": label} for p, label in gefunden],
         "known": [{"port": p, "label": label} for p, label in port_probe.KNOWN_PORTS],
+        "gatewayOnly": port_probe.nur_gateway(gefunden),
     }
 
 
@@ -71,7 +78,7 @@ def check_socket(host: str, port: int) -> dict[str, Any]:
         "ok": False,
         "message": (
             f"Nothing answers on {host}:{port}, and none of the IBKR default "
-            "ports answered either. Start TWS or IB Gateway and log in."
+            "ports answered either. Start TWS and log in."
         ),
     }
 

@@ -42,7 +42,20 @@ def main() -> int:
         "--onefile",
         "--name",
         "ordertune-bridge-ibkr",
-        "--console",
+        # T1-213 — ein Fenster fuer den Kunden.
+        #
+        # Bis zum 2026-09-23 stand hier `--console`, und ein Doppelklick
+        # oeffnete zwei Fenster: das Protokoll und das Cockpit. Das Protokoll
+        # ist fuer den Owner; er holt es sich mit `--console` auf der
+        # Befehlszeile zurueck (`windows_ui.allocate_console`).
+        #
+        # Verworfen wurde die kleinere Aenderung — weiter mit `--console`
+        # bauen und das Fenster beim Start verbergen. Windows behandelt die
+        # Datei dann weiterhin als Konsolenanwendung, und beim Doppelklick
+        # blitzt das schwarze Fenster sichtbar auf. Ein Aufblitzen ist kein
+        # Fortschritt gegenueber einem Fenster, sondern dasselbe Bekenntnis in
+        # kuerzer.
+        "--windowed",
         "--clean",
         "--noconfirm",
         "--paths",

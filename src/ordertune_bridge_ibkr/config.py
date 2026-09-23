@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, HttpUrl
+from pydantic import AliasChoices, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .trade_reports import STANDARD_VERZEICHNIS as DEFAULT_TWS_EXPORT_DIR
@@ -39,23 +39,52 @@ class BridgeConfig(BaseSettings):
         description="UUID of the broker_connections row this bridge represents.",
     )
 
-    # ── IBKR TWS/Gateway (lokaler Socket) ──────────────────────────────
-    ibkr_gateway_host: str = Field(
+    # ── IBKR TWS (lokaler Socket) ───────────────────────────────────────
+    #
+    # T1-214 — zwei Schreibweisen, eine Bedeutung.
+    #
+    # Die Felder hiessen bis zum 2026-09-23 `IBKR_GATEWAY_HOST` und
+    # `IBKR_GATEWAY_PORT`. Sie heissen jetzt nach der TWS, weil die Bridge nur
+    # noch mit ihr betrieben wird (T1-207: das IB Gateway hat keine
+    # Berichtsfunktion).
+    #
+    # Die alten Namen bleiben **unbefristet** gueltig. Jede ausgelieferte
+    # `bridge.env` traegt sie, und eine Installation durch eine Umbenennung
+    # stehenzulassen waere ein schlechterer Ausgang als ein Feldname, der an
+    # eine alte Entscheidung erinnert. `validation_alias` macht daraus genau
+    # eine Zeile Aufwand.
+    #
+    # Stehen beide in derselben Datei, gewinnt die neue Schreibweise — das ist
+    # die Reihenfolge in `AliasChoices` —, und `env_file.warne_bei_doppelung`
+    # sagt es in einer Protokollzeile.
+    ibkr_tws_host: str = Field(
         default="127.0.0.1",
-        description="Host running TWS or IB Gateway (normally 127.0.0.1).",
+        validation_alias=AliasChoices("IBKR_TWS_HOST", "IBKR_GATEWAY_HOST"),
+        description="Host running TWS (normally 127.0.0.1).",
     )
-    ibkr_gateway_port: int = Field(
+    ibkr_tws_port: int = Field(
         default=7497,
-        description="Socket port. Read it out of the API settings in TWS or IB Gateway — it is a setting there and does not follow from the account type. IBKR defaults: TWS 7497 paper / 7496 live, Gateway 4002 paper / 4001 live.",
+        validation_alias=AliasChoices("IBKR_TWS_PORT", "IBKR_GATEWAY_PORT"),
+        description="Socket port. Read it out of the API settings in TWS — it is a setting there and does not follow from the account type. IBKR defaults: 7497 paper / 7496 live.",
     )
     ibkr_trading_mode: Literal["paper", "live"] = Field(
         default="paper",
-        description="Label only. The actual trading mode comes from the account you log in to in TWS or IB Gateway; this value changes nothing.",
+        description="Label only. The actual trading mode comes from the account you log in to in TWS; this value changes nothing.",
     )
     ibkr_client_id: int = Field(
         default=17,
-        description="IBKR API client id. Must be unique per connection to one TWS or Gateway instance.",
+        description="IBKR API client id. Must be unique per connection to one TWS instance.",
     )
+
+    # Die alten Namen als Eigenschaft, damit nichts im Baum zweimal umgestellt
+    # werden muss. Sie sind Lesezugriffe auf dasselbe Feld, keine zweite Quelle.
+    @property
+    def ibkr_gateway_host(self) -> str:
+        return self.ibkr_tws_host
+
+    @property
+    def ibkr_gateway_port(self) -> int:
+        return self.ibkr_tws_port
 
     # ── TWS trade reports (T1-207) ──────────────────────────────────────
     tws_export_dir: str = Field(
@@ -65,7 +94,9 @@ class BridgeConfig(BaseSettings):
             "Global Configuration - Export Reports, and leave 'Export "
             "filename' EMPTY there so TWS writes one dated file per trading "
             "day. Without this archive a fill that happens while the Bridge is "
-            "off cannot be recovered. IB Gateway has no such function."
+            "off cannot be recovered. This is why the Bridge is run with TWS "
+            "and not with IB Gateway: the Gateway has no such function "
+            "(T1-207, verified in its configuration tree)."
         ),
     )
 

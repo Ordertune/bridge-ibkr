@@ -2,7 +2,7 @@
 
 IBC automatisiert den täglichen Login in die TWS. Ohne IBC müssen Sie jeden Morgen manuell einloggen, sonst schlagen alle Trades fehl (IBKR zwingt die TWS um 05:00 CET zu einem Force-Logout).
 
-**Nur TWS.** Seit Fassung 0.25.0 verlangt die Bridge die TWS — das IB Gateway hat keine Berichtsfunktion und kann eine verpasste Füllung nicht nachtragen. Siehe [SETUP_TWS_GATEWAY.md](SETUP_TWS_GATEWAY.md).
+**Nur TWS.** Seit Fassung 0.25.0 verlangt die Bridge die TWS — das IB Gateway hat keine Berichtsfunktion und kann eine verpasste Füllung nicht nachtragen. Siehe [SETUP_TWS.md](SETUP_TWS.md).
 
 ## Installation
 

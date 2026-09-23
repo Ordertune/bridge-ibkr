@@ -1,4 +1,4 @@
-"""ib_insync-Wrapper für TWS/Gateway.
+"""ib_insync-Wrapper für die TWS.
 
 Async-first, aber gewrappt in sync-Interface für den Scheduler-basierten
 Poll-Loop. ib_insync erlaubt beides via internem util.run().
@@ -204,7 +204,7 @@ class IbkrClient:
         `connect()` ruft, beginnt eine neue Sitzung, und was die vorige gesehen
         hat, ist kein Befund ueber die neue.
         """
-        log.info("Connecting to IBKR TWS/Gateway at %s:%d (client-id=%d)",
+        log.info("Connecting to IBKR TWS at %s:%d (client-id=%d)",
                  self._host, self._port, self._client_id)
         # VOR dem Verbinden angehaengt: der 321er kommt rund eine Zehntel-
         # sekunde nach den Positionen, also mitten im Verbindungsvorgang.
@@ -218,7 +218,7 @@ class IbkrClient:
         self._validation_errors.clear()
         self._positions_known = False
         self._ib.connect(self._host, self._port, clientId=self._client_id)
-        log.info("Connected to IBKR TWS/Gateway.")
+        log.info("Connected to IBKR TWS.")
         self._confirm_positions_subscription()
         self._confirm_write_access()
 

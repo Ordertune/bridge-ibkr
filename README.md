@@ -12,7 +12,7 @@ Windows-Native Bridge-Client für Interactive Brokers. Holt vom User freigegeben
   (`Global Configuration → Export Reports`). **IB Gateway wird seit 0.25.0 nicht mehr
   unterstützt** — es hat keine Berichtsfunktion, und ohne sie lässt sich eine Füllung,
   die während einer Auszeit der Bridge passiert, nicht mehr nachtragen. Siehe
-  [SETUP_TWS_GATEWAY.md](docs/SETUP_TWS_GATEWAY.md)
+  [SETUP_TWS.md](docs/SETUP_TWS.md)
 - Empfohlen: IBC (Interactive Brokers Controller) für tägliche Auto-Login nach 05:00 CET Force-Logout
 - Ordertune-Advanced- oder Institutional-Alpha-Subscription mit `allows_ibkr_bridge=true` (im aktuellen Tier-Setting)
 
@@ -33,8 +33,8 @@ ORDERTUNE_API_BASE=https://t1.ordertune.com
 ORDERTUNE_BRIDGE_TOKEN=ot_bridge_<hex>
 ORDERTUNE_BRIDGE_CONNECTION_ID=<uuid>
 
-IBKR_GATEWAY_HOST=127.0.0.1
-IBKR_GATEWAY_PORT=7497
+IBKR_TWS_HOST=127.0.0.1
+IBKR_TWS_PORT=7497
 IBKR_TRADING_MODE=paper
 IBKR_CLIENT_ID=17
 
@@ -91,7 +91,7 @@ Die Bridge beendet sich bei einem Startfehler nicht mehr stillschweigend. Sie ze
   WHAT HAPPENED
   Nothing answers on port 7497, but something does elsewhere.
 
-  bridge.env says:  IBKR_GATEWAY_PORT=7497
+  bridge.env says:  IBKR_TWS_PORT=7497
   Answering ports:  7496 (TWS live)
   ...
   Reference: tws_wrong_port
@@ -100,7 +100,7 @@ Die Bridge beendet sich bei einem Startfehler nicht mehr stillschweigend. Sie ze
 
 Beim Doppelklick auf die EXE **bleibt das Fenster offen**, bis eine Taste gedrückt wird — vorher schloss Windows es zusammen mit dem Prozess, und die Meldung war nicht lesbar.
 
-Findet die Bridge auf dem konfigurierten Port nichts, klopft sie die vier IBKR-Standardports ab (TWS 7497/7496, Gateway 4002/4001) und nennt, wo sich etwas meldet. Dabei geht **keine API-Anfrage** hinaus: es ist ein reiner Verbindungsversuch, der sofort wieder geschlossen wird.
+Findet die Bridge auf dem konfigurierten Port nichts, klopft sie die IBKR-Standardports ab und nennt, wo sich etwas meldet. Angeboten werden nur die TWS-Ports (7497 Paper / 7496 Live); die Gateway-Ports (4002/4001) werden weiterhin abgeklopft, aber nur, um zu **erklären** — antwortet ausschließlich ein Gateway, sagt die Bridge, was dort fehlt, statt „nichts gefunden" zu melden. Dabei geht **keine API-Anfrage** hinaus: es ist ein reiner Verbindungsversuch, der sofort wieder geschlossen wird.
 
 ### `--headless`
 
@@ -112,7 +112,7 @@ Unterdrückt das Warten auf eine Eingabe **und startet das Cockpit nicht**. Für
 
 ## Laufverhalten
 
-- **Heartbeat** alle 60 Sekunden: Cash, Equity, Positions + Gateway-Status an Ordertune
+- **Heartbeat** alle 60 Sekunden: Cash, Equity, Positions + Verbindungszustand an Ordertune (das Vertragsfeld heißt weiterhin `gatewayStatus` — ein Name aus T1-78, der auf dem Draht bleibt)
 - **Pending-Poll** alle 5 Sekunden während US-Marktzeit (60s off-hours): holt freigegebene Signale
 - **Position-Sizing-Recompute**: Bridge recomputet die Qty gegen die Live-Equity aus TWS. Bei >5% Drift zur Server-Berechnung wird die Order automatisch abgelehnt (der User muss dann neu freigeben)
 - **Order-Result-Push**: nach jedem Fill/Cancel/Reject wird ein Result-Event an Ordertune gesendet
@@ -142,7 +142,7 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 ## Docs
 
 - [Windows-VPS-Setup](docs/SETUP_WINDOWS_VPS.md)
-- [TWS Setup inklusive Handelsberichte](docs/SETUP_TWS_GATEWAY.md)
+- [TWS Setup inklusive Handelsberichte](docs/SETUP_TWS.md)
 - [IBC (Auto-Login)](docs/SETUP_IBC.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 

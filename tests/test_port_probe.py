@@ -68,11 +68,41 @@ def test_the_probe_leaves_no_connection_behind() -> None:
 
 def test_only_the_four_ibkr_defaults_are_probed() -> None:
     """Ein breiterer Scan waere auf einem fremden VPS eine andere Handlung."""
-    assert tuple(p for p, _ in port_probe.KNOWN_PORTS) == (7497, 7496, 4002, 4001)
+    assert tuple(p for p, _ in port_probe.SCANNED_PORTS) == (7497, 7496, 4002, 4001)
+
+
+def test_what_is_offered_is_tws_only() -> None:
+    """T1-214 — der Unterschied zwischen anbieten und erkennen.
+
+    Seit T1-207 wird die Bridge mit der TWS betrieben; das IB Gateway hat keine
+    Berichtsfunktion, und ohne sie gibt es keinen Ausfallschutz. `KNOWN_PORTS`
+    ist deshalb die Liste dessen, was wir VORSCHLAGEN — und die enthaelt kein
+    Gateway mehr.
+    """
+    assert tuple(p for p, _ in port_probe.KNOWN_PORTS) == (7497, 7496)
+    assert port_probe.KNOWN_PORTS == port_probe.TWS_PORTS
+
+
+def test_the_gateway_is_still_recognised() -> None:
+    """Erkannt wird es weiterhin — um zu erklaeren, nicht um vorzuschlagen.
+
+    Wer heute auf dem Gateway laeuft, soll erfahren, was ihm fehlt. Ihn einfach
+    nichts mehr finden zu lassen waere ein Riegel, der den Kunden haerter
+    trifft als das Problem.
+    """
+    assert tuple(p for p, _ in port_probe.GATEWAY_PORTS) == (4002, 4001)
+    assert port_probe.nur_gateway(((4001, "IB Gateway live"),)) is True
+    assert port_probe.nur_gateway(((7497, "TWS paper"),)) is False
+    assert (
+        port_probe.nur_gateway(((7497, "TWS paper"), (4001, "IB Gateway live"))) is False
+    ), "Laeuft beides, ist die TWS da — dann gibt es nichts zu erklaeren."
+    assert port_probe.nur_gateway(()) is False, (
+        "Ohne Antwort gibt es nichts zu erklaeren."
+    )
 
 
 def test_every_port_carries_the_label_the_user_sees_in_tws() -> None:
-    labels = dict(port_probe.KNOWN_PORTS)
+    labels = dict(port_probe.SCANNED_PORTS)
     assert labels[7497] == "TWS paper"
     assert labels[7496] == "TWS live"
     assert labels[4002] == "IB Gateway paper"

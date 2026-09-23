@@ -69,16 +69,75 @@ def test_the_token_value_is_never_printed() -> None:
     assert f"<{len(secret)} characters>" in rendered
 
 
-def test_the_field_is_named_the_way_it_appears_in_the_file() -> None:
-    exc = _validation_error(
-        ordertune_bridge_token="x" * 40,
-        ordertune_bridge_connection_id="c0ffee",
-        ibkr_gateway_port="not-a-number",
+def _fehler_aus_datei(tmp_path, zeilen: str) -> ValidationError:
+    """Ein Pydantic-Fehler aus einer ECHTEN Datei.
+
+    T1-214: seit der Port zwei Schreibweisen hat (`IBKR_TWS_PORT` und das alte
+    `IBKR_GATEWAY_PORT`), liest Pydantic ihn ueber einen `validation_alias`.
+    Ein Schluesselwort-Argument mit dem Feldnamen erreicht ihn dann nicht mehr
+    — und ein Test, der den Wert gar nicht erst zustellt, prueft nichts.
+    """
+    f = tmp_path / "bridge.env"
+    f.write_text(
+        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
+        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n" + zeilen,
+        encoding="utf-8",
     )
-    rendered = failures.render(
-        failures.classify_config_error(exc, "bridge.env", env_exists=True)
+    with pytest.raises(ValidationError) as caught:
+        BridgeConfig(_env_file=str(f))  # type: ignore[call-arg]
+    return caught.value
+
+
+def test_the_field_is_named_the_way_it_appears_in_the_file(tmp_path) -> None:
+    """Der Name im Block ist der Name, den der Nutzer wirklich geschrieben hat.
+
+    Beide Schreibweisen, beide Male die eigene: wer `IBKR_TWS_PORT` in der Datei
+    stehen hat, darf nicht angewiesen werden, `IBKR_GATEWAY_PORT` zu suchen —
+    und umgekehrt genauso.
+    """
+    # T1-214: welche der beiden Schreibweisen Pydantic meldet, entscheidet
+    # Pydantic — und das faellt je nach Plattform verschieden aus (gemessen am
+    # 2026-09-23: macOS nennt die aus der Datei, Windows die kanonische).
+    # Deshalb wird nicht geraten: der Block nennt BEIDE, und die Zusicherung
+    # prueft genau das. Eine Erwartung auf nur eine Schreibweise waere auf
+    # einem der beiden Systeme dauerhaft rot gewesen.
+    for zeile in ("IBKR_TWS_PORT=not-a-number\n", "IBKR_GATEWAY_PORT=not-a-number\n"):
+        exc = _fehler_aus_datei(tmp_path, zeile)
+        rendered = failures.render(
+            failures.classify_config_error(exc, "bridge.env", env_exists=True)
+        )
+        assert "IBKR_TWS_PORT" in rendered, rendered
+        assert "IBKR_GATEWAY_PORT" in rendered, rendered
+
+
+def test_both_spellings_of_the_port_are_accepted(tmp_path) -> None:
+    """T1-214 C-2/C-3 — die alte Schreibweise bleibt unbefristet gueltig.
+
+    Jede ausgelieferte `bridge.env` traegt sie. Eine Installation durch eine
+    Umbenennung stehenzulassen waere ein schlechterer Ausgang als ein Feldname,
+    der an eine alte Entscheidung erinnert.
+    """
+    kopf = (
+        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
+        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n"
     )
-    assert "IBKR_GATEWAY_PORT" in rendered
+
+    def lade(zeilen: str) -> BridgeConfig:
+        f = tmp_path / "b.env"
+        f.write_text(kopf + zeilen, encoding="utf-8")
+        return BridgeConfig(_env_file=str(f))  # type: ignore[call-arg]
+
+    assert lade("IBKR_GATEWAY_PORT=7496\n").ibkr_tws_port == 7496
+    assert lade("IBKR_TWS_PORT=7496\n").ibkr_tws_port == 7496
+    assert lade("IBKR_GATEWAY_HOST=1.2.3.4\n").ibkr_tws_host == "1.2.3.4"
+    assert lade("IBKR_TWS_HOST=1.2.3.4\n").ibkr_tws_host == "1.2.3.4"
+
+    beide = lade("IBKR_GATEWAY_PORT=7496\nIBKR_TWS_PORT=7497\n")
+    assert beide.ibkr_tws_port == 7497, "Stehen beide da, gewinnt die neue."
+
+    # Der alte Feldname bleibt als Lesezugriff, damit nichts im Baum zweimal
+    # umgestellt werden muss — dieselbe Zahl, keine zweite Quelle.
+    assert beide.ibkr_gateway_port == beide.ibkr_tws_port
 
 
 # ── TWS / Gateway ────────────────────────────────────────────────────────────
@@ -222,3 +281,73 @@ def test_the_settings_link_follows_a_custom_server() -> None:
         "https://staging.example.com/settings?tab=broker"
     )
     assert failures.settings_url() == "https://t1.ordertune.com/settings?tab=broker"
+
+
+def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path) -> None:
+    """T1-213 — Owner-Befund vom 2026-09-23, am ersten Probelauf der EXE.
+
+    Der Assistent legt `bridge.env` seit T1-178 selbst an, sobald die Kopplung
+    steht. Eine Startmeldung, die stattdessen zum Herunterladen auffordert,
+    schickt den Kunden auf einen Umweg — und zwar an der auffaelligsten Stelle
+    der ganzen Anwendung, unmittelbar ueber dem Knopf, der den kurzen Weg geht.
+
+    Geprueft werden beide Faelle, die eine `bridge.env` betreffen: die fehlende
+    und die fehlerhafte. Der zweite war in der ersten Fassung dieser Korrektur
+    uebersehen worden.
+    """
+    fehlt = failures.render(
+        failures.classify_config_error(
+            _validation_error(), "C:\\ot\\bridge.env", env_exists=False
+        )
+    )
+    kaputt = failures.render(
+        failures.classify_config_error(
+            _fehler_aus_datei(tmp_path, "IBKR_TWS_PORT=nope\n"),
+            "C:\\ot\\bridge.env",
+            env_exists=True,
+        )
+    )
+
+    # Geprueft wird die AUFFORDERUNG, nicht das Wort: „nothing to download"
+    # ist genau die richtige Aussage und darf nicht mitgefangen werden.
+    aufforderungen = ("download the", "download a", "downloaden")
+    for block, fall in ((fehlt, "env_missing"), (kaputt, "env_invalid")):
+        unten = block.lower()
+        for form in aufforderungen:
+            assert form not in unten, (
+                f"{fall} fordert zum Herunterladen auf ({form!r}):\n{block}"
+            )
+        assert "settings?tab=broker" not in unten, (
+            f"{fall} verweist auf die Download-Flaeche:\n{block}"
+        )
+
+    # Und die fehlende Datei nennt den Weg, der wirklich gilt.
+    assert "pair" in fehlt.lower()
+
+
+def test_no_token_failure_tells_the_customer_to_download_a_bridge_env() -> None:
+    """Owner-Befund vom 2026-09-23, ZWEITER Probelauf — und eine Lehre ueber
+    Zusicherungen.
+
+    Die Zusicherung darueber deckte nur die zwei Konfigurationsfaelle ab, weil
+    das die zwei Stellen waren, die der erste Probelauf gezeigt hat. Sechs
+    weitere standen in der Token-Familie, darunter der 401-Fall — und den hat
+    der Owner beim naechsten Lauf als Meldungsfenster fotografiert.
+
+    Eine Zusicherung, die genau den gemeldeten Fall prueft und nicht seine
+    Gattung, findet den naechsten nicht. Diese hier geht ueber ALLE
+    Handschlag-Stoerungen.
+
+    Ausnahme mit Grund: `missing_fingerprint`. Dort ist die BRIDGE zu alt, und
+    die will wirklich heruntergeladen werden.
+    """
+    from ordertune_bridge_ibkr.failures import _HANDSHAKE_BY_CODE
+
+    for schluessel, (code, headline, detail, _) in _HANDSHAKE_BY_CODE.items():
+        if code == "fingerprint_missing":
+            continue
+        text = " ".join(detail).lower()
+        for form in ("download the", "download a", "download new"):
+            assert form not in text, (
+                f"{schluessel} fordert zum Herunterladen auf ({form!r}): {detail}"
+            )

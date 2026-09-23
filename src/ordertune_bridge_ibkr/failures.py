@@ -99,8 +99,42 @@ def _redacted(field_name: str, value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "..."
 
 
+# T1-214 — ein Feld, zwei erlaubte Schreibweisen.
+#
+# Seit `IBKR_TWS_PORT` die neue und `IBKR_GATEWAY_PORT` die weiterhin gueltige
+# alte Schreibweise ist, entscheidet **Pydantic**, welche der beiden im
+# Fehlerblock landet — und das faellt nicht ueberall gleich aus. Gemessen am
+# 2026-09-23 am selben Datensatz: macOS nannte die Schreibweise aus der Datei,
+# der Windows-Laeufer die kanonische.
+#
+# Damit war die Zusage im Kommentar unten — „Name wie in der Datei" — keine
+# mehr. Ein Kunde mit `IBKR_GATEWAY_PORT` in seiner Datei haette nach einer
+# Zeile gesucht, die dort nicht steht.
+#
+# Statt zu raten, welche gemeint ist, nennt die Zeile **beide**. Das ist
+# plattformunabhaengig richtig und beantwortet die Frage, die der Kunde
+# wirklich hat: welche Zeile fasse ich an.
+ALIAS_GESCHWISTER: dict[str, str] = {
+    "IBKR_TWS_PORT": "IBKR_GATEWAY_PORT",
+    "IBKR_GATEWAY_PORT": "IBKR_TWS_PORT",
+    "IBKR_TWS_HOST": "IBKR_GATEWAY_HOST",
+    "IBKR_GATEWAY_HOST": "IBKR_TWS_HOST",
+}
+
+
+def _feldname(roh: str) -> str:
+    """Der Name fuer den Block — bei zwei Schreibweisen beide."""
+    name = roh.upper()
+    geschwister = ALIAS_GESCHWISTER.get(name)
+    return f"{name} (or {geschwister})" if geschwister else name
+
+
 def _pydantic_lines(errors: Iterable[dict[str, Any]]) -> tuple[str, ...]:
-    """Je Feld eine Zeile: Name wie in der Datei, Erwartung, gelesener Wert."""
+    """Je Feld eine Zeile: Name wie in der Datei, Erwartung, gelesener Wert.
+
+    Traegt ein Feld zwei erlaubte Schreibweisen, stehen beide da — siehe
+    `ALIAS_GESCHWISTER`.
+    """
     lines: list[str] = []
     for err in errors:
         loc = err.get("loc") or ("<unknown>",)
@@ -110,10 +144,10 @@ def _pydantic_lines(errors: Iterable[dict[str, Any]]) -> tuple[str, ...]:
             # Bei `missing` ist `input` der ganze gelesene Datensatz, nicht der
             # Wert des Feldes. Ihn auszugeben waere irrefuehrend — und bei einem
             # Datensatz mit Token auch noch gefaehrlich.
-            lines.append(f"  {field_name.upper()}: missing")
+            lines.append(f"  {_feldname(field_name)}: missing")
             continue
         got = _redacted(field_name, err.get("input"))
-        lines.append(f"  {field_name.upper()}: {msg} (got: {got})")
+        lines.append(f"  {_feldname(field_name)}: {msg} (got: {got})")
     return tuple(lines)
 
 
@@ -136,13 +170,22 @@ def classify_config_error(
             headline="bridge.env was not found.",
             detail=(f"  Looked for: {env_path}",),
             action=(
-                "Download the pre-filled bridge.env from Ordertune and place it",
-                "in the same folder as this program:",
-                f"  {settings_url()}",
+                # T1-213 (Owner-Befund 2026-09-23 am ersten Probelauf der
+                # fensterlosen EXE): hier stand „Download the pre-filled
+                # bridge.env from Ordertune and place it in the same folder".
+                #
+                # Der Satz war ueberholt und stand an der auffaelligsten Stelle
+                # der ganzen Anwendung. Unmittelbar darunter oeffnet sich der
+                # Assistent, dessen erster Schritt genau das ueberfluessig
+                # macht: Code holen, in Ordertune eintippen, fertig — die
+                # Datei entsteht dabei von selbst (T1-178). Der Kunde wurde
+                # also zu einem Umweg aufgefordert, waehrend der kurze Weg
+                # unter der Meldung auf ihn wartete.
+                "This window is the setup assistant. Step 1 pairs this machine",
+                "with Ordertune: fetch a code, type it into the Broker tab, and",
+                "the Bridge writes bridge.env for you.",
                 "",
-                "The file must be named exactly bridge.env. Windows hides known",
-                "file extensions by default, so a file shown as 'bridge' may",
-                "actually be bridge.env.txt.",
+                "Nothing to download, nothing to copy between windows.",
             ),
         )
 
@@ -162,13 +205,69 @@ def classify_config_error(
         headline="bridge.env was found, but a value is missing or invalid.",
         detail=detail,
         action=(
-            "Fix the listed line, or download a fresh pre-filled bridge.env:",
-            f"  {settings_url()}",
+            # T1-213: auch hier stand ein Download. Bei einer vorhandenen,
+            # aber fehlerhaften Datei ist die richtige Auskunft ohnehin „die
+            # genannte Zeile richtigstellen" — der zweite Weg ist eine neue
+            # Kopplung, nicht ein Dateitransport.
+            "Fix the line named above.",
+            "",
+            "If you would rather start over: delete bridge.env, start the",
+            "Bridge again, and pair this machine in the assistant that opens.",
         ),
     )
 
 
-# ── IBKR TWS / Gateway ───────────────────────────────────────────────────────
+# T1-222 — es laeuft bereits eine Bridge auf dieser Maschine.
+#
+# Eigener Text, weil der Zustand ein eigener ist: nichts ist kaputt, der
+# Nutzer hat zweimal geklickt. Bis zum 2026-09-23 lief der zweite Start bis
+# zum IBKR-Verbindungsversuch, kollidierte dort auf der Client-ID, und
+# `classify_connect_error` riet aus einem Socket-Fehler — mit
+# „'Enable ActiveX and Socket Clients' is off in TWS" an erster Stelle. Eine
+# Einstellung, die in Ordnung war, sonst haette die ERSTE Instanz nicht
+# verbunden.
+
+
+def bridge_laeuft_bereits(url: str) -> Failure:
+    """Die Auskunft fuer den Doppelstart. Kein Fehler, kein Verdacht.
+
+    Der Text nennt ausdruecklich keine TWS-Einstellung und keine Client-ID:
+    beide waeren hier eine falsche Faehrte, und eine falsche Faehrte schickt
+    den Nutzer in seinen Broker, um dort etwas umzustellen, das stimmt.
+    """
+    return Failure(
+        code="bridge_already_running",
+        headline="A Bridge is already running on this machine.",
+        detail=(
+            "  Its window: " + url,
+            "",
+            "  Nothing is wrong. The Bridge has no taskbar window of its own,",
+            "  so a second click looks like a first one.",
+        ),
+        action=(
+            "The running Bridge keeps working -- you do not need to do anything.",
+            "",
+            # T1-223 — jetzt gibt es den Knopf, und der Text zeigt darauf.
+            #
+            # Die Geschichte dieser vier Zeilen ist der Grund, warum die
+            # Zusicherung dazu BEIDE Seiten misst: zuerst stand hier „close
+            # the running one first (its window has the controls)" — ein
+            # Versprechen auf Bedienelemente, die es nicht gab. Dann der
+            # Task-Manager, wahr, aber unbequem. Erst T1-223 hat das gebaut,
+            # was der erste Satz schon behauptet hatte.
+            # Der Knopf wird beim Namen genannt, nicht umschrieben: der Kunde
+            # sucht die Beschriftung, die er sieht. Die Zusicherung in
+            # T1-222 haelt genau das fest — sie ist rot geworden, als hier
+            # „the Stop button" stand.
+            "To stop it: open its window and press \"Stop the Bridge\".",
+            "",
+            "Closing the browser window does not stop the Bridge. The window is",
+            "a view of it, not the program itself.",
+        ),
+    )
+
+
+# ── IBKR TWS ─────────────────────────────────────────────────────────────────
 
 
 def classify_connect_error(
@@ -206,11 +305,10 @@ def classify_connect_error(
                 "  - Client id "
                 + (f"{client_id} is " if client_id is not None else "is ")
                 + "already used by another API connection",
-                "    to the same TWS or Gateway.",
+                "    to the same TWS.",
             ),
             action=(
                 "In TWS: File -> Global Configuration -> API -> Settings.",
-                "In IB Gateway: Configure -> Settings -> API.",
                 "Enable 'ActiveX and Socket Clients', keep 'Read-Only API' off,",
                 "and allow 127.0.0.1 as a trusted IP. Restart TWS afterwards.",
                 "",
@@ -225,7 +323,7 @@ def classify_connect_error(
             code="tws_wrong_port",
             headline=f"Nothing answers on port {port}, but something does elsewhere.",
             detail=(
-                f"  bridge.env says:  IBKR_GATEWAY_PORT={port}",
+                f"  bridge.env says:  IBKR_TWS_PORT={port}",
                 f"  Answering ports:  {listed}",
                 "",
                 "  An open port is not proof that TWS is behind it, but on this",
@@ -233,30 +331,71 @@ def classify_connect_error(
             ),
             action=(
                 "Check the socket port in TWS (File -> Global Configuration ->",
-                "API -> Settings) and set IBKR_GATEWAY_PORT in bridge.env to",
+                "API -> Settings) and set IBKR_TWS_PORT in bridge.env to",
                 "that number.",
                 "",
-                "IBKR defaults: TWS 7497 paper / 7496 live,",
-                "               IB Gateway 4002 paper / 4001 live.",
+                "IBKR defaults: TWS 7497 paper / 7496 live.",
                 "The port is a setting -- it does not follow from the account.",
             ),
         )
 
     return Failure(
         code="tws_unreachable",
-        headline=f"No connection to TWS or IB Gateway at {host}:{port}.",
+        headline=f"No connection to TWS at {host}:{port}.",
         detail=(
             f"  {exc}",
             "",
-            "  None of the four IBKR default ports answered on this machine,",
-            "  so TWS or IB Gateway is most likely not running.",
+            "  None of the IBKR default ports answered on this machine,",
+            "  so TWS is most likely not running.",
         ),
         action=(
-            "Start TWS or IB Gateway and log in, then start the Bridge again.",
+            "Start TWS and log in, then start the Bridge again.",
             "",
             "Note that IBKR logs TWS out daily around 05:00 CET. For unattended",
             "operation use IBC so it logs back in automatically.",
         ),
+    )
+
+
+# T1-214 — der Kunde sitzt auf einem IB Gateway.
+#
+# Ein eigener Text, weil der Zustand ein eigener ist: es laeuft etwas, es
+# funktioniert sogar, und trotzdem fehlt der Ausfallschutz. „Nichts gefunden"
+# waere falsch, „falscher Port" waere die halbe Wahrheit.
+GATEWAY_HEADLINE = "You are running IB Gateway. Ordertune Bridge needs TWS."
+
+GATEWAY_DETAIL: tuple[str, ...] = (
+    "  The Bridge reads the trade reports that TWS writes to disk. That file",
+    "  is what lets a fill be recovered when the Bridge was off at the moment",
+    "  it happened -- the reason you no longer have to keep the Bridge open",
+    "  until the closing bell.",
+    "",
+    "  IB Gateway has no export function: its configuration tree ends before",
+    "  'Export Reports'. Everything else works, this one thing cannot.",
+)
+
+GATEWAY_ACTION: tuple[str, ...] = (
+    "Install Trader Workstation, log in with the same account, and set",
+    "Global Configuration -> Export Reports (leave 'Export filename' empty).",
+    "",
+    "Until you do, the Bridge keeps trading -- you are missing the recovery,",
+    "not the execution.",
+)
+
+
+def gateway_statt_tws(port: int, answering: tuple[tuple[int, str], ...]) -> Failure:
+    """Die Auskunft fuer ein erkanntes Gateway. **Kein Abbruch.**
+
+    Ein Riegel waere hier die falsche Antwort: wer heute laeuft, soll
+    weiterlaufen. Er bekommt einen Hinweis, keine Sperre — ein Riegel, der den
+    Kunden haerter trifft als das Problem, ist keine Verbesserung.
+    """
+    listed = ", ".join(f"{p} ({label})" for p, label in answering)
+    return Failure(
+        code="gateway_not_tws",
+        headline=GATEWAY_HEADLINE,
+        detail=(f"  Answering ports:  {listed}", "", *GATEWAY_DETAIL),
+        action=GATEWAY_ACTION,
     )
 
 
@@ -267,6 +406,16 @@ def classify_connect_error(
 # gilt fuer jeden Code ausserhalb von `RENEWABLE_AUTH_CODES`, und dort bleibt
 # der heutige Wortlaut samt Website unveraendert stehen.
 #
+# T1-213, Owner-Befund 2026-09-23 am zweiten Probelauf: sechs dieser Texte
+# forderten noch zum Herunterladen einer `bridge.env` auf — darunter der
+# 401-Fall, den der Owner als Meldungsfenster fotografiert hat. Seit T1-178
+# legt die Kopplung die Datei selbst an, und seit T1-181 oeffnet ausgerechnet
+# ein wertloses Token den Assistenten: der Satz forderte also einen Umweg,
+# waehrend der kurze Weg im selben Augenblick aufging.
+#
+# `missing_fingerprint` behaelt seinen Download — dort ist die BRIDGE zu alt,
+# und die will wirklich heruntergeladen werden.
+#
 # Die Texte hier nennen bewusst KEINE Handlung. Der Knopf darunter ist die
 # Handlung; ein Satz, der dasselbe noch einmal sagt, muss mitgepflegt werden
 # und widerspricht ihm beim ersten Mal, wo das jemand vergisst. Genau so ist
@@ -276,8 +425,8 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "token_invalid",
         "Ordertune rejected the access token.",
         (
-            "Generate a fresh token in Ordertune and download the new",
-            "bridge.env. The plain token is shown only once.",
+            "Pair this machine again: the assistant opens in a moment and",
+            "fetches a fresh token for you.",
         ),
         ("This access token is no longer valid.",),
     ),
@@ -286,7 +435,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "The request carried no access token.",
         (
             "ORDERTUNE_BRIDGE_TOKEN is empty or malformed in bridge.env.",
-            "Download a fresh pre-filled file.",
+            "Pair this machine again to write a working one.",
         ),
         ("This machine has no usable access token.",),
     ),
@@ -294,8 +443,8 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "connection_revoked",
         "This bridge connection was revoked in Ordertune.",
         (
-            "Create a new connection in Ordertune, download the new",
-            "bridge.env and replace the old one.",
+            "Create a new connection in Ordertune, then pair this machine",
+            "with it.",
         ),
         ("This connection was revoked, so its token no longer works.",),
     ),
@@ -322,7 +471,7 @@ _HANDSHAKE_BY_CODE: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]]
         "fingerprint_already_set",
         "This token already belongs to another machine.",
         (
-            "Rotate the token in Ordertune and download the new bridge.env.",
+            "Pair this machine again -- that issues it a token of its own.",
             "Do not run two bridges from one token -- give each machine its own.",
         ),
         # Der Zusatz gehoert hierher und nicht zum Knopf: die Kopplung rotiert
@@ -434,7 +583,7 @@ def classify_handshake_error(exc: Exception, api_base: str | None = None) -> Fai
         detail=(f"  {body[:200]}" if body else f"  {exc}",),
         action=(
             "Check the Broker tab in Ordertune. If the connection looks healthy",
-            "there, rotate the token and download a fresh bridge.env:",
+            "there, pair this machine again:",
             f"  {settings_url(api_base)}",
         ),
     )

@@ -58,12 +58,22 @@ def _run(script: Path, cwd: Path | None = None) -> subprocess.CompletedProcess[s
     """
     env = dict(os.environ)
     env["PYTHONPATH"] = str(SRC)
+    # T1-213: mit Zeitgrenze, und die ist keine Vorsicht, sondern eine Lehre.
+    #
+    # Ohne sie verwandelt jeder Fehler, der den Vorgang anhaelt, diesen Test in
+    # ein Haengen — und ein haengender Test sagt nichts. Genau so ist der
+    # Release-Lauf am 2026-09-23 zweimal stehengeblieben: der Abbruchweg
+    # oeffnete auf Windows einen modalen Dialog, und `subprocess.run` wartete
+    # darauf, dass jemand klickt.
+    #
+    # Dreissig Sekunden sind grosszuegig — der Lauf dauert unter einer.
     return subprocess.run(
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
         cwd=str(cwd or ROOT),
         env=env,
+        timeout=30,
     )
 
 
