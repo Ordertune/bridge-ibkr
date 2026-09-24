@@ -90,6 +90,57 @@ def exe_dir() -> Path:
     return Path.cwd()
 
 
+ENV_FILE_NAME = "bridge.env"
+
+
+def env_file() -> Path:
+    """Wo `bridge.env` liegt.
+
+    ## Der Befund (Owner, 2026-09-24)
+
+    `main.main` loeste die Datei als `Path("bridge.env").resolve()` auf — also
+    gegen das **Arbeitsverzeichnis**. Der Kopf dieses Moduls behauptet seit
+    T1-176 B das Gegenteil:
+
+        `bridge.env` bleibt, wo sie ist: neben der EXE.
+
+    Das war nie wahr, es ist auf Windows nur nie aufgefallen: ein Doppelklick
+    setzt das Arbeitsverzeichnis auf den Ordner der EXE, und damit fallen beide
+    Orte zusammen.
+
+    Auf einem Linux-Desktop fallen sie auseinander. Wer das Programm aus dem
+    Dateimanager startet oder aus einem Terminal, das woanders steht, koppelt
+    erfolgreich — und die frisch geschriebene `bridge.env` landet irgendwo,
+    nicht neben dem Programm. Der naechste Start findet sie nicht und
+    praesentiert `env_missing`, obwohl die Kopplung sichtbar geklappt hat.
+
+    ## Die Reihenfolge, und warum sie so herum ist
+
+    1. **Neben dem Programm.** Das ist die Zusage, und ab jetzt gilt sie.
+    2. **Im Arbeitsverzeichnis**, falls dort eine liegt und neben dem Programm
+       keine.
+
+    Der zweite Schritt ist kein Zoegern, sondern Ruecksicht auf den Bestand.
+    Wer seine Bridge heute ueber eine geplante Aufgabe mit gesetztem
+    „Ausfuehren in" startet und die Datei dort abgelegt hat, laeuft damit
+    weiter. Ohne den Rueckfall haette dieselbe Aenderung, die einen Fehler
+    behebt, bei ihm einen erzeugt.
+
+    Gesucht wird nur nach einer **vorhandenen** Datei. Geschrieben wird immer
+    an Stelle 1 — sonst wuerde der Rueckfall den Fehler verewigen, den er
+    abfedern soll.
+    """
+    neben = exe_dir() / ENV_FILE_NAME
+    if neben.exists():
+        return neben
+
+    im_arbeitsverzeichnis = (Path.cwd() / ENV_FILE_NAME).resolve()
+    if im_arbeitsverzeichnis != neben and im_arbeitsverzeichnis.exists():
+        return im_arbeitsverzeichnis
+
+    return neben
+
+
 def _hat_inhalt(pfad: Path) -> bool:
     return pfad.is_dir() and any(pfad.iterdir())
 

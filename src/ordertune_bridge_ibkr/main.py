@@ -1949,7 +1949,9 @@ def run_supervised(
             on_reconnected()
 
 
-ENV_FILE = "bridge.env"
+#: Der Name der Datei. WO sie liegt, beantwortet `paths.env_file()` — und das
+#: ist seit T1-206 nicht mehr dasselbe wie „im Arbeitsverzeichnis".
+ENV_FILE = paths.ENV_FILE_NAME
 
 
 # ── T1-101 B-1: die vier Beruehrpunkte zum Cockpit ───────────────────────────
@@ -2048,7 +2050,7 @@ def start_cockpit(
             diagnostics=diagnostics,
             on_stop=_halten,
             setup=SetupActions(
-                Path(ENV_FILE).resolve(),
+                paths.env_file(),
                 store=store,
                 orders_in_flight=orders_in_flight,
                 api_base=str(config.ordertune_api_base),
@@ -2476,7 +2478,12 @@ def main() -> int:
     # Aufgeloest, bevor irgendetwas schiefgeht: bei einem Doppelklick ist das
     # Arbeitsverzeichnis nicht zwingend der Ordner der EXE, und „Datei nicht
     # gefunden" ohne Suchort ist keine Auskunft.
-    env_path = Path(ENV_FILE).resolve()
+    # T1-206 — neben dem Programm, nicht im Arbeitsverzeichnis.
+    #
+    # Aufgeloest, bevor irgendetwas schiefgeht: „Datei nicht gefunden" ohne
+    # Suchort ist keine Auskunft. Die Begruendung, warum der Ort nicht mehr die
+    # CWD ist, steht bei `paths.env_file()`.
+    env_path = paths.env_file()
 
     # T1-206 B — die Kopplung ueber die Konsole, vor dem Laden der Datei.
     #
