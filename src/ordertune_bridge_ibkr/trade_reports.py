@@ -70,14 +70,57 @@ from .order_reference import dispatch_id_from_order_ref
 
 log = logging.getLogger(__name__)
 
-#: Wohin die TWS unter Windows ueblicherweise exportiert. Nur ein Vorschlag —
-#: der Kunde waehlt das Verzeichnis im Dialog selbst, und `bridge.env` hat das
-#: letzte Wort.
-#:
-#: Ausserhalb von Windows gibt es keinen sinnvollen Vorschlag; dort bleibt es
-#: leer, und die Bereitschaftspruefung sagt „nicht eingerichtet" statt einen
-#: Windows-Pfad zu vermissen, den es auf dieser Maschine nie geben wird.
-STANDARD_VERZEICHNIS = r"C:\IBExport" if sys.platform == "win32" else ""
+#: Der Name des Ordners, den beide Plattformen vorschlagen. Er steht hier
+#: einmal, damit Anleitung und Vorschlag nicht auseinanderlaufen koennen.
+EXPORT_ORDNERNAME = "IBExport"
+
+
+def standard_verzeichnis() -> str:
+    r"""Wohin die TWS ueblicherweise exportiert. Nur ein Vorschlag.
+
+    Der Kunde waehlt das Verzeichnis im Dialog der TWS selbst, und `bridge.env`
+    hat in jedem Fall das letzte Wort. Dieser Wert entscheidet nur, ob er
+    ueberhaupt etwas eintragen **muss**.
+
+    ## Warum hier bis T1-206 eine leere Zeichenkette stand
+
+    Die Begruendung war: ausserhalb von Windows gibt es keinen sinnvollen
+    Vorschlag, und einen Windows-Pfad zu vermissen, den es auf dieser Maschine
+    nie geben wird, waere schlechter als zu schweigen.
+
+    Das stimmte, **solange wir das Installationsbild auf Linux nicht kannten**.
+    Mit Scope C von T1-206 liegt es fest: ein Dienstnutzer mit Heimverzeichnis,
+    unter dem sowohl die TWS als auch die Bridge laufen (Entscheidung 7). Damit
+    gibt es einen natuerlichen Ort, und er ist genauso gut wie `C:\IBExport`
+    auf Windows.
+
+    ## Was die leere Zeichenkette gekostet haette
+
+    Die Bereitschaftspruefung haette auf **jeder** frischen Linux-Installation
+    `not_configured` gemeldet, und diese Meldung sagt woertlich, was fehlt: eine
+    Fuellung, die passiert, waehrend die Bridge aus ist, kann nicht nachgetragen
+    werden. Das ist der teuerste Zustand des ganzen Systems — und er waere auf
+    Linux die Voreinstellung gewesen, nicht der Ausnahmefall.
+
+    Die Plattform-Verzweigung bleibt dabei die einzige im Modul. Es kommt kein
+    zweiter Entscheidungspunkt dazu, nur ein tragfaehiger Zweig an derselben
+    Stelle.
+    """
+    if sys.platform == "win32":
+        return rf"C:\{EXPORT_ORDNERNAME}"
+    try:
+        return str(Path.home() / EXPORT_ORDNERNAME)
+    except (OSError, RuntimeError):
+        # Ein Vorgang ohne aufloesbares Heimverzeichnis — ein Dienst ohne
+        # `HOME`, ein leeres Passwortverzeichnis. Dann lieber schweigen als
+        # einen Pfad vorschlagen, der nirgendwohin zeigt: das ist genau der
+        # alte Zustand, und fuer genau diesen Fall war er richtig.
+        return ""
+
+
+#: Der Vorschlag, einmal beim Laden ausgewertet. `config` liest ihn als
+#: `DEFAULT_TWS_EXPORT_DIR`.
+STANDARD_VERZEICHNIS = standard_verzeichnis()
 
 # ── Spaltennamen, wie die TWS sie schreibt ───────────────────────────────────
 SPALTE_KONTO = "Account"
@@ -501,6 +544,100 @@ def pruefe(verzeichnis: Path | str, *, heute: str | None = None) -> Bereitschaft
         )
 
     return Bereitschaft("ok", f"TWS trade reports: reading {basis}.")
+
+
+# ── T1-206 — die Uebergabe an die TWS nachpruefbar machen ────────────────────
+
+CHECK_FLAG = "--check-reports"
+
+
+def check_requested(argv: list[str]) -> bool:
+    """Steht `--check-reports` auf der Befehlszeile?
+
+    Als reine Funktion, damit die Zusicherung sie ohne Vorgang pruefen kann —
+    wie `pair_requested`, `probe_requested` und `console_requested`.
+    """
+    return CHECK_FLAG in argv
+
+
+def check_bericht(verzeichnis: Path | str) -> list[str]:
+    r"""Der Block, den `--check-reports` ausgibt. Zeile fuer Zeile.
+
+    ## Woher das kommt
+
+    Owner-Befund 2026-09-24: der eine Handgriff, den wir dem Kunden nicht
+    abnehmen koennen, ist die **Uebergabe des Verzeichnisses an die TWS**. Wir
+    legen den Ordner an, die Bridge liest ihn — aber eintragen muss ihn ein
+    Mensch, in einem fremden Dialog, auf der anderen Seite des Bildschirms.
+
+    Auf Windows ist das erprobt und kurz: `C:\IBExport` steht in der Anleitung
+    und wird abgetippt. Auf Linux ist der Pfad laenger, traegt einen
+    Bindestrich, und der Kunde ist beim Eintragen nicht einmal als der Nutzer
+    angemeldet, dem er gehoert. Ein Tippfehler faellt dabei **nicht** auf: die
+    TWS legt den Ordner an, den sie bekommt, exportiert fleissig dorthin, und
+    alles sieht richtig aus. Bemerkt wird es an einer Fuellung, die nach einer
+    Auszeit fehlt — also genau dann, wenn es zu spaet ist.
+
+    ## Warum ein eigener Schalter und nicht nur das Protokoll
+
+    Die Pruefung `pruefe()` gibt es laengst und sie laeuft beim Start. Ihr
+    Befund landet im Protokoll und im Cockpit. Nur: beim Einrichten hat der
+    Kunde das Cockpit nicht offen (auf einem Server gibt es keins), und das
+    Protokoll liest er nicht mit.
+
+    Der Schalter aendert nichts an der Pruefung — er holt sie an die Stelle,
+    an der die Frage entsteht. Der Kunde traegt den Pfad in die TWS ein,
+    wechselt ins Terminal, tippt einen Befehl und **weiss es**, statt es zu
+    glauben.
+
+    Bewusst ohne IBKR-Verbindung und ohne Plattform: die Frage ist „liegt da,
+    was ich erwarte", und die laesst sich an der Platte beantworten. Ein
+    Pruefbefehl, der eine laufende TWS braucht, waere beim Einrichten
+    ausgerechnet dann nicht verfuegbar, wenn er gebraucht wird.
+    """
+    basis = str(verzeichnis or "").strip()
+    zeilen = [
+        "",
+        "  TWS trade reports",
+        "  " + "-" * 64,
+        f"  Bridge reads:  {basis or '(not set)'}",
+        "",
+    ]
+
+    bereit = pruefe(basis)
+    zeilen.append(f"  Result: {bereit.zustand}")
+    zeilen.append(f"  {bereit.text}")
+
+    if bereit.ok:
+        try:
+            dateien_hier = sorted(
+                p.name for p in Path(basis).iterdir()
+                if p.is_file() and p.suffix.lower() == ".csv"
+            )
+        except OSError:
+            dateien_hier = []
+        zeilen.append("")
+        zeilen.append(f"  {len(dateien_hier)} report file(s) found.")
+        for name in dateien_hier[-3:]:
+            zeilen.append(f"    {name}")
+    else:
+        # Die drei Einstellungen, an denen es haengt — in der Reihenfolge des
+        # Dialogs. Zwei davon sind Fallen, die sich nicht von selbst zeigen:
+        # ein eingetragener Dateiname laesst die TWS dieselbe Datei ueberschreiben,
+        # und ein Komma als Trennzeichen zerbricht Zeilen, weil IBKR nicht quotet.
+        zeilen.extend([
+            "",
+            "  In TWS: Global Configuration - Export Reports",
+            f"    Directory        {basis or '(set TWS_EXPORT_DIR in bridge.env)'}",
+            "    Export filename  leave EMPTY",
+            "    Field separator  semicolon",
+            "    Export trade reports periodically: on",
+            "",
+            "  TWS and the Bridge must run under the same user.",
+        ])
+
+    zeilen.append("")
+    return zeilen
 
 
 def _tage_zurueck(tag: str, tage: int) -> str:

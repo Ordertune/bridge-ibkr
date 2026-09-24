@@ -150,6 +150,78 @@ def migrate_legacy(*, ziel: Path | None = None) -> list[tuple[str, str]]:
     return meldungen
 
 
+#: Die Raenge der Schreibprobe. Bewusst benannt und nicht bloss wahr/falsch —
+#: dieselbe Haltung wie in `write_access`: ein Zustand, der sagt, WELCHER
+#: Riegel fehlt, ist etwas anderes als ein Fehlschlag.
+ABLAGE_SCHREIBBAR = "writable"
+ABLAGE_NICHT_SCHREIBBAR = "not_writable"
+
+
+def probe_writable(*, ziel: Path | None = None) -> tuple[str, str | None]:
+    """Einmal schreiben, einmal loeschen. Gibt `(Rang, Grund)` zurueck.
+
+    ## Warum das nicht dem `SubmittedStore` ueberlassen bleibt
+
+    Die Haltung des Speichers ist richtig und bleibt: ein schreibgeschuetztes
+    Verzeichnis darf den Handel nicht anhalten. Falsch ist nur der
+    **Zeitpunkt**, zu dem sie auffaellt. Heute entsteht die Warnung erst, wenn
+    zum ersten Mal geschrieben werden soll — also mitten im ersten Auftrag, in
+    einer Protokolldatei, die in diesem Moment niemand offen hat.
+
+    ## Was auf dem Spiel steht
+
+    In dieser Ablage liegt `submitted-dispatches.json`, der Riegel gegen den
+    Doppelauftrag aus T1-103 H. Sein ganzer Zweck ist es, den Neustart zu
+    ueberleben. Ist die Ablage nicht schreibbar, verhaelt sich die Bridge wie
+    vor T1-103 H: sie vergisst ueber einen Neustart hinweg, was sie schon
+    abgesendet hat — `place_order` gelingt, `ack_order` scheitert, der naechste
+    Abruf liefert denselben Auftrag erneut aus. **Zwei Echtauftraege.**
+
+    Auf Windows war das ein exotischer Fall. Auf Linux ist es eine
+    realistische Fehlkonfiguration: ein Dienstnutzer, der ohne Heimverzeichnis
+    angelegt wurde, hat genau diesen Zustand — und nichts daran sieht nach
+    einem Fehler aus, weil die Kopplung ja geklappt hat.
+
+    Deshalb wird hier nichts Neues verboten. Es wird dieselbe Warnung
+    ausgeloest, nur **bevor** Geld im Spiel ist.
+    """
+    wurzel = ziel if ziel is not None else data_root()
+    marke = wurzel / ".write-probe"
+    try:
+        wurzel.mkdir(parents=True, exist_ok=True)
+        marke.write_text("ordertune", encoding="utf-8")
+        marke.unlink()
+    except OSError as exc:
+        return ABLAGE_NICHT_SCHREIBBAR, str(exc)
+    return ABLAGE_SCHREIBBAR, None
+
+
+def writability_warning(grund: str | None, *, ziel: Path | None = None) -> list[str]:
+    """Der Wortlaut zur fehlgeschlagenen Probe, Zeile fuer Zeile.
+
+    Getrennt vom Messen, damit die Zusicherung den Text pruefen kann, ohne ein
+    schreibgeschuetztes Verzeichnis herstellen zu muessen.
+
+    Der Riegel wird **namentlich** genannt. „Could not write to the data
+    folder" waere richtig und nutzlos: es sagt nicht, was dadurch ausfaellt,
+    und genau das entscheidet, ob jemand hinsieht.
+    """
+    wurzel = ziel if ziel is not None else data_root()
+    return [
+        f"The Bridge cannot write to its data folder: {wurzel}",
+        f"  Reason: {grund}" if grund else "  Reason: unknown",
+        "  This disables the guard against sending the same order twice.",
+        (
+            "  That guard remembers which orders already went to your broker,"
+            " and it only works if it survives a restart."
+        ),
+        (
+            "  Trading continues. Fix the folder permissions and restart the"
+            " Bridge as soon as you can."
+        ),
+    ]
+
+
 def ensure_readme(*, ziel: Path | None = None) -> None:
     """Einen Satz danebenlegen, damit niemand den Ordner fuer Abfall haelt."""
     wurzel = ziel if ziel is not None else data_root()
