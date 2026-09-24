@@ -1,4 +1,16 @@
-# Linux-VPS Setup
+# Linux-Server Setup (ohne Desktop)
+
+> **Das ist einer von zwei Linux-Wegen, und wahrscheinlich nicht deiner.**
+>
+> Dieser hier ist für eine Maschine, an der niemand angemeldet ist: Dienstnutzer,
+> systemd, Kopplung über die Konsole. Den anderen — **Linux mit grafischer
+> Oberfläche**, TWS im Fenster, Bridge wie unter Windows — beschreibt
+> [SETUP_LINUX_DESKTOP.md](SETUP_LINUX_DESKTOP.md), und er ist der einfachere.
+>
+> Wer den Desktop-Fall hier hineinzwingt, bekommt den teuersten aller
+> Fehlzustände: der Dienstnutzer liest `/home/ordertune-bridge/IBExport`,
+> während die TWS unter der Kennung des Menschen nach dessen `~/IBExport`
+> schreibt. Zwei Orte, keine Meldung, kein Sicherungsnetz.
 
 Technisches Gegenstück zu [SETUP_WINDOWS_VPS.md](SETUP_WINDOWS_VPS.md) — für
 Support und Entwicklung. **Das Kundenhandbuch ist
@@ -61,12 +73,16 @@ sudo systemctl enable --now ordertune-bridge
 
 Zwei Dinge daran sind unsichtbar, wenn sie falsch sind.
 
-**`cd /opt/ordertune-bridge`.** `main()` löst die Datei als
-`Path("bridge.env").resolve()` auf — gegen das **Arbeitsverzeichnis**, nicht
-gegen den Programmordner. Auf Windows fällt das nie auf, weil ein Doppelklick
-beides gleichsetzt. Ohne `cd` landet die frisch gekoppelte `bridge.env` dort,
-wo der Befehl abgesetzt wurde, und der Dienst startet später in einen
-Konfigurationsfehler — obwohl die Kopplung sichtbar geklappt hat.
+**`cd /opt/ordertune-bridge`.** Seit T1-206 sucht die Bridge `bridge.env`
+neben dem Programm (`paths.env_file()`), also ist das `cd` keine Bedingung
+mehr — es schadet aber nichts und hält die Befehlszeile bei dem, was auch im
+Handbuch steht.
+
+Bis dahin war es Pflicht, und der Fehler war teuer: `main()` löste die Datei
+gegen das **Arbeitsverzeichnis** auf, obwohl der Kopf von `paths.py` das
+Gegenteil behauptete. Ohne `cd` landete die frisch gekoppelte `bridge.env`
+dort, wo der Befehl abgesetzt wurde — die Kopplung meldete Erfolg, und der
+Dienst startete später in `env_missing`.
 
 **`env HOME=…`.** `runuser -u` wechselt die Kennung, nicht die Umgebung.
 `$HOME` bliebe das des Aufrufers, und daraus leitet die Bridge ihre Ablage
