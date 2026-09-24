@@ -578,3 +578,55 @@ def test_pairing_runs_as_the_service_user_from_the_program_folder() -> None:
     assert "runuser -u" in skript
     assert "HOME=" in skript
     assert 'cd "${ZIEL}"' in skript
+
+
+# ── Der leere Ordner ist keine Anschuldigung ─────────────────────────────────
+
+
+def test_an_empty_folder_does_not_claim_the_switch_is_off(tmp_path) -> None:
+    """`no_file` darf nicht behaupten, was die Bridge nicht sehen kann.
+
+    ## Der Befund (Owner, 2026-09-24)
+
+    Erster Lauf auf einer frisch eingerichteten Maschine. In der TWS: Schalter
+    an, Intervall 1, Dateiname leer, Semikolon — alles richtig. Die Bridge
+    meldete:
+
+        no .csv file in /home/.../IBExport. In TWS open Global Configuration -
+        Export Reports and switch on 'Export trade reports periodically'.
+
+    Sie forderte ihn auf, einzuschalten, was eingeschaltet war. Das ist eine
+    Aussage ueber eine Einstellung in einem fremden Programm, und die Bridge
+    sieht sie nicht — sie sieht einen leeren Ordner.
+
+    Eine Anweisung, die man gerade befolgt hat, ist die schnellste Art, die
+    naechste nicht mehr ernst zu nehmen.
+    """
+    bereit = trade_reports.pruefe(tmp_path)
+
+    assert bereit.zustand == "no_file"
+    assert "switch on" not in bereit.text.lower(), (
+        "Die Meldung fordert auf, einzuschalten, was sie nicht pruefen kann."
+    )
+    # Was sie sieht, steht da.
+    assert "empty" in bereit.text
+    assert str(tmp_path) in bereit.text
+    # Und beide Lesarten, die harmlose zuerst.
+    assert "expected" in bereit.text
+    assert "somewhere else" in bereit.text
+
+
+def test_the_cockpit_does_not_call_an_empty_folder_a_failure() -> None:
+    """Die Flaeche nennt den leeren Ordner beim Namen, nicht beim Verdacht.
+
+    „TWS is not writing trade reports" ueber einem Ordner, der nur noch nichts
+    zu berichten hatte, ist dieselbe Behauptung eine Ebene hoeher.
+    """
+    seite = (
+        WURZEL / "src/ordertune_bridge_ibkr/cockpit/page.py"
+    ).read_text(encoding="utf-8")
+
+    assert 's.trade_export === "no_file"' in seite, (
+        "Der leere Ordner teilt sich die Flaeche wieder mit jedem anderen Befund."
+    )
+    assert "No trade report yet" in seite

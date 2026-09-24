@@ -510,12 +510,34 @@ def pruefe(verzeichnis: Path | str, *, heute: str | None = None) -> Bereitschaft
         )
 
     if not eintraege:
+        # T1-206 — dieser Zweig hat behauptet, was er nicht wissen kann.
+        #
+        # Hier stand: „In TWS open Global Configuration - Export Reports and
+        # switch on 'Export trade reports periodically'." Das ist eine Aussage
+        # ueber eine Einstellung in einem fremden Programm, und die Bridge
+        # sieht sie nicht. Sie sieht einen leeren Ordner.
+        #
+        # Gemeldet vom Owner am 2026-09-24, beim ersten Lauf auf einer frisch
+        # eingerichteten Maschine: Schalter an, Intervall 1, Dateiname leer,
+        # alles richtig — und die Bridge sagte ihm, er solle einschalten, was
+        # eingeschaltet war. Eine Anweisung, die man gerade befolgt hat, ist
+        # die schnellste Art, die naechste nicht mehr ernst zu nehmen.
+        #
+        # Ein leerer Ordner hat zwei Lesarten, und die harmlose ist direkt nach
+        # der Einrichtung die wahrscheinlichere: die TWS exportiert
+        # Handelsberichte, und ohne Handel gibt es nichts zu exportieren. Die
+        # teure Lesart — die TWS schreibt woanders hin — wird erst dann
+        # wahrscheinlich, wenn an diesem Tag etwas gefuellt wurde.
+        #
+        # Beide stehen jetzt da, die harmlose zuerst, und keine als Befehl.
         return Bereitschaft(
             "no_file",
-            f"TWS trade reports: no .csv file in {basis}. In TWS open Global "
-            f"Configuration - Export Reports and switch on 'Export trade "
-            f"reports periodically'. Until then a fill that happens while the "
-            f"Bridge is off cannot be recovered.",
+            f"TWS trade reports: {basis} exists and is empty. If nothing has "
+            f"filled since you switched the export on, that is expected - TWS "
+            f"writes a report once there is a trade to report. If something "
+            f"did fill today, then TWS is writing somewhere else: compare this "
+            f"path with the one in Global Configuration - Export Reports, "
+            f"character by character.",
         )
 
     # Die Falle aus dem Dialog: ein eingetragener Dateiname laesst die TWS in
