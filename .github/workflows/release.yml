@@ -517,15 +517,23 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/smoke"
           cp "$LOG" "$GITHUB_WORKSPACE/smoke/bridge-linux.log"
 
-          BEIDES="$OUT
-          $(cat "$LOG")"
+          # In eine Datei statt durch ein Rohr — siehe die ausfuehrliche
+          # Begruendung im Schritt „The installer and the archive still agree".
+          # Hier hat es bisher gehalten, weil die Ausgabe in den Puffer des
+          # Rohres passt und `echo` fertig ist, bevor `grep -q` aussteigt. Das
+          # ist kein Entwurf, das ist eine Puffergroesse: waechst das Protokoll
+          # ueber 64 KiB, kippt derselbe Fall hier hinein.
+          {
+            echo "$OUT"
+            cat "$LOG"
+          } > /tmp/smoke-beides.txt
 
-          if echo "$BEIDES" | grep -qE "ImportError|Traceback \(most recent call last\)"; then
+          if grep -qE "ImportError|Traceback \(most recent call last\)" /tmp/smoke-beides.txt; then
             echo "::error::The built bundle fails to start. Publishing this would ship a binary that dies on launch."
             exit 1
           fi
           # Geprueft wird die stabile Kennung, nicht der Wortlaut (T1-101 A-2).
-          if ! echo "$BEIDES" | grep -q "env_missing"; then
+          if ! grep -q "env_missing" /tmp/smoke-beides.txt; then
             echo "::error::Expected the configuration check to run and reject the missing bridge.env. It did not — the startup path changed."
             exit 1
           fi
@@ -557,7 +565,8 @@ jobs:
           sudo mount -o remount,exec /tmp || true
 
           echo "$OUT"
-          if echo "$OUT" | grep -qiE "permission denied|failed to extract|cannot execute"; then
+          echo "$OUT" > /tmp/noexec-out.txt
+          if grep -qiE "permission denied|failed to extract|cannot execute" /tmp/noexec-out.txt; then
             echo "::error::The bundle needs an executable /tmp. That is exactly the failure class One-Folder is supposed to remove."
             exit 1
           fi
@@ -590,12 +599,37 @@ jobs:
         run: |
           set -euo pipefail
           bash -n "$INSTALLER"
-          tar -tzf "$ARCHIV" | grep -qx "ordertune-bridge-ibkr/ordertune-bridge-ibkr" \
+
+          # Die Liste EINMAL in eine Datei, dann darin suchen.
+          #
+          # Hier stand `tar -tzf "$ARCHIV" | grep -qx "..."`, und der erste
+          # echte Lauf ist daran gescheitert — mit einer Meldung, die das
+          # Gegenteil des Befundes behauptete: „The archive does not carry the
+          # executable", obwohl es sie trug.
+          #
+          # Der Grund ist das Zusammenspiel zweier Dinge, die einzeln richtig
+          # sind. `grep -q` steigt beim ERSTEN Treffer aus und schliesst das
+          # Rohr; `tar` schreibt weiter, bekommt SIGPIPE und endet mit
+          # `tar: stdout: write error`. Unter `set -o pipefail` ist der
+          # Rueckgabewert einer Rohrkette der des letzten FEHLGESCHLAGENEN
+          # Gliedes — also tars Fehler, obwohl grep gefunden hat.
+          #
+          # Je frueher der Treffer, desto sicherer schlaegt es fehl. Das ist
+          # die unangenehme Sorte: ein Riegel, der genau dann rot wird, wenn
+          # alles stimmt.
+          #
+          # Ohne Rohr gibt es kein SIGPIPE. Nebenbei laeuft `tar` einmal statt
+          # zweimal.
+          tar -tzf "$ARCHIV" > /tmp/archivliste.txt
+
+          grep -qx "ordertune-bridge-ibkr/ordertune-bridge-ibkr" /tmp/archivliste.txt \
             || { echo "::error::The archive does not carry the executable where the installer looks for it."; exit 1; }
-          tar -tzf "$ARCHIV" | grep -qx "ordertune-bridge.service" \
+          grep -qx "ordertune-bridge.service" /tmp/archivliste.txt \
             || { echo "::error::The archive carries no systemd unit — the installer copies one."; exit 1; }
           grep -q "ordertune-bridge-ibkr-linux-x86_64.tar.gz" "$INSTALLER" \
             || { echo "::error::The installer does not name the archive this job builds."; exit 1; }
+
+          echo "Archive and installer agree."
 
       - name: Artefakt zum Mitnehmen
         if: always()

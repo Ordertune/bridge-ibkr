@@ -15,6 +15,7 @@ einer Meinung:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -412,6 +413,48 @@ def test_the_release_builds_linux_too() -> None:
     # Gebaut wird auf der aelteren Basis — das ist es, was die glibc-Zusage
     # nach unten absichert.
     assert "ubuntu-22.04" in yml
+
+
+def test_the_release_job_pipes_nothing_into_grep_q() -> None:
+    """`set -o pipefail` und `grep -q` vertragen sich in einer Rohrkette nicht.
+
+    ## Der Befund, aus dem diese Zusicherung entstanden ist
+
+    Der erste echte Lauf des Linux-Strangs (Tag v0.27.0, 2026-09-24) ist am
+    Abgleichschritt gescheitert — mit einer Meldung, die das Gegenteil des
+    Befundes behauptete:
+
+        tar: stdout: write error
+        ::error::The archive does not carry the executable where the
+                 installer looks for it.
+
+    Die Datei war da. `grep -q` steigt beim ERSTEN Treffer aus und schliesst
+    das Rohr; `tar` schreibt weiter, bekommt SIGPIPE und endet mit einem
+    Fehler. Unter `pipefail` ist der Rueckgabewert der Kette der des letzten
+    fehlgeschlagenen Gliedes — also tars, obwohl grep gefunden hat.
+
+    Je frueher der Treffer, desto sicherer schlaegt es fehl: ein Riegel, der
+    genau dann rot wird, wenn alles stimmt.
+
+    Dass es im Rauchtest daneben gutging, war kein Entwurf, sondern eine
+    Puffergroesse — kurze Ausgaben passen in das Rohr, und `echo` ist fertig,
+    bevor `grep` aussteigt. Waechst das Protokoll, kippt derselbe Fall.
+
+    Deshalb hier ein Riegel gegen die **Form**, nicht gegen den Einzelfall.
+    """
+    yml = (WURZEL / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    befehle = [
+        z for z in yml.splitlines()
+        if z.strip() and not z.strip().startswith("#")
+    ]
+    treffer = [z.strip() for z in befehle if re.search(r"\|\s*grep\s+-[a-zA-Z]*q", z)]
+
+    assert not treffer, (
+        "Rohrkette in `grep -q`: unter `set -o pipefail` schlaegt das fehl, "
+        "sobald der Erzeuger nach dem Treffer weiterschreibt. In eine Datei "
+        "schreiben und darin suchen.\n  " + "\n  ".join(treffer)
+    )
 
 
 def test_the_linked_names_carry_no_version() -> None:
