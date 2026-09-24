@@ -1,0 +1,91 @@
+# T1-206 C — die Bridge als Systemdienst.
+#
+# Eine SYSTEM-Einheit unter einem eigenen Dienstnutzer, nicht eine
+# Nutzer-Einheit mit `loginctl enable-linger`. Der Unterschied zaehlt: eine
+# Nutzer-Einheit haengt an einer Sitzung, und genau die soll hier niemand
+# offenhalten muessen. Der Kunde verbindet sich per SSH, meldet sich ab, und
+# der Handel laeuft weiter.
+#
+# Installiert nach /etc/systemd/system/ordertune-bridge.service.
+
+[Unit]
+Description=Ordertune Bridge (IBKR)
+Documentation=https://docs.ordertune.com/brokers/
+
+# `network-online` und nicht `network`: die Bridge spricht beim Start sofort
+# mit der Plattform. `network.target` bedeutet nur, dass die Netzwerkverwaltung
+# gestartet WURDE, nicht dass eine Adresse steht.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ordertune-bridge
+Group=ordertune-bridge
+
+# Der Programmordner. `bridge.env` liegt darin, neben der ausfuehrbaren Datei —
+# dieselbe Regel wie auf Windows, und `paths.exe_dir()` loest genau dorthin auf.
+WorkingDirectory=/opt/ordertune-bridge
+ExecStart=/opt/ordertune-bridge/ordertune-bridge-ibkr --headless
+
+# Das Heimverzeichnis ist hier kein Beiwerk, sondern der Grund, warum der
+# Dienstnutzer eines braucht.
+#
+# `paths.data_root()` loest im gepackten Zustand auf
+# `~/.local/share/ordertune-bridge` auf, und dort liegt
+# `submitted-dispatches.json` — der Riegel gegen den Doppelauftrag aus
+# T1-103 H, dessen ganzer Zweck es ist, den Neustart zu ueberleben. Zeigt
+# `$HOME` ins Leere, verhaelt sich die Bridge wie vor T1-103 H: sie vergisst
+# ueber einen Neustart hinweg, was sie schon abgesendet hat.
+#
+# systemd setzt `$HOME` aus dem Passwortverzeichnis, sobald `User=` steht. Das
+# hier ausdruecklich zu schreiben kostet nichts und macht die Abhaengigkeit
+# sichtbar, statt sie einer Voreinstellung zu ueberlassen. Die Bridge sagt es
+# beim Start ausserdem selbst, wenn die Ablage nicht schreibbar ist
+# (T1-206 C, `paths.probe_writable`).
+Environment=HOME=/home/ordertune-bridge
+
+# `--headless` steht oben in `ExecStart` und ist Pflicht: ohne die Zusage
+# koennte der Erst-Start-Assistent aufgehen und auf eine Eingabe warten, die
+# hier nie kommt. Ein haengender Vorgang meldet keinen Herzschlag und ist fuer
+# die Plattform von einem Absturz nicht zu unterscheiden.
+
+Restart=always
+RestartSec=10
+
+# Der Handelstag ueberlebt einen Absturz, aber eine Schleife aus Absturz und
+# Neustart soll nicht unbemerkt laufen. Faellt der Dienst fuenfmal in fuenf
+# Minuten aus, bleibt er stehen — dann liegt ein Fehler vor, den ein Neustart
+# nicht behebt, und der Herzschlag fehlt in t1 sichtbar.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ordertune-bridge
+
+# Ein Handelsprogramm braucht nichts vom restlichen System. Die Riegel sind
+# bewusst knapp gehalten: jeder von ihnen kann eine Installation brechen, die
+# wir nicht vor uns haben, und ein Dienst, der wegen einer Haertung nicht
+# startet, ist teurer als einer ohne sie.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+# `ProtectHome` steht hier bewusst NICHT.
+#
+# Der erste Entwurf trug `ProtectHome=read-only` samt passender
+# `ReadWritePaths`. Das war falsch herum gedacht: `ProtectHome` macht `/home`
+# auch fuer den Dienstnutzer selbst schreibgeschuetzt — also ausgerechnet die
+# Ablage unter `~/.local/share/ordertune-bridge`, in der
+# `submitted-dispatches.json` liegt. Eine Ausnahme haette das geheilt, aber nur
+# solange das Verzeichnis schon existiert; fehlt es, scheitert entweder der
+# Start der Einheit oder die Bridge laeuft ohne ihren Doppelauftrag-Riegel.
+#
+# Eine Haertung, die den teuersten Zustand des Systems wahrscheinlicher macht,
+# ist keine. `ProtectSystem=full` schuetzt `/usr`, `/boot` und `/etc` und
+# kostet nichts; die Heimverzeichnisse anderer Nutzer schuetzt die
+# Rechteverwaltung, unter der dieser Dienst ohnehin laeuft.
+
+[Install]
+WantedBy=multi-user.target

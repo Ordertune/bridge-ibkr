@@ -60,6 +60,7 @@ from .external_executions import (
 )
 from .logging_setup import setup_logging
 from . import windows_ui
+from .pair_console import pair_requested, run_pairing
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
@@ -2477,6 +2478,21 @@ def main() -> int:
     # gefunden" ohne Suchort ist keine Auskunft.
     env_path = Path(ENV_FILE).resolve()
 
+    # T1-206 B — die Kopplung ueber die Konsole, vor dem Laden der Datei.
+    #
+    # Die Reihenfolge ist der ganze Punkt: `--pair` ist genau dafuer da, dass
+    # es noch KEINE Zugangsdaten gibt. Stuende es hinter `load_config`, liefe
+    # der Kunde erst in den Konfigurationsfehler, den er mit diesem Schalter
+    # gerade beheben will.
+    #
+    # Danach geht der Start normal weiter — `--pair` ist keine zweite
+    # Betriebsart, sondern eine zweite Anzeige an derselben Weiche, an der
+    # sonst der Assistent wartet (T1-206 Entscheidung 2).
+    if pair_requested(argv):
+        pair_code = run_pairing(env_path)
+        if pair_code != 0:
+            return pair_code
+
     try:
         config = load_config()
     except Exception as exc:
@@ -2515,10 +2531,42 @@ def main() -> int:
     umzugsmeldungen = paths.migrate_legacy()
     paths.ensure_readme()
 
+    # T1-206 — „liegt da, was ich erwarte?", beantwortet ohne Umweg.
+    #
+    # Hier und nicht spaeter: die Frage haengt an der Platte, nicht an der
+    # TWS und nicht an der Plattform. Ein Pruefbefehl, der eine laufende
+    # Verbindung braucht, waere beim Einrichten ausgerechnet dann nicht zu
+    # haben, wenn er gebraucht wird.
+    #
+    # Der Ausgangscode traegt den Befund: 0 heisst „das Archiv taugt als
+    # Quelle". Damit laesst sich der Schritt in eine Einrichtungsroutine
+    # haengen, statt einen Satz lesen zu muessen.
+    if trade_reports.check_requested(argv):
+        for zeile in trade_reports.check_bericht(config.tws_export_dir):
+            print(zeile, flush=True)
+        return 0 if trade_reports.pruefe(config.tws_export_dir or "").ok else 1
+
     log_file = setup_logging(level=config.log_level)
     log.info("Log file: %s", log_file)
     for stufe, zeile in umzugsmeldungen:
         log.log(logging.WARNING if stufe == "warning" else logging.INFO, "%s", zeile)
+
+    # T1-206 C — die Ablage einmal anfassen, bevor Geld im Spiel ist.
+    #
+    # Der `SubmittedStore` merkt eine nicht schreibbare Ablage erst beim ersten
+    # Auftrag, und dann steht die Warnung mitten in einem Vorgang, den niemand
+    # mitliest. Hier kostet sie einen Schreib- und einen Loeschvorgang.
+    #
+    # WARNING und nicht ERROR, und der Handel laeuft weiter: die Haltung des
+    # Speichers bleibt gueltig, ein schreibgeschuetztes Verzeichnis haelt den
+    # Handel nicht an. Es soll nur niemand behaupten koennen, es sei still
+    # geschehen. Die Zeilen landen ueber den Wurzel-Handler zugleich im
+    # Cockpit-Journal.
+    ablage_rang, ablage_grund = paths.probe_writable()
+    if ablage_rang != paths.ABLAGE_SCHREIBBAR:
+        for zeile in paths.writability_warning(ablage_grund):
+            log.warning("%s", zeile)
+
     log.info("ordertune-bridge-ibkr v%s starting up", __version__)
 
     if config.update_check_enabled:

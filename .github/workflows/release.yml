@@ -409,3 +409,244 @@ jobs:
           # zweiter Lauf auf denselben Tag hinterliesse den Hinweis doppelt.
           generate_release_notes: true
           body: ${{ steps.hinweis.outputs.notiz }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # T1-206 A — der Linux-Strang.
+  #
+  # ## Warum nachgelagert und nicht daneben
+  #
+  # `needs: build`. Beide Jobs wollten sonst dasselbe Release anlegen, und wer
+  # dabei zuerst kommt, entschiede der Zufall. Nachgelagert findet dieser Job
+  # das Release vor und haengt nur noch seine Anhaenge an.
+  #
+  # ## Warum `ubuntu-22.04` und nicht `ubuntu-latest`
+  #
+  # Das Binary bindet gegen die glibc der Baumaschine. Die aeltere Basis ist
+  # genau das, was die Zusage nach unten absichert: gebaut auf 22.04 laeuft es
+  # auf 22.04, 24.04 und Debian 12. Umgekehrt gaebe es auf 22.04 einen
+  # Ladefehler, den kein Kunde deuten kann.
+  #
+  # ## Warum nicht signiert
+  #
+  # Es gibt auf Linux kein Gegenstueck zum EV-Zertifikat und keinen
+  # SmartScreen, den es zu beruhigen gaelte. An seine Stelle tritt die
+  # SHA-256-Summe — als eigener Anhang, damit der Installer sie nachrechnen
+  # kann, und in der Release-Notiz, damit ein Mensch sie vergleichen kann.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    env:
+      ARCHIV: ordertune-bridge-ibkr-linux-x86_64.tar.gz
+      INSTALLER: ordertune-bridge-ibkr-linux-installer.sh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      # Dieselbe Reihenfolge wie im Windows-Job, und aus demselben Grund: die
+      # Vertragstests sind das Einzige, was zwischen einer Formataenderung und
+      # einer Bridge steht, die nicht mehr mit der API sprechen kann.
+      - name: Run tests
+        run: |
+          pip install pytest Pillow
+          pytest -q
+
+      - name: Build Linux bundle
+        run: python build_linux.py
+
+      # Das gebaute Artefakt starten — nicht den Aufruf glauben.
+      #
+      # Es gibt Praezedenz, und zwar teure: v0.1.0 und v0.2.0 sind beide mit
+      # einer ausfuehrbaren Datei ausgeliefert worden, die beim ersten Import
+      # starb. Jeder Test war gruen; sie importieren das Paket auf dem
+      # normalen Weg, auf dem die relativen Importe stimmen. Gestartet hat das
+      # Gebaute nie jemand.
+      #
+      # Hier ist dieser Schritt zusaetzlich das Einzige, was aus der
+      # glibc-Zusage eine geprueft Aussage macht statt einer Zeile in einer
+      # Konfigurationsdatei.
+      #
+      # Erwartet wird dasselbe wie auf Windows: ohne `bridge.env` weist das
+      # Programm seine Konfiguration zurueck und endet mit 1. Das ist die
+      # Erfolgsbedingung — sie belegt, dass der Start an den Importen vorbei
+      # bis in die eigene Fehlerbehandlung gekommen ist.
+      - name: Smoke-test the built bundle
+        run: |
+          set -uo pipefail
+
+          BUNDLE="$GITHUB_WORKSPACE/dist/ordertune-bridge-ibkr"
+          mkdir -p "$GITHUB_WORKSPACE/smoke-run"
+          cd "$GITHUB_WORKSPACE/smoke-run"
+
+          # `--headless` ist Pflicht, nicht Vorsicht: ohne die Zusage koennte
+          # der Erst-Start-Assistent aufgehen und auf eine Eingabe warten, die
+          # hier niemand tippt. Genau dieser Hang hat den Release-Lauf am
+          # 2026-09-23 zweimal angehalten.
+          set +e
+          OUT="$("$BUNDLE/ordertune-bridge-ibkr" --headless 2>&1)"
+          CODE=$?
+          set -e
+
+          echo "--- stdout/stderr ---"
+          echo "$OUT"
+
+          LOG="$HOME/.local/share/ordertune-bridge/logs/bridge.log"
+          if [ ! -f "$LOG" ]; then
+            echo "::error::The bundle left no log file at $LOG. A run that leaves nothing behind is not a passed run."
+            exit 1
+          fi
+          echo "--- log file ---"
+          cat "$LOG"
+
+          # Zum Mitnehmen. Die Datei liegt unter dem Nutzerprofil und damit
+          # ausserhalb des Arbeitsbereichs; bei einem ROTEN Lauf ist sie das
+          # Einzige, woran sich die Ursache ablesen laesst.
+          mkdir -p "$GITHUB_WORKSPACE/smoke"
+          cp "$LOG" "$GITHUB_WORKSPACE/smoke/bridge-linux.log"
+
+          BEIDES="$OUT
+          $(cat "$LOG")"
+
+          if echo "$BEIDES" | grep -qE "ImportError|Traceback \(most recent call last\)"; then
+            echo "::error::The built bundle fails to start. Publishing this would ship a binary that dies on launch."
+            exit 1
+          fi
+          # Geprueft wird die stabile Kennung, nicht der Wortlaut (T1-101 A-2).
+          if ! echo "$BEIDES" | grep -q "env_missing"; then
+            echo "::error::Expected the configuration check to run and reject the missing bridge.env. It did not — the startup path changed."
+            exit 1
+          fi
+          if [ "$CODE" -ne 1 ]; then
+            echo "::error::Expected exit code 1 from a missing configuration, got $CODE."
+            exit 1
+          fi
+          echo "Bundle starts, reaches its configuration check, writes its log, and exits cleanly."
+
+      # Der Rauchtest oben startet aus einem gewoehnlichen Verzeichnis. Das
+      # belegt die One-Folder-Entscheidung noch NICHT: ihr ganzer Zweck ist,
+      # dass nichts zur Laufzeit entpackt werden muss. Hier wird genau das
+      # nachgestellt — ein `/tmp`, aus dem nichts ausgefuehrt werden darf.
+      #
+      # Ein One-File-Buendel faellt an dieser Stelle durch, und das ist der
+      # Sinn des Schrittes: die Entscheidung bleibt geprueft, auch wenn jemand
+      # spaeter `--onefile` fuer die schoenere Bauweise haelt.
+      - name: Prove it starts with noexec on /tmp
+        run: |
+          set -uo pipefail
+          sudo mount -o remount,noexec /tmp || { echo "::warning::Could not remount /tmp noexec — skipping."; exit 0; }
+
+          mkdir -p "$GITHUB_WORKSPACE/smoke-noexec"
+          cd "$GITHUB_WORKSPACE/smoke-noexec"
+          set +e
+          OUT="$("$GITHUB_WORKSPACE/dist/ordertune-bridge-ibkr/ordertune-bridge-ibkr" --headless 2>&1)"
+          CODE=$?
+          set -e
+          sudo mount -o remount,exec /tmp || true
+
+          echo "$OUT"
+          if echo "$OUT" | grep -qiE "permission denied|failed to extract|cannot execute"; then
+            echo "::error::The bundle needs an executable /tmp. That is exactly the failure class One-Folder is supposed to remove."
+            exit 1
+          fi
+          if [ "$CODE" -ne 1 ]; then
+            echo "::error::Expected exit code 1 from a missing configuration under noexec /tmp, got $CODE."
+            exit 1
+          fi
+          echo "Starts with noexec on /tmp — One-Folder holds."
+
+      - name: Package tarball, checksum and installer
+        run: |
+          set -euo pipefail
+          cp README.md dist/README.txt
+          cp packaging/linux/ordertune-bridge.service dist/
+
+          tar -czf "$ARCHIV" \
+            -C dist ordertune-bridge-ibkr README.txt ordertune-bridge.service
+
+          sha256sum "$ARCHIV" | awk '{print $1}' > "$ARCHIV.sha256"
+          cp packaging/linux/"$INSTALLER" "$INSTALLER"
+          chmod +x "$INSTALLER"
+
+          echo "SUMME=$(cat "$ARCHIV.sha256")" >> "$GITHUB_ENV"
+          ls -la "$ARCHIV" "$ARCHIV.sha256" "$INSTALLER"
+
+      # Der Installer wird gegen das Archiv gehalten, das er spaeter laden
+      # soll. Das faengt die Sorte Fehler, die sonst erst beim Kunden aufgeht:
+      # ein umbenannter Ordner im Archiv, ein vertippter Pfad im Skript.
+      - name: The installer and the archive still agree
+        run: |
+          set -euo pipefail
+          bash -n "$INSTALLER"
+          tar -tzf "$ARCHIV" | grep -qx "ordertune-bridge-ibkr/ordertune-bridge-ibkr" \
+            || { echo "::error::The archive does not carry the executable where the installer looks for it."; exit 1; }
+          tar -tzf "$ARCHIV" | grep -qx "ordertune-bridge.service" \
+            || { echo "::error::The archive carries no systemd unit — the installer copies one."; exit 1; }
+          grep -q "ordertune-bridge-ibkr-linux-x86_64.tar.gz" "$INSTALLER" \
+            || { echo "::error::The installer does not name the archive this job builds."; exit 1; }
+
+      - name: Artefakt zum Mitnehmen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-linux-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ordertune-bridge-ibkr-linux-x86_64.tar.gz
+            ordertune-bridge-ibkr-linux-x86_64.tar.gz.sha256
+            ordertune-bridge-ibkr-linux-installer.sh
+            smoke/bridge-linux.log
+
+      # An dasselbe Release anhaengen, das der Windows-Job angelegt hat.
+      # `append_body` ist hier richtig und im Windows-Job falsch: dort wird die
+      # Notiz erzeugt, hier kommt ein Absatz dazu.
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: |
+            ordertune-bridge-ibkr-linux-x86_64.tar.gz
+            ordertune-bridge-ibkr-linux-x86_64.tar.gz.sha256
+            ordertune-bridge-ibkr-linux-installer.sh
+          append_body: true
+          body: |
+
+            ### Linux (x86_64)
+
+            One file to download and run:
+
+            ```
+            wget https://github.com/${{ github.repository }}/releases/latest/download/ordertune-bridge-ibkr-linux-installer.sh
+            chmod +x ordertune-bridge-ibkr-linux-installer.sh
+            sudo ./ordertune-bridge-ibkr-linux-installer.sh
+            ```
+
+            It downloads the archive below, verifies it, installs to
+            `/opt/ordertune-bridge`, sets up a systemd service and pairs the
+            Bridge with your account. Read it before you run it — it is a
+            plain shell script, not a self-extracting archive.
+
+            Prefer to do it by hand? Use the tarball and follow
+            <https://docs.ordertune.com/brokers/>.
+
+            Supported: Ubuntu 22.04 LTS, Ubuntu 24.04 LTS, Debian 12.
+            Not signed — Linux has no counterpart to the Windows certificate.
+            Check the download instead:
+
+            ```
+            sha256sum -c <<< "${{ env.SUMME }}  ordertune-bridge-ibkr-linux-x86_64.tar.gz"
+            ```
+
+            `SHA-256: ${{ env.SUMME }}`
