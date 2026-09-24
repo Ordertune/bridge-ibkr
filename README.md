@@ -200,7 +200,8 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 ## Docs
 
 - [Windows-VPS-Setup](docs/SETUP_WINDOWS_VPS.md)
-- [Linux-VPS-Setup](docs/SETUP_LINUX_VPS.md)
+- [Linux-Desktop-Setup](docs/SETUP_LINUX_DESKTOP.md) — der uebliche Weg
+- [Linux-Server-Setup](docs/SETUP_LINUX_SERVER.md) — ohne grafische Oberflaeche
 - [TWS Setup inklusive Handelsberichte](docs/SETUP_TWS.md)
 - [IBC (Auto-Login)](docs/SETUP_IBC.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
