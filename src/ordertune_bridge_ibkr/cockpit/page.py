@@ -684,6 +684,28 @@ function renderCard(s) {
       + "Global Configuration -> Export Reports (leave 'Export filename' empty).\\n\\n"
       + "Until you do, the Bridge keeps trading - you are missing the recovery,\\n"
       + "not the execution.";
+  } else if (s.trade_export === "no_file") {
+    // T1-206 — der leere Ordner ist NICHT dasselbe wie ein abgeschalteter
+    // Export, und diese Flaeche hat ihn genauso genannt.
+    //
+    // Owner-Befund 2026-09-24, erster Lauf auf einer frischen Maschine:
+    // Schalter an, Intervall 1, Dateiname leer — und hier stand
+    // "TWS is not writing trade reports" samt der Aufforderung,
+    // einzuschalten, was eingeschaltet war.
+    //
+    // Direkt nach der Einrichtung ist das der erwartbare Zustand: die TWS
+    // exportiert Handelsberichte, und ohne Handel gibt es nichts zu
+    // exportieren. Deshalb eine Ueberschrift, die eine Beobachtung ist statt
+    // einer Anschuldigung.
+    q("card-title").textContent = "No trade report yet";
+    q("card-detail").textContent = s.trade_export_detail || "";
+    q("card-action").textContent =
+      "Nothing to do if you have just set this up. TWS writes the first file\\n"
+      + "once there is a trade to report, and the Bridge picks it up from\\n"
+      + "there.\\n\\n"
+      + "Come back to this after your first fill. If the folder is still empty\\n"
+      + "then, TWS is writing somewhere else - compare the path above with\\n"
+      + "Global Configuration -> Export Reports, character by character.";
   } else {
     // T1-207. Der Text kommt aus der Bridge, nicht von hier: er benennt, WELCHE
     // Bedingung fehlt, und diese Flaeche soll ihn nicht zu "something is wrong"
