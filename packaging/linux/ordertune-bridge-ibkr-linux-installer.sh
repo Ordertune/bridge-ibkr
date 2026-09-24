@@ -127,9 +127,51 @@ else
 fi
 
 sagen
-fett "  Ordertune Bridge — installer"
+fett "  Ordertune Bridge — server installer"
 sagen "  ────────────────────────────────────────────────────────────────"
 sagen
+sagen "  This sets the Bridge up as a SYSTEM SERVICE with its own user"
+sagen "  (${DIENSTNUTZER}) in ${ZIEL}. It is meant for a server that nobody"
+sagen "  logs in to."
+sagen
+
+# ── Der Desktop-Fall darf hier nicht stillschweigend durchlaufen ────────────
+#
+# Owner-Befund 2026-09-24: der erwartete Kunde ist nicht der headless Server,
+# sondern jemand, der sich die Windows-Lizenz spart und die TWS auf einem
+# ganz normalen Linux-Desktop betreibt.
+#
+# Fuer den ist dieses Skript nicht bloss umstaendlich, es ist **falsch**: es
+# legt einen eigenen Dienstnutzer an, und die TWS laeuft unter der Kennung des
+# angemeldeten Menschen. Das Berichtsverzeichnis zeigt dann auf
+# `/home/ordertune-bridge/IBExport`, waehrend die TWS nach `~/IBExport` DES
+# NUTZERS schreibt — zwei Orte, und das Sicherungsnetz fehlt still.
+#
+# Geprueft wird am Systemziel und nicht an `$XDG_CURRENT_DESKTOP`: das
+# ueberlebt `sudo` nicht. `graphical.target` ist ein Hinweis, kein Beweis —
+# deshalb eine Frage und kein Abbruch.
+if [ "$(systemctl get-default 2>/dev/null)" = "graphical.target" ]; then
+  rot "  This machine boots to a graphical desktop."
+  sagen
+  sagen "  If you use that desktop — Trader Workstation in a window, a browser,"
+  sagen "  a person logged in — this is the WRONG installer. It would give the"
+  sagen "  Bridge its own user, while Trader Workstation runs as you. The two"
+  sagen "  would write and read different folders, and the missing-fill safety"
+  sagen "  net would be gone without saying so."
+  sagen
+  sagen "  The desktop way needs no root and no service at all:"
+  sagen "    https://docs.ordertune.com/brokers/install-and-run"
+  sagen
+  if [ -t 0 ]; then
+    read -r -p "  Continue with the server installation anyway? [y/N] " desktop_antwort
+    case "${desktop_antwort}" in
+      y|Y|yes|YES) sagen ;;
+      *) sagen; sagen "  Stopped. Nothing was changed."; exit 1 ;;
+    esac
+  else
+    abbruch "Refusing to guess on a graphical machine. Run this on a terminal."
+  fi
+fi
 
 # ── Eine bestehende Installation wird nicht still ueberschrieben ────────────
 #

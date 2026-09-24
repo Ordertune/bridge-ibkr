@@ -359,6 +359,34 @@ def test_the_installer_hands_the_path_over_at_the_right_moment() -> None:
     assert "leave EMPTY" in skript
 
 
+def test_the_installer_does_not_walk_into_a_desktop() -> None:
+    """Auf einer grafischen Maschine fragt der Installer nach.
+
+    ## Warum das kein Komfort ist
+
+    Der erwartete Kunde ist nicht der headless Server, sondern jemand, der sich
+    die Windows-Lizenz spart und die TWS auf einem gewoehnlichen Linux-Desktop
+    betreibt. Fuer den ist dieses Skript nicht bloss umstaendlich, sondern
+    **falsch**: es legt einen eigenen Dienstnutzer an, waehrend die TWS unter
+    der Kennung des angemeldeten Menschen laeuft. Das Berichtsverzeichnis zeigt
+    dann auf `/home/ordertune-bridge/IBExport`, die TWS schreibt nach
+    `~/IBExport` des Nutzers — zwei Orte, und das Sicherungsnetz fehlt still.
+
+    Geprueft wird am Systemziel, nicht an `$XDG_CURRENT_DESKTOP`: das ueberlebt
+    `sudo` nicht.
+    """
+    skript = (
+        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "systemctl get-default" in skript
+    assert "graphical.target" in skript
+    # Ein Hinweis, kein Beweis — also eine Frage und kein Abbruch.
+    assert "Continue with the server installation anyway?" in skript
+    # Und der Weg, der stattdessen gilt, wird benannt.
+    assert "docs.ordertune.com/brokers/install-and-run" in skript
+
+
 def test_the_report_folder_survives_an_update() -> None:
     """Das Archiv liegt NICHT im Programmordner, den der Installer ersetzt.
 
