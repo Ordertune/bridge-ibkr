@@ -1,12 +1,13 @@
 # ordertune-bridge-ibkr
 
-Windows-Native Bridge-Client für Interactive Brokers. Holt vom User freigegebene Signale aus `t1.ordertune.com`, führt Orders im privaten IBKR-Depot aus, meldet Depot-State und Order-Results zurück.
+Bridge-Client für Interactive Brokers, auf Windows **und** Linux. Holt vom User freigegebene Signale aus `t1.ordertune.com`, führt Orders im privaten IBKR-Depot aus, meldet Depot-State und Order-Results zurück.
 
 **Der Bridge-Client läuft auf einem privaten Virtual Private Server des Nutzers.** Ordertune führt keine Orders im Namen des Nutzers aus. Der Nutzer muss jede Order (oder jede Strategy für maximal 24 Stunden) über die Ordertune-Weboberfläche explizit freigeben, bevor die Bridge sie abholen und in IBKR platzieren darf.
 
 ## Voraussetzungen
 
-- Windows-VPS (Windows Server 2019+ oder Windows 10/11 Pro)
+- Windows-VPS (Windows Server 2019+ oder Windows 10/11 Pro) **oder**
+  Linux-VPS (Ubuntu 22.04 LTS, Ubuntu 24.04 LTS, Debian 12; x86_64)
 - Interactive Brokers Pro Individual Account (Retail-OAuth wird von IBKR nicht angeboten — Bridge ist der einzige Weg)
 - Installiertes **Trader Workstation (TWS)** mit eingeschalteten Handelsberichten
   (`Global Configuration → Export Reports`). **IB Gateway wird seit 0.25.0 nicht mehr
@@ -18,11 +19,68 @@ Windows-Native Bridge-Client für Interactive Brokers. Holt vom User freigegeben
 
 ## Installation
 
+Jedes Release traegt beide Plattformen. Die Broker-Karte in t1 verlinkt je
+Plattform **eine** Datei — `.exe` fuer Windows, `.sh` fuer Linux.
+
+### Windows
+
 1. Download der aktuellen Version aus [Releases](https://github.com/ordertune/bridge-ibkr/releases/latest)
 2. Zip entpacken auf dem Windows-VPS
 3. `bridge.env`-Datei (aus dem Ordertune-Settings-Wizard heruntergeladen) daneben legen
 4. TWS starten und einloggen (API aktiviert, Read-Only-API deaktiviert, Trusted-IP `127.0.0.1` erlaubt, Handelsberichte eingeschaltet)
 5. Doppelklick auf `ordertune-bridge-ibkr.exe`
+
+### Linux (x86_64)
+
+```
+wget https://github.com/Ordertune/bridge-ibkr/releases/latest/download/ordertune-bridge-ibkr-linux-installer.sh
+chmod +x ordertune-bridge-ibkr-linux-installer.sh
+sudo ./ordertune-bridge-ibkr-linux-installer.sh
+```
+
+Das Skript laedt das Archiv, rechnet die SHA-256-Summe nach, installiert nach
+`/opt/ordertune-bridge`, legt den Dienstnutzer an, setzt die systemd-Einheit
+und uebergibt an die Kopplung (`--pair`). Es ist lesbarer Text und **kein**
+selbstentpackendes Archiv — wer ein Skript mit `sudo` auf eine Maschine laesst,
+auf der sein Depot haengt, soll vorher hineinsehen koennen.
+
+Der Handweg aus dem `tar.gz` bleibt gangbar und steht in
+[SETUP_LINUX_VPS.md](docs/SETUP_LINUX_VPS.md).
+
+Gekoppelt wird auf einem Server ohne Desktop ueber die Konsole:
+
+```
+cd /opt/ordertune-bridge && sudo runuser -u ordertune-bridge -- \
+  env HOME=/home/ordertune-bridge ./ordertune-bridge-ibkr --pair
+```
+
+Die TWS laeuft auf derselben Maschine und **unter derselben Kennung** wie die
+Bridge. Sie braucht ein Display (Xvfb genuegt); das IB Gateway reicht seit
+0.25.0 nicht mehr, weil es keine Berichtsfunktion hat.
+
+**Das Berichtsverzeichnis ist der eine Handgriff, den kein Skript abnehmen
+kann.** Der Installer legt den Ordner an; eintragen muss ihn ein Mensch im
+Dialog der TWS:
+
+| | Windows | Linux |
+|---|---|---|
+| `Global Configuration -> Export Reports` | `C:\IBExport` | `/home/ordertune-bridge/IBExport` |
+
+Gleicher Ordnername, anderer Elternordner — sonst ist die Einstellung auf
+beiden Plattformen identisch. `Export filename` bleibt **leer**, Trennzeichen
+ist das **Semikolon**.
+
+Ein Tippfehler faellt dabei nicht auf: die TWS exportiert dann in einen
+Ordner, den niemand liest, und es sieht richtig aus. Deshalb nachpruefen statt
+glauben:
+
+```
+cd /opt/ordertune-bridge && sudo runuser -u ordertune-bridge -- \
+  env HOME=/home/ordertune-bridge ./ordertune-bridge-ibkr --check-reports
+```
+
+Ausgangscode 0 heisst „das Archiv taugt als Quelle". Details in
+[SETUP_LINUX_VPS.md](docs/SETUP_LINUX_VPS.md).
 
 ## Konfiguration (`bridge.env`)
 
@@ -142,6 +200,7 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 ## Docs
 
 - [Windows-VPS-Setup](docs/SETUP_WINDOWS_VPS.md)
+- [Linux-VPS-Setup](docs/SETUP_LINUX_VPS.md)
 - [TWS Setup inklusive Handelsberichte](docs/SETUP_TWS.md)
 - [IBC (Auto-Login)](docs/SETUP_IBC.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

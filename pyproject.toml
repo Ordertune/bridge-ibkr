@@ -1,7 +1,7 @@
 [project]
 name = "ordertune-bridge-ibkr"
 version = "0.26.0"
-description = "Ordertune Bridge — Windows-Native Client für IBKR TWS. Holt confirmed Signale aus t1.ordertune.com, führt Orders auf privatem IBKR-Depot aus, meldet Depot-State und Order-Results zurück."
+description = "Ordertune Bridge — Client für IBKR TWS auf Windows und Linux. Holt confirmed Signale aus t1.ordertune.com, führt Orders auf privatem IBKR-Depot aus, meldet Depot-State und Order-Results zurück."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -14,7 +14,18 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.4.0",
     "coloredlogs>=15.0.1",
-    "tzdata>=2024.1; sys_platform == 'win32'",
+    # T1-206 Entscheidung 6 — ohne Plattform-Einschraenkung.
+    #
+    # Hier stand `; sys_platform == 'win32'`, weil Linux die Zonendaten aus
+    # dem System nimmt. Das stimmt — auf einem schlanken VPS-Abbild fehlen sie
+    # aber, und dann endete die Bridge an einer Meldung ueber eine fehlende
+    # Zeitzone. Die Alternative waere, dem Kunden ein Systempaket in die
+    # Anleitung zu schreiben: ein Handgriff mehr in einer Anleitung, die schon
+    # lang ist, fuer eine Fehlerklasse, die ein paar hundert Kilobyte
+    # beseitigen. Python nimmt die Systemdaten, wenn sie da sind, und faellt
+    # sonst hierauf zurueck — auf allen drei zugesagten Systemen aendert das
+    # nichts.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
