@@ -96,8 +96,24 @@ tut.
 cd ~/ordertune-bridge && ./ordertune-bridge-ibkr
 ```
 
-Oder im Dateimanager doppelklicken — seit T1-206 sucht die Bridge `bridge.env`
-neben dem Programm und nicht mehr im Arbeitsverzeichnis, also stimmt beides.
+### Und der Doppelklick?
+
+Von unserer Seite ja: seit T1-206 sucht die Bridge `bridge.env` **neben dem
+Programm** und nicht mehr im Arbeitsverzeichnis, also ist es gleichgültig, von
+wo sie gestartet wird. Das Ausführbar-Bit überlebt das Archiv auch.
+
+Ob der Dateimanager eine nackte ausführbare Datei per Doppelklick **startet**,
+entscheidet aber der Desktop, nicht wir:
+
+| Dateimanager | Doppelklick auf das Binary |
+|---|---|
+| GNOME Files (Debians Standard) | meist **nicht** — GNOME führt ELF-Dateien bewusst nicht aus |
+| KDE Dolphin | fragt nach, dann läuft es |
+| XFCE Thunar | fragt meist nach, dann läuft es |
+
+Das ist eine Sicherheitsentscheidung der jeweiligen Oberfläche. Das
+verlässliche Gegenstück zum Windows-Doppelklick ist deshalb ein **Menü-Eintrag**
+— siehe Schritt 5.
 
 Der Browser geht auf, der Assistent zeigt den Kopplungscode, du tippst ihn in
 t1 unter **Settings → Broker** ein und bestätigst. Vergleiche vorher Rechnername
@@ -106,9 +122,40 @@ Vergleich.
 
 Ab hier ist alles identisch zu Windows, das Cockpit eingeschlossen.
 
-## 5 — Bei der Anmeldung mitstarten
+## 5 — Ins Menü legen, und bei der Anmeldung mitstarten
 
-Das Gegenstück zum Autostart-Ordner unter Windows:
+Zwei `.desktop`-Dateien, gleicher Inhalt, zwei Orte und zwei Zwecke. Das
+verwechselt man leicht, deshalb beide ausgeschrieben.
+
+### Menü-Eintrag — das Gegenstück zum Doppelklick
+
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/ordertune-bridge.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Ordertune Bridge
+Comment=Connects Trader Workstation with Ordertune
+Exec=$HOME/ordertune-bridge/ordertune-bridge-ibkr
+Path=$HOME/ordertune-bridge
+Icon=$HOME/ordertune-bridge/ordertune-bridge.png
+Terminal=false
+Categories=Office;Finance;
+EOF
+```
+
+Danach steht „Ordertune Bridge" im Anwendungsmenü und lässt sich in die
+Favoritenleiste ziehen — ein Symbol zum Anklicken, wie die `.exe` auf dem
+Windows-Desktop.
+
+Das Symbol liegt seit T1-206 im Programmordner (`ordertune-bridge.png`, das
+Marken-Glyph). Es wird beim Bauen aus `cockpit/assets.py:ICON_PNG` erzeugt, also
+aus derselben Quelle wie das Windows-Symbol — es gibt kein zweites Markenbild,
+das auseinanderlaufen könnte.
+
+### Autostart — mit der Anmeldung hochkommen
+
+Dasselbe noch einmal, an einem anderen Ort:
 
 ```bash
 mkdir -p ~/.config/autostart
@@ -125,6 +172,9 @@ EOF
 
 `Path=` setzt das Arbeitsverzeichnis. Nötig ist es seit T1-206 nicht mehr, aber
 es kostet nichts und hält die Protokolle dort, wo man sie sucht.
+
+**Beide Dateien anlegen ist kein Fehler**, sondern der Normalfall: die eine
+macht das Programm anklickbar, die andere startet es ohne Klick.
 
 **Keine systemd-Unit.** Sie liefe ohne Anzeigesitzung, und dann gäbe es weder
 Cockpit noch eine TWS, mit der zu reden wäre. Auf dem Desktop hängen beide an
