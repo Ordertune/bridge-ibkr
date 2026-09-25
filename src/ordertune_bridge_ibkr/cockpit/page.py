@@ -531,6 +531,20 @@ const q = (id) => document.getElementById(id);
 const withToken = (p) => p + "?t=" + encodeURIComponent(token);
 let state = null;
 
+// T1-223 Nachtrag (Owner-Befund 2026-09-25) — wurde ein Halt gewuenscht, und
+// ist er vollzogen?
+//
+// Bis hierher endete die Flaeche bei „Stopping the Bridge." und blieb dort
+// stehen. Im Terminal stand laengst „exited normally"; im Browser stand
+// weiter eine Verlaufsform, die nach einem andauernden Vorgang klingt — und
+// vier gruene Lampen ueber einem Programm, das es nicht mehr gab.
+//
+// Der Beleg liegt in genau dem, was dabei schiefgeht: **antwortet der lokale
+// Server nicht mehr, ist der Vorgang beendet.** Er gehoert zur Bridge und
+// stirbt mit ihr.
+let stopGewuenscht = false;
+let beendet = false;
+
 // Das Alter wird HIER gerechnet, aus einem Zeitpunkt des Servers. Eine
 // stehende Zeitangabe, die aussieht wie eine laufende, ist eine dauerhaft
 // falsche Aussage.
@@ -576,7 +590,20 @@ function heartbeatStale(s) {
 
 function exportBroken(s) {
   // "unknown" heisst „noch nicht nachgesehen" und ist keine Stoerung.
-  return s.trade_export && s.trade_export !== "ok" && s.trade_export !== "unknown";
+  //
+  // "no_file" gehoert in dieselbe Klasse, stand aber bis T1-206 im
+  // Alarm-Topf: ein leerer Ordner heisst „noch nichts zu lesen", nicht
+  // „wird nicht gelesen". Die TWS exportiert HANDELSBERICHTE, und ohne
+  // Handel gibt es nichts zu exportieren.
+  //
+  // Owner-Befund 2026-09-25: die Seite sagte oben „TWS trade reports are not
+  // being read - fills may be lost" und unten in derselben Karte „Nothing to
+  // do if you have just set this up." Zwei Aussagen, ein Bildschirm,
+  // gegensaetzlich. Die obere war die falsche.
+  return s.trade_export
+    && s.trade_export !== "ok"
+    && s.trade_export !== "unknown"
+    && s.trade_export !== "no_file";
 }
 
 // T1-214: die Bridge haengt an einem IB Gateway statt an der TWS. Kein
@@ -609,6 +636,17 @@ function verdict(s) {
   // Bridge nicht mehr nachgetragen werden kann.
   if (exportBroken(s))
     return ["TWS trade reports are not being read - fills may be lost", "warn"];
+  // T1-206: der leere Ordner bekommt eine eigene Zeile, und zwar eine ohne
+  // Urteil. Sie nennt den offenen Punkt — es liegt noch kein Bericht — und
+  // behauptet nicht, es werde keiner gelesen. Ob daraus ein Befund wird,
+  // entscheidet der erste Handel; bis dahin steht die Einzelheit in der Karte
+  // darunter.
+  //
+  // Ohne Warnfarbe, weil der Zustand direkt nach der Einrichtung der
+  // erwartbare ist. Eine gelbe Zeile fuer den Normalfall erzieht dazu, die
+  // gelbe Zeile im Ernstfall zu uebersehen.
+  if (s.trade_export === "no_file")
+    return ["Connected - no trade report yet", ""];
   return ["Connected - waiting for releases", ""];
 }
 
@@ -753,6 +791,20 @@ function render() {
   }
   q("restart").hidden = !s.pending_restart;
 
+  // Ist die Bridge beendet, sind alle Werte darunter Vergangenheit. Sie als
+  // Gegenwart zu zeigen — vier gruene Lampen ueber einem toten Vorgang — ist
+  // dieselbe Behauptung ohne Grundlage wie die Verlaufsform oben.
+  if (beendet) {
+    q("verdict").textContent = "The Bridge has stopped. You can close this window.";
+    q("verdict").className = "verdict";
+    chip("d-tws", "l-tws", false, "Stopped");
+    chip("d-ot", "l-ot", false, "Stopped");
+    chip("d-acct", "l-acct", false, "Stopped");
+    chip("d-write", "l-write", false, "Stopped");
+    q("card").hidden = true;
+    return;
+  }
+
   q("verdict").textContent = verdict(s)[0];
 
   chip("d-tws", "l-tws", s.tws_connected,
@@ -827,12 +879,42 @@ q("stop").onclick = () => {
       + "Ordertune will not be able to send new ones until you start it again."))
     return;
   q("stop").disabled = true;
+  stopGewuenscht = true;
   post("/stop", {}).then(res => note("stopmsg", res)).catch(() => {
     // Der Vorgang kann waehrend der Antwort schon beendet sein — dann bricht
     // die Verbindung ab, und genau das war der Zweck. Kein Fehler.
     note("stopmsg", {ok: true, message: "Stopping the Bridge."});
   });
+  beobachteHalt();
 };
+
+// T1-223 Nachtrag — nachsehen, ob der Halt vollzogen ist.
+//
+// Der Kern fuehrt seinen laufenden Durchgang zu Ende und raeumt dann auf; wie
+// lange das dauert, weiss diese Flaeche nicht. Sie fragt deshalb nach, statt
+// zu schaetzen: solange `/state` antwortet, laeuft die Bridge noch.
+//
+// ZWEI Fehlschlaege hintereinander, nicht einer. Ein einzelner kann auch ein
+// Aussetzer sein, und aus einem Aussetzer „beendet" zu machen waere genau die
+// Sorte Behauptung, die hier gerade behoben wird.
+function beobachteHalt() {
+  let daneben = 0;
+  const uhr = setInterval(() => {
+    fetch(withToken("/state"), {cache: "no-store"})
+      .then(r => { if (!r.ok) throw new Error("nicht ok"); daneben = 0; })
+      .catch(() => {
+        daneben += 1;
+        if (daneben < 2) return;
+        clearInterval(uhr);
+        beendet = true;
+        // Den Strom schliessen, sonst versucht der Browser endlos, ihn
+        // wiederherzustellen — gegen einen Server, den es nicht mehr gibt.
+        if (strom) strom.close();
+        note("stopmsg", {ok: true, message: "The Bridge has stopped."});
+        render();
+      });
+  }, 1000);
+}
 
 function loadConfig() {
   fetch(withToken("/config")).then(r => r.json()).then(c => {
@@ -1012,7 +1094,8 @@ q("copy").addEventListener("click", () => {
   });
 });
 
-new EventSource(withToken("/events")).onmessage = (e) => {
+const strom = new EventSource(withToken("/events"));
+strom.onmessage = (e) => {
   state = JSON.parse(e.data).state; render();
 };
 fetch(withToken("/state")).then(r => r.json()).then(d => { state = d.state; render(); });
