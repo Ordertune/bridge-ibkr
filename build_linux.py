@@ -34,12 +34,19 @@ kein uebersprungener Schritt, sondern die Abwesenheit eines Schrittes.
 """
 from __future__ import annotations
 
+import base64
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 NAME = "ordertune-bridge-ibkr"
+
+#: Das Symbol fuer den Menue-Eintrag. Liegt IM Programmordner und nicht daneben,
+#: weil der Desktop-Weg nur diesen Ordner auspackt
+#: (`tar --strip-components=1 ordertune-bridge-ibkr`). Was daneben liegt —
+#: README, Dienst-Einheit — bekommt er nie zu sehen.
+ICON_NAME = "ordertune-bridge.png"
 
 
 def main() -> int:
@@ -89,7 +96,51 @@ def main() -> int:
     if proc.returncode != 0:
         return proc.returncode
 
+    write_icon(dist / NAME)
     return verify_bundle(dist / NAME)
+
+
+def write_icon(ordner: Path) -> None:
+    """Das Marken-Glyph als PNG neben das Programm legen.
+
+    ## Warum erzeugt und nicht committet
+
+    `assets/icon.ico` liegt als Datei im Repo, damit der Windows-Build kein
+    Pillow braucht. Fuer Linux gibt es diesen Grund nicht: ein `.desktop`
+    verlangt ein PNG, und das steckt bereits fertig in
+    `cockpit/assets.py:ICON_PNG` — base64, 512x512, aus dem Design-System
+    erzeugt und dort als einziges erlaubtes Marken-Glyph benannt.
+
+    Eine zweite Bilddatei im Repo waere genau das, wovor `tools/make_icon.py`
+    im eigenen Kopf warnt: die zweite Stelle, an der die Marke falsch werden
+    kann. Hier wird deshalb dekodiert, nicht kopiert.
+
+    ## Wozu es ueberhaupt gebraucht wird
+
+    Auf einem Linux-Desktop fuehrt der Dateimanager eine nackte ausfuehrbare
+    Datei per Doppelklick meist NICHT aus — GNOME tut es bewusst nicht. Das
+    Gegenstueck zum Windows-Doppelklick ist ein Eintrag im Anwendungsmenue,
+    und der will ein Bild. Ohne dieses haette er ein Platzhaltersymbol.
+    """
+    ziel = ordner / ICON_NAME
+    ziel.write_bytes(base64.b64decode(_glyph_base64()))
+    print(f"Symbol geschrieben: {ziel} ({ziel.stat().st_size} Bytes)")
+
+
+def _glyph_base64() -> str:
+    """Das Glyph aus dem Paket holen, ohne es zu importieren zu muessen.
+
+    `sys.path` wird hier angefasst und nicht global: dieses Skript laeuft VOR
+    dem Build und soll das Paket nicht dauerhaft in seinen Suchpfad ziehen.
+    """
+    root = Path(__file__).parent
+    sys.path.insert(0, str(root / "src"))
+    try:
+        from ordertune_bridge_ibkr.cockpit import assets
+
+        return assets.ICON_PNG
+    finally:
+        sys.path.pop(0)
 
 
 def verify_bundle(ordner: Path) -> int:
@@ -104,6 +155,7 @@ def verify_bundle(ordner: Path) -> int:
     """
     binaer = ordner / NAME
     intern = ordner / "_internal"
+    symbol = ordner / ICON_NAME
 
     if not binaer.exists():
         print(f"FEHLER: {binaer} wurde nicht gebaut.", file=sys.stderr)
@@ -121,7 +173,18 @@ def verify_bundle(ordner: Path) -> int:
         )
         return 2
 
-    print(f"Buendel belegt: {binaer} ist ausfuehrbar, {intern} steht daneben.")
+    # Das Symbol wird MITGEPRUEFT und nicht nur geschrieben: es reist im
+    # Programmordner mit, und der Menue-Eintrag aus der Anleitung nennt es mit
+    # festem Namen. Faellt es weg, bekommt der Kunde einen Eintrag mit
+    # Platzhaltersymbol — und niemand merkt es im Bau.
+    if not symbol.exists() or symbol.stat().st_size == 0:
+        print(f"FEHLER: {symbol} fehlt oder ist leer.", file=sys.stderr)
+        return 2
+    if symbol.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        print(f"FEHLER: {symbol} ist kein PNG.", file=sys.stderr)
+        return 2
+
+    print(f"Buendel belegt: {binaer} ist ausfuehrbar, {intern} und {symbol.name} stehen daneben.")
     return 0
 
 

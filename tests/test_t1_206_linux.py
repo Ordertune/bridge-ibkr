@@ -426,6 +426,74 @@ def test_the_folder_name_matches_windows(monkeypatch, tmp_path) -> None:
     assert windows != linux
 
 
+# ── Das Symbol reist im Programmordner mit ──────────────────────────────────
+
+
+def test_the_icon_comes_from_the_one_brand_glyph() -> None:
+    """Erzeugt, nicht committet — es gibt nur EINE Quelle fuer die Marke.
+
+    `tools/make_icon.py` warnt im eigenen Kopf davor: zwei Markenbilder mit
+    getrennter Herkunft waeren die zweite Stelle, an der die Marke falsch
+    werden kann. Fuer Linux gibt es keinen Grund, eine zweite Datei anzulegen —
+    das PNG steckt fertig in `cockpit/assets.py:ICON_PNG`.
+    """
+    bau = (WURZEL / "build_linux.py").read_text(encoding="utf-8")
+
+    assert "assets.ICON_PNG" in bau
+    assert "base64.b64decode" in bau
+    # Kein zweites Markenbild im Repo.
+    assert not (WURZEL / "assets" / "icon.png").exists(), (
+        "Eine committete PNG-Kopie waere die zweite Quelle, vor der make_icon warnt."
+    )
+
+
+def test_the_icon_lands_inside_the_program_folder() -> None:
+    """Es muss IM Ordner liegen, nicht daneben.
+
+    Der Desktop-Weg packt nur den Programmordner aus
+    (`tar --strip-components=1 ordertune-bridge-ibkr`). Was daneben liegt —
+    README, Dienst-Einheit — bekommt ein Desktop-Kunde nie zu sehen. Ein
+    Symbol auf Archiv-Ebene waere damit fuer genau die Plattform unsichtbar,
+    fuer die es gemacht ist.
+    """
+    bau = (WURZEL / "build_linux.py").read_text(encoding="utf-8")
+
+    # `write_icon` bekommt den Programmordner, nicht `dist`.
+    assert "write_icon(dist / NAME)" in bau
+    # Und der Bau prueft es nach, statt es nur zu schreiben.
+    assert "ist kein PNG" in bau
+
+
+def test_the_menu_entry_names_the_icon_that_ships() -> None:
+    """Anleitung und Bau muessen denselben Dateinamen fuehren.
+
+    Zwei Stellen, ein Name — laufen sie auseinander, bekommt der Kunde einen
+    Menue-Eintrag mit Platzhaltersymbol, und im Bau faellt nichts auf.
+    """
+    bau = (WURZEL / "build_linux.py").read_text(encoding="utf-8")
+    anleitung = (WURZEL / "docs/SETUP_LINUX_DESKTOP.md").read_text(encoding="utf-8")
+
+    assert 'ICON_NAME = "ordertune-bridge.png"' in bau
+    assert "ordertune-bridge.png" in anleitung
+    # Der Menue-Eintrag gehoert nach `applications`, der Autostart nach
+    # `autostart`. Beide stehen in der Anleitung, und zwar getrennt.
+    assert ".local/share/applications" in anleitung
+    assert ".config/autostart" in anleitung
+
+
+def test_the_guide_does_not_promise_a_double_click() -> None:
+    """Ob ein Dateimanager ein nacktes Binary startet, entscheidet der Desktop.
+
+    GNOME tut es bewusst nicht, und Debian liefert GNOME. Die Anleitung hat das
+    zuerst als „works too" behauptet — eine Zusage ueber fremde Software, die
+    wir nicht einhalten koennen.
+    """
+    anleitung = (WURZEL / "docs/SETUP_LINUX_DESKTOP.md").read_text(encoding="utf-8")
+
+    assert "GNOME" in anleitung
+    assert "Menü-Eintrag" in anleitung
+
+
 # ── A / Entscheidung 8 — das Release und die `.sh` ───────────────────────────
 
 
