@@ -234,6 +234,34 @@ def _build_order(
         o.totalQuantity = qty
         return o
 
+    if order_type == "stop":
+        # T1-231 Stufe 2 — der Stop, und der Ausloeser gehoert in `auxPrice`.
+        #
+        # Das ist keine Formalie. IBKR fuehrt zwei Preisfelder: `lmtPrice` ist
+        # die Zusage „nicht schlechter als", `auxPrice` der Ausloeser „ab hier
+        # geht es an den Markt". Stuende der Ausloeser in `lmtPrice`, waere der
+        # Auftrag ein Limit — er laege still am Markt und loeste nie aus.
+        #
+        # `lmtPrice` bleibt bei 0.0, genau wie im Referenzentwurf des Owners.
+        #
+        # Die Plattform traegt den Ausloeser im Feld `lmtPrice` des Intents: der
+        # Draht fuehrt EINEN Preis je Auftrag, und welches IBKR-Feld daraus
+        # wird, entscheidet der Ordertyp. Ein `STP LMT` — der Typ mit ZWEI
+        # Preisen — existiert in 300 von 300 Zeilen der Anlieferung nicht.
+        roh = intent.get("lmtPrice")
+        if roh is None:
+            # Dieselbe Begruendung wie beim Tageslimit: ein Stop ohne Ausloeser
+            # ist kein Stop. Ihn als Marktauftrag abzusetzen waere genau der
+            # Fehler, gegen den T1-231 gebaut ist.
+            raise ValueError("stop ohne Ausloeserpreis (lmtPrice)")
+        o = Order()
+        o.orderType = "STP"
+        o.action = action
+        o.totalQuantity = qty
+        o.auxPrice = float(roh)
+        o.lmtPrice = 0.0
+        return o
+
     raise ValueError(f"Unsupported orderType: {order_type}")
 
 

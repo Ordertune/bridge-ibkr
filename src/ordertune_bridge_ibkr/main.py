@@ -469,9 +469,10 @@ def _handle_pending(
         # Scheitert nur die Bestaetigung, liegt der Auftrag da und die Bridge
         # sagt darueber gar nichts — der naechste Abruf holt die Bestaetigung
         # nach, und der Vermerk oben verhindert das zweite Absenden.
-        # T1-136 — das angehaengte Ausstiegsbein, sofern die Plattform eines
-        # mitgibt. `None` heisst: gewoehnlicher Einzelauftrag wie bisher.
-        kind = _attached_exit(intent)
+        # T1-136 / T1-233 — die angehaengten Ausstiegsbeine, sofern die
+        # Plattform welche mitgibt. Eine leere Liste heisst: gewoehnlicher
+        # Einzelauftrag wie bisher.
+        kinder = _attached_exits(intent)
 
         try:
             contract = make_contract(intent["symbol"])
@@ -482,15 +483,17 @@ def _handle_pending(
                 order.dispatch_id, intent.get("orderRefLabel")
             )
 
-            kind_order = None
-            if kind is not None:
-                # Das Symbol steht nur am Elternteil — beide Beine handeln
-                # denselben Wert, und es zweimal ueber die Leitung zu schicken
+            kind_orders: list[Order] = []
+            for kind in kinder:
+                # Das Symbol steht nur am Elternteil — alle Beine handeln
+                # denselben Wert, und es mehrfach ueber die Leitung zu schicken
                 # hiesse, zwei Quellen fuer dieselbe Aussage zu haben.
-                kind_order = translate_intent({**kind, "symbol": intent["symbol"]})
-                kind_order.orderRef = build_order_ref(
+                ko = translate_intent({**kind, "symbol": intent["symbol"]})
+                ko.orderRef = build_order_ref(
                     kind["dispatchId"], kind.get("orderRefLabel")
                 )
+                kind_orders.append(ko)
+            if kind_orders:
                 # IBKRs Bracket-Muster: der Parent geht ungesendet hinaus, das
                 # Kind zuletzt und mit `transmit=True`. Erst dann uebertraegt
                 # TWS beide zusammen.
@@ -500,73 +503,100 @@ def _handle_pending(
                 # IBKR das Kind ab — der Auftrag, an den es sich haengen soll,
                 # ist dann schon abgeschlossen. Bei einem Limit, das im Geld
                 # liegt, sind das Millisekunden.
-                apply_bracket_transmit_flags([ib_order, kind_order])
+                # T1-233: die Liste traegt jetzt beide Kinder. Nur das LETZTE
+                # bekommt `transmit=True` — erst dann uebertraegt TWS die ganze
+                # Gruppe. Die Funktion nahm von jeher eine Liste entgegen; sie
+                # brauchte fuer diesen Vorgang keine Zeile Aenderung.
+                apply_bracket_transmit_flags([ib_order, *kind_orders])
 
             # Der Vermerk steht VOR dem Absenden. Ein Vermerk ohne Auftrag
             # kostet eine ausgelassene Order — die der Nutzer erneut freigeben
             # kann. Ein Auftrag ohne Vermerk kostet einen zweiten Echtauftrag.
             submitted.vermerken(order.dispatch_id)
-            if kind is not None:
+            for kind in kinder:
                 submitted.vermerken(kind["dispatchId"])
             trade = ibkr.place_order(contract, ib_order)
 
-            if kind_order is not None and kind is not None:
+            # T1-233 — beide Kinder, und sie haengen am selben Elternteil.
+            #
+            # `parentId` kommt erst jetzt: die Auftragsnummer des Elternteils
+            # steht erst fest, wenn TWS ihn angenommen hat.
+            gesetzte_kinder: list[Any] = []
+            for kind, kind_order in zip(kinder, kind_orders):
                 kind_order.parentId = int(getattr(trade.order, "orderId", 0))
                 try:
                     kind_trade = ibkr.place_order(contract, kind_order)
                 except Exception as kind_exc:
                     # Der Parent liegt bei TWS und ist NICHT uebertragen — ohne
-                    # das Kind wird er es auch nie. Ein Auftrag, den die
+                    # das letzte Kind wird er es auch nie. Ein Auftrag, den die
                     # Plattform fuer lebend haelt und der nie an den Markt geht,
                     # ist der schlimmste der moeglichen Ausgaenge: er ist
-                    # unsichtbar. Also beide zuruecknehmen und beide melden.
+                    # unsichtbar.
+                    #
+                    # T1-233: dasselbe gilt fuer ein halbes Paar. Ein Stop ohne
+                    # seinen Schlussauktions-Partner ist kein Schutz, sondern
+                    # ein einzelner Verkaufsauftrag. Also faellt ALLES —
+                    # Elternteil und jedes schon gesetzte Geschwister.
                     log.error(
                         "attached exit failed for dispatch %s (parent %s): %s — "
-                        "cancelling the staged parent",
+                        "cancelling the staged parent and %d sibling(s)",
                         kind["dispatchId"],
                         order.dispatch_id,
                         kind_exc,
+                        len(gesetzte_kinder),
                     )
-                    try:
-                        ibkr.cancel_order(trade.order)
-                    except Exception as storno_exc:
-                        log.error(
-                            "could not cancel the staged parent %s: %s",
-                            order.dispatch_id,
-                            storno_exc,
-                        )
+                    for schon in [trade, *gesetzte_kinder]:
+                        try:
+                            ibkr.cancel_order(schon.order)
+                        except Exception as storno_exc:
+                            log.error(
+                                "could not cancel staged order of dispatch %s: %s",
+                                order.dispatch_id,
+                                storno_exc,
+                            )
                     submitted.vergessen(order.dispatch_id)
-                    submitted.vergessen(kind["dispatchId"])
+                    for k in kinder:
+                        submitted.vergessen(k["dispatchId"])
                     _report_rejected(
                         api,
                         order.dispatch_id,
                         f"attached_exit_failed: {kind_exc}",
                     )
-                    # Das Kind MUSS als abgeschlossen gemeldet werden. Bleibt
-                    # seine Zeile auf `submitting`, liest `describeLotExit` sie
+                    # Jedes Kind MUSS als abgeschlossen gemeldet werden. Bleibt
+                    # eine Zeile auf `submitting`, liest `describeLotExit` sie
                     # als `in_flight` und der Roundtrip fasst das Lot nie wieder
                     # an — die Position haette dauerhaft keinen Ausstieg. Genau
                     # der Schaden, gegen den dieses Spec gebaut ist.
-                    _report_rejected(
-                        api,
-                        kind["dispatchId"],
-                        f"attached_exit_failed: {kind_exc}",
-                    )
-                    continue
+                    for k in kinder:
+                        _report_rejected(
+                            api,
+                            k["dispatchId"],
+                            f"attached_exit_failed: {kind_exc}",
+                        )
+                    break
 
+                gesetzte_kinder.append(kind_trade)
                 kind_ib_order_id = int(getattr(kind_trade.order, "orderId", 0))
                 register_trade(dispatch_id_map, kind["dispatchId"], kind_trade)
                 _acknowledge(api, kind["dispatchId"], kind_ib_order_id)
                 log.info(
-                    "Attached exit for dispatch %s: %s %s x%s — ib_order_id=%s, "
-                    "parentId=%s",
+                    "Attached exit for dispatch %s: %s %s %s x%s — "
+                    "ib_order_id=%s, parentId=%s, oca=%s",
                     kind["dispatchId"],
                     intent["symbol"],
                     kind["side"],
+                    kind.get("orderType"),
                     kind["qty"],
                     kind_ib_order_id,
                     kind_order.parentId,
+                    kind.get("ocaGroup") or "-",
                 )
+            # Liegt nicht jedes Kind, ist oben schon alles zurueckgenommen und
+            # gemeldet worden — dann darf der Elternteil nicht als abgesetzt
+            # verbucht werden.
+            if len(gesetzte_kinder) != len(kinder):
+                continue
+
         except Exception as exc:
             # Nichts ist hinausgegangen: der Vermerk faellt wieder weg, damit
             # ein spaeterer Versuch moeglich bleibt.
@@ -576,7 +606,7 @@ def _handle_pending(
             # T1-136: das Kind faellt mit. Es ist nie hinausgegangen, und seine
             # Zeile darf nicht auf `submitting` stehen bleiben — sonst haelt sie
             # den Roundtrip fuer dieses Lot dauerhaft zurueck.
-            if kind is not None:
+            for kind in kinder:
                 submitted.vergessen(kind["dispatchId"])
                 _report_rejected(
                     api, kind["dispatchId"], f"parent_submit_error: {exc}"
@@ -614,22 +644,37 @@ _CANCEL_SENT: set[str] = set()
 _CANCEL_UNRESOLVED: set[str] = set()
 
 
-def _attached_exit(intent: dict[str, Any]) -> dict[str, Any] | None:
-    """T1-136 — das angehaengte Ausstiegsbein aus dem Intent, oder nichts.
+def _attached_exits(intent: dict[str, Any]) -> list[dict[str, Any]]:
+    """T1-233 — die Kinder der Klammer, ein oder zwei, in Absende-Reihenfolge.
 
-    Eng geprueft statt wahrheitswertig: `order_intent` ist ungetyptes `jsonb`,
-    und ein halb gefuelltes Feld waere hier schlimmer als ein fehlendes. Ohne
-    `dispatchId` liesse sich das Bein weder bestaetigen noch melden — es ginge
-    an den Markt und niemand koennte es zuordnen.
+    Loest `_attached_exit` (Einzelwert) ab. Der Grund liegt auf der
+    Plattformseite: die Signalquelle liefert je Intraday-Einstieg einen Stop
+    UND einen Schlussauktions-Auftrag, und die alte Auswahlregel wies zwei
+    Beine ab — seit dem 8. September ging keine Klammer mehr hinaus.
+
+    Der alte Schluessel `attachedExit` wird ausdruecklich NICHT mehr gelesen.
+    Eine Plattform, die ihn noch schickt, ist aelter als diese Bridge; sie
+    bekaeme sonst eine halbe Klammer, und das ist der eine Ausgang, den es
+    nicht geben darf.
+
+    Eng geprueft, Bein fuer Bein: `order_intent` ist ungetyptes JSON, und ein
+    halb gefuelltes Feld waere hier schlimmer als ein fehlendes. Faellt EINES
+    durch, faellt die ganze Klammer — ein Stop ohne seinen Partner am Markt ist
+    schlimmer als kein Stop.
     """
-    roh = intent.get("attachedExit")
-    if not isinstance(roh, dict):
-        return None
-    if not isinstance(roh.get("dispatchId"), str) or not roh["dispatchId"]:
-        return None
-    if not isinstance(roh.get("orderType"), str) or not roh.get("side"):
-        return None
-    return roh
+    roh = intent.get("attachedExits")
+    if not isinstance(roh, list) or not roh:
+        return []
+    geprueft: list[dict[str, Any]] = []
+    for kind in roh:
+        if not isinstance(kind, dict):
+            return []
+        if not isinstance(kind.get("dispatchId"), str) or not kind["dispatchId"]:
+            return []
+        if not isinstance(kind.get("orderType"), str) or not kind.get("side"):
+            return []
+        geprueft.append(kind)
+    return geprueft
 
 
 def _report_rejected(
