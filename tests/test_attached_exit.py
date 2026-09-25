@@ -1,14 +1,14 @@
 """T1-136 — der Ausstieg reist mit dem Einstieg.
 
 Geprueft wird hier die Bauform des Paares, nicht die Sendeschleife: was
-`_attached_exit` als Bein durchlaesst, und wie Parent und Kind zueinander
+`_attached_exits` als Bein durchlaesst, und wie Parent und Kind zueinander
 stehen, wenn sie IBKR erreichen. Die Schleife selbst haengt an einer
 IBKR-Verbindung und steht im Papiertest, den der Spec als Ausrollsperre nennt.
 """
 
 import pytest
 
-from ordertune_bridge_ibkr.main import _attached_exit
+from ordertune_bridge_ibkr.main import _attached_exits
 from ordertune_bridge_ibkr.order_translator import (
     apply_bracket_transmit_flags,
     translate_intent,
@@ -32,18 +32,19 @@ def _kind() -> dict:
 
 
 def test_attached_exit_is_returned_when_complete():
-    assert _attached_exit({"attachedExit": _kind()}) is not None
+    assert _attached_exits({"attachedExits": [_kind()]}) != []
 
 
 def test_no_attached_exit_is_the_ordinary_case():
     """Jeder Auftrag ohne Kind muss weiterhin der Einzelweg sein."""
-    assert _attached_exit({"symbol": "AAPL"}) is None
+    assert _attached_exits({"symbol": "AAPL"}) == []
 
 
 def test_attached_exit_must_be_a_mapping():
-    assert _attached_exit({"attachedExit": "moc"}) is None
-    assert _attached_exit({"attachedExit": None}) is None
-    assert _attached_exit({"attachedExit": []}) is None
+    assert _attached_exits({"attachedExits": "moc"}) == []
+    assert _attached_exits({"attachedExits": ["moc"]}) == []
+    assert _attached_exits({"attachedExits": None}) == []
+    assert _attached_exits({"attachedExits": []}) == []
 
 
 def test_attached_exit_without_dispatch_id_is_refused():
@@ -53,21 +54,21 @@ def test_attached_exit_without_dispatch_id_is_refused():
     """
     ohne = _kind()
     del ohne["dispatchId"]
-    assert _attached_exit({"attachedExit": ohne}) is None
+    assert _attached_exits({"attachedExits": [ohne]}) == []
 
     leer = _kind()
     leer["dispatchId"] = ""
-    assert _attached_exit({"attachedExit": leer}) is None
+    assert _attached_exits({"attachedExits": [leer]}) == []
 
 
 def test_attached_exit_without_order_type_or_side_is_refused():
     ohne_typ = _kind()
     del ohne_typ["orderType"]
-    assert _attached_exit({"attachedExit": ohne_typ}) is None
+    assert _attached_exits({"attachedExits": [ohne_typ]}) == []
 
     ohne_seite = _kind()
     del ohne_seite["side"]
-    assert _attached_exit({"attachedExit": ohne_seite}) is None
+    assert _attached_exits({"attachedExits": [ohne_seite]}) == []
 
 
 # ── Wie das Paar bei IBKR ankommt ────────────────────────────────────────────
