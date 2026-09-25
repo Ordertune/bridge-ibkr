@@ -49,9 +49,30 @@ ohnehin benutzt. Damit misst die Sonde mit demselben Client wie der Ernstfall.
 from __future__ import annotations
 
 import argparse
+import asyncio
+import sys
 import time
 
-from ib_insync import IB, Contract, Order, Trade
+# ── Muss VOR dem Import von ib_insync stehen ────────────────────────────────
+#
+# `ib_insync` stuetzt sich auf `eventkit`, und das ruft beim IMPORT
+# `asyncio.get_event_loop()` auf. Bis Python 3.11 legte der Aufruf stillschweigend
+# eine Schleife an; ab 3.12 ist er verpoent, und in **3.14 wirft er**:
+#
+#     RuntimeError: There is no current event loop in thread 'MainThread'.
+#
+# `ib_insync` wird seit 2023 nicht mehr gepflegt und kennt diese Aenderung
+# nicht. Wir legen die Schleife deshalb selbst an, bevor der Import passiert —
+# damit laeuft die Sonde auch auf einer frischen Python-Installation.
+#
+# Gemessen am 2026-09-25 auf einem Windows-VPS mit Python 3.14.
+if sys.version_info >= (3, 12):
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+from ib_insync import IB, Contract, Order, Trade  # noqa: E402
 
 TWS_HOST = "127.0.0.1"
 # Papier-TWS und Papier-Gateway. Alles andere ist ein Echtgeldkonto.
@@ -60,6 +81,10 @@ PAPIER_PORTS = {7497: "Papier-TWS", 4002: "Papier-Gateway"}
 # Owner-Testskript 994. Zwei Clients mit derselben Kennung werfen sich
 # gegenseitig aus der TWS (Fehler 326).
 CLIENT_ID = 993
+# Der Ableser. Eine EIGENE Kennung ist hier keine Ordnungsliebe, sondern der
+# Kern der Messung: nur fuer einen Client, der die Auftraege nicht selbst
+# gestellt hat, baut ib_insync sie frisch aus IBKRs Antwort auf.
+LESER_CLIENT_ID = 992
 
 # Weit vom Markt. Der Einstieg fuellt nicht, also werden die Kinder nie scharf.
 ENTRY_LIMIT = 1.00
@@ -106,8 +131,36 @@ def order(
     return o
 
 
-def durchgang(ib: IB, symbol: str, qty: int, oca: str, warten: float) -> dict:
-    """Stellt eine Klammer, liest zurueck, was IBKR meldet, und raeumt auf."""
+def ibkrs_sicht(leser: IB, order_ids: set[int]) -> dict[int, Order]:
+    """Was IBKR ueber diese Auftraege sagt — nicht, was wir hineingeschrieben haben.
+
+    ## Warum das ein zweiter Client sein muss
+
+    `ib_insync` schreibt beim Rueckmelden nur **sechs** Felder in unser eigenes
+    Auftragsobjekt zurueck (`Wrapper.openOrder`): `permId`, `totalQuantity`,
+    `lmtPrice`, `auxPrice`, `orderType`, `orderRef`. **`ocaGroup` ist nicht
+    dabei.**
+
+    Wer also `trade.order.ocaGroup` ausliest, liest seine eigene Eingabe.
+    Genau daran ist der erste Wurf dieser Sonde gescheitert: er meldete
+    „IBKR verknuepft nicht von sich aus", obwohl er ueber IBKR gar nichts
+    wusste.
+
+    Fuer einen **zweiten** Client sind diese Auftragsnummern unbekannt. Dort
+    greift der andere Zweig derselben Funktion, und `ib_insync` baut das
+    Objekt frisch aus IBKRs Draht — mit allen Feldern.
+    """
+    gesehen: dict[int, Order] = {}
+    for trade in leser.reqAllOpenOrders():
+        if trade.order.orderId in order_ids:
+            gesehen[trade.order.orderId] = trade.order
+    return gesehen
+
+
+def durchgang(
+    ib: IB, leser: IB, symbol: str, qty: int, oca: str, warten: float
+) -> dict:
+    """Stellt eine Klammer, liest sie mit dem ZWEITEN Client zurueck, raeumt auf."""
     c = kontrakt(symbol)
     eltern = order("BUY", "LMT", qty, lmt=ENTRY_LIMIT, transmit=False)
     eltern_trade: Trade = ib.placeOrder(c, eltern)
@@ -126,10 +179,21 @@ def durchgang(ib: IB, symbol: str, qty: int, oca: str, warten: float) -> dict:
 
     ib.sleep(warten)
 
+    # Die eigentliche Messung: IBKRs Sicht, nicht unsere. Sie muss VOR dem
+    # Stornieren passieren — ein stornierter Auftrag taucht in
+    # `reqAllOpenOrders` nicht mehr auf.
+    ids = {
+        eltern_trade.order.orderId,
+        stop_trade.order.orderId,
+        moc_trade.order.orderId,
+    }
+    laut_ibkr = ibkrs_sicht(leser, ids)
+
     ergebnis = {
         "eltern": eltern_trade,
         "stop": stop_trade,
         "moc": moc_trade,
+        "laut_ibkr": laut_ibkr,
     }
     for t in (moc_trade, stop_trade, eltern_trade):
         try:
@@ -142,16 +206,22 @@ def durchgang(ib: IB, symbol: str, qty: int, oca: str, warten: float) -> dict:
 
 def zeige(titel: str, e: dict) -> None:
     print(f"\n  {titel}")
+    laut_ibkr: dict[int, Order] = e["laut_ibkr"]
+    if not laut_ibkr:
+        print("    (IBKR meldet keinen dieser Auftraege zurueck — siehe unten)")
     for name in ("eltern", "stop", "moc"):
         t: Trade = e[name]
         o = t.order
-        gruppe = getattr(o, "ocaGroup", "") or "(leer)"
+        ibkr = laut_ibkr.get(o.orderId)
+        # Links unsere Eingabe, rechts IBKRs Antwort. Nur rechts zaehlt.
+        unser = getattr(o, "ocaGroup", "") or "-"
+        deren = (getattr(ibkr, "ocaGroup", "") or "-") if ibkr else "?"
+        deren_typ = getattr(ibkr, "ocaType", 0) if ibkr else "?"
         print(
-            f"    {name:7} id={o.orderId:<6} {o.orderType:4} "
-            f"parentId={getattr(o, 'parentId', 0):<6} "
-            f"transmit={str(o.transmit):5} "
-            f"ocaGroup={gruppe!r:34} ocaType={getattr(o, 'ocaType', 0)} "
-            f"aux={o.auxPrice} status={t.orderStatus.status}"
+            f"    {name:7} id={o.orderId:<5} {o.orderType:4} "
+            f"parentId={getattr(o, 'parentId', 0):<5} "
+            f"aux={o.auxPrice:<6} status={t.orderStatus.status:<14} "
+            f"| gesetzt={unser:24} | LAUT IBKR={deren:24} ocaType={deren_typ}"
         )
         for log in t.log[-2:]:
             if log.errorCode:
@@ -177,10 +247,17 @@ def main() -> None:
         return
 
     ib = IB()
+    leser = IB()
     try:
         ib.connect(args.host, args.port, clientId=CLIENT_ID, timeout=10)
+        # Der zweite Client ist die eigentliche Messung. Fuer ihn sind unsere
+        # Auftragsnummern unbekannt, also baut ib_insync das Objekt frisch aus
+        # IBKRs Draht — mit `ocaGroup`. Der erste Client tut das nicht.
+        leser.connect(args.host, args.port, clientId=LESER_CLIENT_ID, timeout=10)
     except Exception as e:  # noqa: BLE001
         print(f"Keine Verbindung zu {args.host}:{args.port} — laeuft die TWS? ({e})")
+        ib.disconnect()
+        leser.disconnect()
         return
 
     print(
@@ -192,18 +269,34 @@ def main() -> None:
     )
 
     try:
-        a = durchgang(ib, args.symbol, args.quantity, "", args.wait)
+        a = durchgang(ib, leser, args.symbol, args.quantity, "", args.wait)
         zeige("Durchgang A — OHNE eigene OCA-Gruppe", a)
 
         name = f"OCA_PROBE_{int(time.time())}"
-        b = durchgang(ib, args.symbol, args.quantity, name, args.wait)
+        b = durchgang(ib, leser, args.symbol, args.quantity, name, args.wait)
         zeige(f"Durchgang B — MIT eigener Gruppe {name!r} (Gegenprobe)", b)
 
-        stop_a = getattr(a["stop"].order, "ocaGroup", "") or ""
-        moc_a = getattr(a["moc"].order, "ocaGroup", "") or ""
+        # AUSSCHLIESSLICH aus IBKRs Sicht. Unsere eigene Eingabe zu lesen waere
+        # zirkulaer — daran ist der erste Wurf dieser Sonde gescheitert.
+        a_ibkr = a["laut_ibkr"]
+        stop_a = (
+            getattr(a_ibkr.get(a["stop"].order.orderId), "ocaGroup", "") or ""
+        )
+        moc_a = getattr(a_ibkr.get(a["moc"].order.orderId), "ocaGroup", "") or ""
 
         print("\n--- Die Antwort ---")
-        if stop_a and stop_a == moc_a:
+        if not a_ibkr:
+            print(
+                "  UNKLAR: IBKR hat zu Durchgang A keinen Auftrag zurueckgemeldet.\n"
+                "  Ohne IBKRs eigene Angabe ist nichts belegt — was wir selbst\n"
+                "  gesetzt haben, sagt ueber IBKR nichts.\n"
+                "\n"
+                "  Moegliche Ursachen: die Auftraege waren schon storniert, oder\n"
+                "  der zweite Client darf die Auftraege des ersten nicht sehen\n"
+                "  (TWS: Global Configuration -> API -> Settings ->\n"
+                "  'Download open orders on connection')."
+            )
+        elif stop_a and stop_a == moc_a:
             print(
                 f"  IBKR verknuepft SELBST: beide Kinder melden {stop_a!r} zurueck,\n"
                 "  obwohl Durchgang A keine Gruppe gesetzt hat.\n"
@@ -214,21 +307,29 @@ def main() -> None:
             )
         else:
             print(
-                "  IBKR verknuepft NICHT von sich aus — Durchgang A meldet keine\n"
-                "  gemeinsame Gruppe zurueck.\n"
+                "  IBKR verknuepft NICHT von sich aus — in Durchgang A meldet es\n"
+                f"  fuer den Stop {stop_a or '(leer)'!r} und fuer den MOC "
+                f"{moc_a or '(leer)'!r} zurueck.\n"
                 "\n"
                 "  -> Beide Kinder BRAUCHEN den gemeinsamen Gruppennamen. Ohne ihn\n"
                 "     verkauft ein um 11:00 gefuellter Stop die Position, und der MOC\n"
                 "     verkauft sie in der Schlussauktion ein zweites Mal.\n"
                 "     T1-233 Entscheidung 8 bleibt wie gebaut."
             )
+        b_ibkr = b["laut_ibkr"]
+        stop_b = (
+            getattr(b_ibkr.get(b["stop"].order.orderId), "ocaGroup", "") or ""
+        )
         print(
-            "\n  Durchgang B zeigt zur Gegenprobe, dass eine gesetzte Gruppe\n"
-            "  ueberhaupt durchkommt — kaeme sie dort NICHT zurueck, waere das ein\n"
-            "  eigener Befund."
+            "\n  Gegenprobe (Durchgang B): eine GESETZTE Gruppe kommt bei IBKR "
+            f"{'an' if stop_b else 'NICHT an'} — "
+            f"IBKR meldet {stop_b or '(leer)'!r} zurueck.\n"
+            "  Kaeme sie dort nicht an, waere das ein eigener Befund, und die\n"
+            "  Aussage darueber waere wertlos."
         )
     finally:
         ib.disconnect()
+        leser.disconnect()
 
 
 if __name__ == "__main__":
