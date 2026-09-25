@@ -576,7 +576,20 @@ function heartbeatStale(s) {
 
 function exportBroken(s) {
   // "unknown" heisst „noch nicht nachgesehen" und ist keine Stoerung.
-  return s.trade_export && s.trade_export !== "ok" && s.trade_export !== "unknown";
+  //
+  // "no_file" gehoert in dieselbe Klasse, stand aber bis T1-206 im
+  // Alarm-Topf: ein leerer Ordner heisst „noch nichts zu lesen", nicht
+  // „wird nicht gelesen". Die TWS exportiert HANDELSBERICHTE, und ohne
+  // Handel gibt es nichts zu exportieren.
+  //
+  // Owner-Befund 2026-09-25: die Seite sagte oben „TWS trade reports are not
+  // being read - fills may be lost" und unten in derselben Karte „Nothing to
+  // do if you have just set this up." Zwei Aussagen, ein Bildschirm,
+  // gegensaetzlich. Die obere war die falsche.
+  return s.trade_export
+    && s.trade_export !== "ok"
+    && s.trade_export !== "unknown"
+    && s.trade_export !== "no_file";
 }
 
 // T1-214: die Bridge haengt an einem IB Gateway statt an der TWS. Kein
@@ -609,6 +622,17 @@ function verdict(s) {
   // Bridge nicht mehr nachgetragen werden kann.
   if (exportBroken(s))
     return ["TWS trade reports are not being read - fills may be lost", "warn"];
+  // T1-206: der leere Ordner bekommt eine eigene Zeile, und zwar eine ohne
+  // Urteil. Sie nennt den offenen Punkt — es liegt noch kein Bericht — und
+  // behauptet nicht, es werde keiner gelesen. Ob daraus ein Befund wird,
+  // entscheidet der erste Handel; bis dahin steht die Einzelheit in der Karte
+  // darunter.
+  //
+  // Ohne Warnfarbe, weil der Zustand direkt nach der Einrichtung der
+  // erwartbare ist. Eine gelbe Zeile fuer den Normalfall erzieht dazu, die
+  // gelbe Zeile im Ernstfall zu uebersehen.
+  if (s.trade_export === "no_file")
+    return ["Connected - no trade report yet", ""];
   return ["Connected - waiting for releases", ""];
 }
 

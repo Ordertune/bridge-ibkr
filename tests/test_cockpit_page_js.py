@@ -111,3 +111,106 @@ def test_das_skript_parst(tmp_path: Path) -> None:
         "Das Cockpit-Skript hat einen Syntaxfehler. Die Flaeche zeigt dann "
         "nichts an und reagiert auf keinen Klick:\n" + ergebnis.stderr
     )
+
+
+# ── T1-206: ein leerer Berichtsordner ist kein Befund ────────────────────────
+
+
+def _verdict(zustand: dict, tmp_path: Path) -> list:
+    """`verdict()` wirklich ausfuehren, nicht den Quelltext danach absuchen.
+
+    Das Skript haengt am DOM — `render()`, `q()` und alles darunter laufen
+    ausserhalb eines Browsers nicht. `verdict()` dagegen ist eine reine
+    Funktion von einem Zustandsobjekt auf ein Paar [Text, Stufe], und genau
+    deshalb laesst sie sich messen.
+
+    Herausgeschnitten wird sie samt ihrer beiden Helfer. Eine Textsuche im
+    Quelltext waere die schlechtere Pruefung: sie belegt, dass ein Satz
+    dasteht, nicht dass er bei diesem Zustand herauskommt.
+    """
+    import json
+
+    skript = _skript()
+    teile = []
+    for name in ("HEARTBEAT_STALE_S", "heartbeatStale", "exportBroken",
+                 "gatewayInstead", "verdict"):
+        if name == "HEARTBEAT_STALE_S":
+            treffer = re.search(r"const HEARTBEAT_STALE_S = \d+;", skript)
+            assert treffer, "HEARTBEAT_STALE_S nicht gefunden"
+            teile.append(treffer.group(0))
+            continue
+        treffer = re.search(
+            r"^function " + name + r"\(.*?^\}", skript, re.S | re.M
+        )
+        assert treffer, f"{name}() nicht gefunden"
+        teile.append(treffer.group(0))
+
+    datei = tmp_path / "verdict.js"
+    datei.write_text(
+        "\n".join(teile)
+        + "\nconsole.log(JSON.stringify(verdict("
+        + json.dumps(zustand)
+        + ")));\n",
+        encoding="utf-8",
+    )
+    ergebnis = subprocess.run(
+        ["node", str(datei)], capture_output=True, text=True
+    )
+    assert ergebnis.returncode == 0, ergebnis.stderr
+    return json.loads(ergebnis.stdout)
+
+
+GESUND = {
+    "stopping": False,
+    "failure_headline": None,
+    "tws_connected": True,
+    "last_heartbeat_age_s": 1,
+    "write_access": "writable",
+    "ordertune_ok": True,
+    "gateway_instead_of_tws": False,
+}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node fehlt")
+def test_ein_leerer_berichtsordner_ist_keine_stoerung(tmp_path: Path) -> None:
+    """Owner-Befund 2026-09-25, an der laufenden Bridge.
+
+    Die Seite sagte oben „TWS trade reports are not being read - fills may be
+    lost" und unten in derselben Karte „Nothing to do if you have just set this
+    up." Zwei Aussagen, ein Bildschirm, gegensaetzlich — und die obere war die
+    falsche.
+
+    Ein leerer Ordner heisst „noch nichts zu lesen", nicht „wird nicht
+    gelesen". Die TWS exportiert Handelsberichte; ohne Handel gibt es nichts
+    zu exportieren.
+    """
+    text, stufe = _verdict({**GESUND, "trade_export": "no_file"}, tmp_path)
+
+    assert "not being read" not in text
+    assert "may be lost" not in text
+    # Ohne Warnfarbe: eine gelbe Zeile fuer den Normalfall erzieht dazu, die
+    # gelbe Zeile im Ernstfall zu uebersehen.
+    assert stufe == "", f"no_file faerbt die Zeile als {stufe!r}"
+    assert "no trade report yet" in text.lower()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node fehlt")
+def test_die_echten_befunde_warnen_weiterhin(tmp_path: Path) -> None:
+    """Der Regressionsteil — und der wichtigere.
+
+    `fixed_name` und `stale` sind die teuren: beide sehen aus wie ein
+    funktionierendes Archiv und sind keins. Sie duerfen durch diese Aenderung
+    nicht mit stillgelegt werden.
+    """
+    for zustand in ("not_configured", "no_dir", "unreadable", "fixed_name", "stale"):
+        text, stufe = _verdict({**GESUND, "trade_export": zustand}, tmp_path)
+        assert stufe == "warn", f"{zustand} warnt nicht mehr"
+        assert "not being read" in text, f"{zustand}: {text}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node fehlt")
+def test_ok_und_unknown_sagen_weiterhin_nichts(tmp_path: Path) -> None:
+    for zustand in ("ok", "unknown"):
+        text, stufe = _verdict({**GESUND, "trade_export": zustand}, tmp_path)
+        assert stufe == ""
+        assert text == "Connected - waiting for releases"
