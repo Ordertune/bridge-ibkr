@@ -130,9 +130,30 @@ def external_execution_bodies(
         if not perm_id:
             continue
 
+        # T1-244: das Konto kommt von der AUSFUEHRUNG, nicht aus der
+        # Verbindung. IBKR liefert es als `acctNumber` auf jeder Execution;
+        # der Report-Leser liest dasselbe Feld seit T1-207 und filtert
+        # danach. Hier fehlte es bis 0.29.0 — 203 fremde Ausfuehrungen auf
+        # der Plattform tragen deshalb keine Kontokennung und lassen sich
+        # keinem Depot zuordnen.
+        #
+        # Ohne Konto wird NICHT gemeldet. Die Plattform muesste es sonst aus
+        # der Verbindung erschliessen, und das ist eine Momentaufnahme: ein
+        # Nutzer fuehrt Papier- und Echtgeldkonto nacheinander an derselben
+        # Verbindung.
+        acct = str(getattr(ex, "acctNumber", "") or "").strip()
+        if not acct:
+            log.warning(
+                "Execution %s carries no account number - not reported. "
+                "Without it the platform cannot tell which depot it belongs to.",
+                exec_id,
+            )
+            continue
+
         body: dict[str, Any] = {
             "brokerExecId": exec_id,
             "brokerPermId": perm_id,
+            "brokerAccountId": acct,
             "symbol": str(getattr(getattr(fill, "contract", None), "symbol", "")),
             "side": side,
             "qty": qty,

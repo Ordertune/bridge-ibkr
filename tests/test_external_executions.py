@@ -42,6 +42,7 @@ def make_fill(
     order_ref: str = "",
     commission: float | None = 1.9,
     zeit: datetime | None = None,
+    acct: str = "DUN950877",
 ) -> SimpleNamespace:
     """Ein Fill, wie ib_insync ihn fuehrt.
 
@@ -64,6 +65,10 @@ def make_fill(
             price=price,
             orderRef=order_ref,
             time=zeit or datetime(2026, 8, 17, 13, 49, 53, tzinfo=timezone.utc),
+            # T1-244: IBKR fuehrt das Konto auf jeder Execution. Die Attrappe
+            # trug es bis dahin nicht — und genau deshalb ist es 203 fremden
+            # Ausfuehrungen auf der Plattform nie aufgefallen.
+            acctNumber=acct,
         ),
         commissionReport=report,
     )
@@ -105,6 +110,7 @@ def test_the_measured_buy_becomes_a_complete_body() -> None:
         {
             "brokerExecId": "00015963.6a82ffde.01.01",
             "brokerPermId": "1433603962",
+            "brokerAccountId": "DUN950877",
             "symbol": "FTNT",
             "side": "buy",
             "qty": 1.0,
@@ -231,3 +237,51 @@ def test_an_incomplete_execution_is_not_reported(kaputt: dict[str, Any]) -> None
 
 def test_a_fill_without_an_execution_does_not_crash() -> None:
     assert ee.external_execution_bodies([SimpleNamespace()], {}, set()) == []
+
+
+# ── 6) T1-244: die Ausfuehrung nennt ihr Konto ───────────────────────────────
+
+
+def test_the_body_carries_the_account_from_the_execution() -> None:
+    """Das Konto kommt von IBKR, nicht aus der Verbindung.
+
+    Ein Nutzer fuehrt Papier- und Echtgeldkonto nacheinander an derselben
+    Verbindung. Die zuletzt gemeldete Kennung der Verbindung ist eine
+    Momentaufnahme und sagt nichts darueber, wo DIESE Stuecke lagen.
+    """
+    (body,) = ee.external_execution_bodies([make_fill()], {}, set())
+
+    assert body["brokerAccountId"] == "DUN950877"
+
+
+def test_a_second_account_keeps_its_own_identity() -> None:
+    """Zwei Konten nacheinander duerfen nicht zu einem verschmelzen."""
+    papier, live = ee.external_execution_bodies(
+        [
+            make_fill(exec_id="a.1", perm_id=1, acct="DUN950877"),
+            make_fill(exec_id="b.1", perm_id=2, acct="U23076419"),
+        ],
+        {},
+        set(),
+    )
+
+    assert papier["brokerAccountId"] == "DUN950877"
+    assert live["brokerAccountId"] == "U23076419"
+
+
+@pytest.mark.parametrize("leer", ["", "   ", None])
+def test_without_an_account_nothing_is_reported(leer: str | None) -> None:
+    """Ohne Konto wird nicht gemeldet, und es wird auch keines erschlossen.
+
+    Die Plattform muesste es sonst aus der Verbindung ableiten — und eine
+    Ableitung ist genau das, was in dieser Kette abgeschafft wird.
+    """
+    assert ee.external_execution_bodies([make_fill(acct=leer)], {}, set()) == []
+
+
+def test_an_execution_without_the_field_at_all_is_not_reported() -> None:
+    """Eine aeltere ib_insync-Fassung ohne das Feld darf keine Nullzeile erzeugen."""
+    fill = make_fill()
+    del fill.execution.acctNumber
+
+    assert ee.external_execution_bodies([fill], {}, set()) == []
