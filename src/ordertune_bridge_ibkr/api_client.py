@@ -274,6 +274,7 @@ class OrdertuneApiClient:
         cpu_load: float | None = None,
         account: str | None = None,
         open_orders: list[dict[str, Any]] | None = None,
+        export_status: dict[str, Any] | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -323,6 +324,21 @@ class OrdertuneApiClient:
             "gatewayStatus": _GATEWAY_STATUS_WIRE.get(gateway_status, gateway_status),
             "accountSnapshot": snapshot,
         }
+        # T1-249 — was der TWS-Export tatsaechlich hergibt.
+        #
+        # Bisher lief der Leser auf dem Rechner des Kunden und schrieb ins
+        # dortige Protokoll. Die Plattform wusste nichts davon: ein Kunde ohne
+        # eingerichteten Export sah aus wie einer ohne Nachtgeschaefte. Und der
+        # schlimmste Fall — die TWS exportiert ein ANDERES Konto als die Bridge
+        # verbindet — blieb ebenfalls lokal, waehrend die Bereitschaftspruefung
+        # „ok" sagte und keine einzige Fuellung nachgetragen wurde.
+        #
+        # Gemeldet wird eine MESSUNG, kein Urteil: was gelesen wurde, wie viel
+        # davon uns gehoerte, und wann. Ob das gut ist, entscheidet die
+        # Plattform. Ein bridge-seitiges „alles in Ordnung" waere dieselbe
+        # Fehlerklasse wie die Bereitschaftspruefung, die es schon einmal war.
+        if export_status is not None:
+            body["exportStatus"] = export_status
         if cpu_load is not None:
             body["cpuLoad"] = float(cpu_load)
         # T1-114 — der Rueckbericht: was IBKR gerade an EIGENEN Auftraegen
