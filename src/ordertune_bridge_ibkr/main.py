@@ -831,6 +831,48 @@ def export_messung() -> dict[str, Any] | None:
     return _letzte_export_messung
 
 
+def _export_messung(
+    *,
+    gelesen: int,
+    eigene: int,
+    fremde: int,
+    fremdes_konto: int,
+    quarantaene: int,
+    neuester_dateitag: str | None,
+    verzeichnis_gesetzt: bool,
+    konto_bekannt: bool,
+    lesefehler: str | None = None,
+) -> dict[str, Any]:
+    """Der Meldekoerper fuer `exportStatus`, an EINER Stelle gebaut.
+
+    Zwei Bauorte fuer denselben Koerper waeren zwei Gelegenheiten, ein Feld zu
+    vergessen — und ein vergessenes Feld heisst auf der Plattform „unbekannt".
+    """
+    koerper: dict[str, Any] = {
+        # Die Z-Form, nicht `+00:00`: die Plattform weist den Offset mit 422
+        # ab. Derselbe Fallstrick, den T1-78 an Ack und Ergebnis schon einmal
+        # gefunden hat.
+        "readAt": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "filesRead": gelesen,
+        "ownFills": eigene,
+        "foreignRows": fremde,
+        "otherAccountRows": fremdes_konto,
+        "quarantinedRows": quarantaene,
+        "newestFileDay": neuester_dateitag,
+        # T1-249 (Nachtrag): WARUM nichts gelesen wurde. Ohne diese beiden
+        # Angaben ist „kein Verzeichnis eingerichtet" von „Verzeichnis da, aber
+        # leer" nicht zu unterscheiden — und das erste ist der Fall, um den es
+        # geht.
+        "exportDirConfigured": verzeichnis_gesetzt,
+        "accountKnown": konto_bekannt,
+    }
+    if lesefehler is not None:
+        koerper["readError"] = lesefehler
+    return koerper
+
+
 # T1-94: welche fremden Ausfuehrungen diese Sitzung schon gemeldet hat.
 #
 # Reine Sparsamkeit, KEINE Sicherung: der Abruf laeuft im Minutentakt und
@@ -1010,13 +1052,52 @@ def _archiv_fuellungen(
     Buch zuzuschlagen waere genau der Fehler, gegen den dieser Vorgang gebaut
     ist.
     """
+    global _letzte_export_messung
+
+    # T1-249 (Nachtrag 2026-09-28) — hier stand ein nacktes `return []`, und
+    # damit war ausgerechnet der wichtigste Zustand unsichtbar.
+    #
+    # Ein Kunde OHNE eingerichteten Export erreichte diese Zeile bei jedem
+    # Herzschlag, kehrte zurueck, bevor irgendetwas gemessen wurde, und die
+    # Plattform bekam kein `exportStatus`. Dort heisst ein fehlendes Feld
+    # „unbekannt" (alte Bridge) — der Zustand `nicht_eingerichtet` war also
+    # gar nicht erreichbar.
+    #
+    # Gemessen am 2026-09-28 auf dem Windows-VPS des Owners: das Verzeichnis
+    # existiert und traegt `trades.20260925`, und die Plattform meldete
+    # trotzdem nichts.
+    #
+    # Ein Nichtwissen zu melden ist nicht dasselbe wie nichts zu melden.
     if not export_dir or report_store is None or not konto:
+        _letzte_export_messung = _export_messung(
+            gelesen=0,
+            eigene=0,
+            fremde=0,
+            fremdes_konto=0,
+            quarantaene=0,
+            neuester_dateitag=None,
+            verzeichnis_gesetzt=bool(export_dir),
+            konto_bekannt=bool(konto),
+        )
         return []
     seit = report_store.seit_tag()
     try:
         lesung = trade_reports.lies_archiv(export_dir, konto, seit_tag=seit)
     except Exception as exc:  # pragma: no cover - defensiv
         log.warning("Could not read the TWS trade reports: %s", exc)
+        # Auch ein Lesefehler ist eine Aussage. Ohne sie saehe ein Archiv, das
+        # sich nicht lesen laesst, aus wie eines, das nicht existiert.
+        _letzte_export_messung = _export_messung(
+            gelesen=0,
+            eigene=0,
+            fremde=0,
+            fremdes_konto=0,
+            quarantaene=0,
+            neuester_dateitag=None,
+            verzeichnis_gesetzt=True,
+            konto_bekannt=True,
+            lesefehler=str(exc)[:200],
+        )
         return []
 
     for zeile in lesung.abgelehnt:
@@ -1071,24 +1152,19 @@ def _archiv_fuellungen(
     # T1-249 — dieselben Zahlen, die oben ins Protokoll gehen, gehen jetzt
     # auch zur Plattform. Sie standen immer schon in der Lesung; sie haben nur
     # nie den Rechner des Kunden verlassen.
-    global _letzte_export_messung
-    _letzte_export_messung = {
-        # Die Z-Form, nicht `+00:00`: die Plattform weist den Offset mit 422
-        # ab. Derselbe Fallstrick, den T1-78 an Ack und Ergebnis schon einmal
-        # gefunden hat.
-        "readAt": datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z"),
-        "filesRead": lesung.gelesene_dateien,
-        "ownFills": len(lesung.fuellungen),
-        "foreignRows": lesung.fremde,
-        "otherAccountRows": lesung.fremdes_konto,
-        "quarantinedRows": len(lesung.quarantaene),
+    _letzte_export_messung = _export_messung(
+        gelesen=lesung.gelesene_dateien,
+        eigene=len(lesung.fuellungen),
+        fremde=lesung.fremde,
+        fremdes_konto=lesung.fremdes_konto,
+        quarantaene=len(lesung.quarantaene),
         # Der juengste Tag, den eine angefasste DATEI trug. Daran erkennt die
         # Plattform einen Export, der seit Tagen nichts Neues liefert — auch
         # dann, wenn keine Zeile davon uns gehoerte.
-        "newestFileDay": lesung.neuester_dateitag,
-    }
+        neuester_dateitag=lesung.neuester_dateitag,
+        verzeichnis_gesetzt=True,
+        konto_bekannt=True,
+    )
 
     return list(lesung.fuellungen)
 
