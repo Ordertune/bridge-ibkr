@@ -67,8 +67,10 @@ import time
 #
 # Gemessen am 2026-09-25 auf einem Windows-VPS mit Python 3.14.
 if sys.version_info >= (3, 12):
+# Dieselbe Begruendung wie in `currency_rate_probe.py`: `get_running_loop()`
+# statt `get_event_loop()`, weil Letzteres ab 3.12 warnt und erst ab 3.14 wirft.
     try:
-        asyncio.get_event_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 

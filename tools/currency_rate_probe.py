@@ -69,8 +69,14 @@ from dataclasses import dataclass
 # eine Schleife anzulegen. `ib_insync` wird seit 2023 nicht gepflegt und kennt
 # das nicht.
 if sys.version_info >= (3, 12):
+# Gefragt wird nach dem LAUFENDEN Loop, nicht nach `get_event_loop()`. Der
+# Unterschied ist nicht Geschmack: `get_event_loop()` wirft erst ab 3.14, warnt
+# aber schon ab 3.12 — auf dem Debian-VPS des Owners (Python 3.13) stand
+# deshalb vor jedem Lauf eine DeprecationWarning. Der Riegel fing die Ausnahme
+# und liess die Warnung durch. `get_running_loop()` wirft in einem Skript immer
+# (es laeuft ja noch nichts), sagt dabei aber nichts.
     try:
-        asyncio.get_event_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
