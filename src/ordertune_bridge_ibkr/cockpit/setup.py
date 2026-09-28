@@ -32,7 +32,7 @@ from typing import Any
 
 import httpx
 
-from .. import env_file, port_probe
+from .. import env_file, port_probe, trade_reports
 from ..fingerprint import compute_fingerprint
 
 log = logging.getLogger(__name__)
@@ -219,16 +219,72 @@ def replace_credentials(path: Path, content: str) -> dict[str, Any]:
     }
 
 
+def export_auskunft(werte: dict[str, str]) -> dict[str, Any]:
+    r"""T1-249 (Nachtrag) — welcher Pfad gilt, und was an ihm liegt.
+
+    ## Der Fehler, aus dem das entstanden ist
+
+    Owner-Befund 2026-09-28: die Bridge lief, die TWS exportierte, auf der
+    Platte lag ein vollstaendiger Bericht fuer den 25.09. — und die Plattform
+    meldete nichts. Die Ursachensuche ging ueber drei Ecken, weil **niemand
+    sehen konnte, welchen Pfad die Bridge liest**. Er stand nicht in
+    `bridge.env` (die Vorlage schrieb die Zeile nicht), also galt die Vorgabe
+    aus `config.py`, und die kennt nur der Quellcode.
+
+    Ein Pfad, der nur im Programm steht, ist ein Pfad, den der Kunde nicht mit
+    dem Feld in der TWS vergleichen kann. Und dieser Vergleich ist der eine
+    Handgriff, den wir ihm nicht abnehmen koennen — die TWS entscheidet, wohin
+    sie schreibt, die Bridge entscheidet, wo sie liest, und beide Seiten wissen
+    nichts voneinander.
+
+    ## Drei Angaben, und sie sind bewusst getrennt
+
+      ``configured``  was in `bridge.env` steht. Leer heisst: nichts gesetzt.
+      ``effective``   was die Bridge tatsaechlich liest. Das ist die Zahl, die
+                      der Kunde mit der TWS vergleicht.
+      ``default``     was gelten wuerde, wenn er nichts eintraegt.
+
+    Nur `effective` zu zeigen waere kuerzer und liesse die Frage offen, ob der
+    Pfad eine Entscheidung oder eine Vorgabe ist. Genau diese Unterscheidung
+    hat am 2026-09-28 gefehlt.
+
+    Das Urteil kommt aus `trade_reports.pruefe` und ist damit dieselbe Messung,
+    die beim Start ins Protokoll geht — keine zweite Rechnung, die eine andere
+    Antwort geben koennte.
+    """
+    vorgabe = trade_reports.standard_verzeichnis()
+    gesetzt = (werte.get("TWS_EXPORT_DIR") or "").strip()
+    gilt = gesetzt or vorgabe
+    bereit = trade_reports.pruefe(gilt)
+    return {
+        "configured": gesetzt,
+        "effective": gilt,
+        "default": vorgabe,
+        "state": bereit.zustand,
+        "detail": bereit.text,
+    }
+
+
 def current_values(path: Path) -> dict[str, Any]:
     """Was die Einstellungen anzeigen — der Token nur als Endung (D9)."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
-        return {"exists": False, "values": {}, "fingerprint": ""}
+        # Auch ohne Datei gilt ein Pfad — die Vorgabe. Der Assistent zeigt ihn,
+        # damit der Kunde ihn in die TWS eintragen kann, BEVOR er zum ersten
+        # Mal auf eine fehlende Fuellung wartet.
+        return {
+            "exists": False,
+            "values": {},
+            "fingerprint": "",
+            "export": export_auskunft({}),
+        }
+    werte = env_file.parse(text)
     return {
         "exists": True,
-        "values": env_file.redacted(env_file.parse(text)),
+        "values": env_file.redacted(werte),
         "fingerprint": env_file.fingerprint(path),
         "editable": list(env_file.EDITABLE),
         "ports": [{"port": p, "label": label} for p, label in port_probe.KNOWN_PORTS],
+        "export": export_auskunft(werte),
     }

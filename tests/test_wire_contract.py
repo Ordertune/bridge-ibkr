@@ -251,6 +251,50 @@ def test_heartbeat_omits_positions_when_the_portfolio_is_unknown() -> None:
     assert rec.body == expected
 
 
+def test_heartbeat_carries_the_export_status_as_contracted() -> None:
+    r"""T1-249 (Nachtrag 2026-09-28) — `exportStatus` bekommt eine Fixture.
+
+    ## Warum das hier stehen muss
+
+    Der Block reiste seit 0.29.0 auf der Leitung und war in dieser Datei nicht
+    vertreten. Die Plattform fuehrt ihn `.strict()` — ein Feld, das sie nicht
+    kennt, wirft **nicht** den Export-Block weg, sondern den GANZEN Herzschlag
+    mit 422. Die Bridge haette gehandelt und fuer die Plattform tot
+    ausgesehen; im Protokoll waere es eine Warnzeile pro Minute gewesen, also
+    genau die Sorte, die niemand liest.
+
+    Beim Nachtragen von `exportDir` waere das passiert. Aufgefallen ist es,
+    weil jemand hingesehen hat — und das ist keine Sicherung.
+
+    `exportDir` selbst ist der Pfad, den die Bridge liest. Sein Fehlen hat den
+    Owner drei Tage gekostet: der Export lag auf der Platte, die Bridge las
+    ihn nicht, und es gab keine Stelle, an der sich der Pfad der Bridge mit dem
+    Feld in der TWS vergleichen liess.
+    """
+    expected = FIXTURES["heartbeatWithExportStatus"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+        account=snap["accountId"],
+        export_status=expected["exportStatus"],
+    )
+
+    assert rec.method == FIXTURES["heartbeatWithExportStatus"]["method"]
+    assert rec.body == expected, (
+        "Der Export-Block weicht vom Vertrag ab. Die Plattform fuehrt ihn "
+        "`.strict()` — eine Abweichung kostet nicht den Block, sondern den "
+        "ganzen Herzschlag."
+    )
+    assert rec.body["exportStatus"]["exportDir"] == "C:\\IBExport"
+
+
 def test_heartbeat_sends_an_empty_list_for_an_empty_account() -> None:
     """Die Gegenprobe: leer bleibt sagbar.
 

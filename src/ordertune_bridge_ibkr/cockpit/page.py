@@ -422,6 +422,26 @@ summary:hover { color: var(--fg-1); }
         <p><button class="action" id="s4">Check with Ordertune</button>
            <span class="note" id="s4msg"></span></p>
       </li>
+      <!-- T1-249 (Nachtrag 2026-09-28). Dieser Schritt fehlte, und sein Fehlen
+           hat einen vollstaendigen Export drei Tage unsichtbar gemacht: der
+           Pfad, den die Bridge liest, stand nirgends, wo ein Mensch ihn mit
+           dem Feld in der TWS vergleichen konnte. -->
+      <li>
+        <h3>Hand the folder to TWS</h3>
+        <p class="muted">The one step nobody can do for you. TWS decides where it writes
+        its trade reports, the Bridge decides where it reads them, and neither side can
+        see the other. Without that archive, an order that fills while the Bridge is off
+        can never be recovered.</p>
+        <dl>
+          <dt>Folder the Bridge reads</dt><dd class="mono" id="s5dir">-</dd>
+        </dl>
+        <p class="muted">In TWS: File -&gt; Global Configuration -&gt; Export Reports.
+        Switch on "Export trade reports periodically", set the interval to 1 minute, enter
+        exactly the path above, and leave "Export filename" EMPTY -- so TWS writes one
+        dated file per trading day instead of overwriting a single one.</p>
+        <p><button class="action" id="s5">Check the folder</button>
+           <span class="note" id="s5msg"></span></p>
+      </li>
     </ol>
     <p class="muted">The Bridge starts on its own as soon as bridge.env is readable.
     This window then turns into the cockpit.</p>
@@ -490,6 +510,18 @@ summary:hover { color: var(--fg-1); }
         <span class="note" id="f-savemsg"></span></p>
     </section>
     <section>
+      <h2>Trade reports from TWS</h2>
+      <dl>
+        <dt>Folder the Bridge reads</dt><dd class="mono" id="f-expdir">-</dd>
+        <dt>Set in bridge.env</dt><dd id="f-expsrc">-</dd>
+        <dt>State</dt><dd id="f-expstate">-</dd>
+      </dl>
+      <p class="note" id="f-expdetail"></p>
+      <p class="muted" style="margin-top:.75rem">Compare this path with TWS: File -&gt;
+      Global Configuration -&gt; Export Reports, character by character. To change it, edit
+      TWS_EXPORT_DIR in bridge.env -- it takes effect the next time the Bridge starts.</p>
+    </section>
+    <section>
       <h2>Credentials</h2>
       <dl>
         <dt>Ordertune server</dt><dd class="mono" id="f-base">-</dd>
@@ -544,6 +576,10 @@ let state = null;
 // stirbt mit ihr.
 let stopGewuenscht = false;
 let beendet = false;
+// Der Exportpfad wird im Assistenten einmal geholt, nicht bei jedem Takt: er
+// aendert sich nur, wenn jemand `bridge.env` anfasst, und dann ist ohnehin ein
+// Neustart faellig.
+let exportGeholt = false;
 
 // Das Alter wird HIER gerechnet, aus einem Zeitpunkt des Servers. Eine
 // stehende Zeitangabe, die aussieht wie eine laufende, ist eine dauerhaft
@@ -778,6 +814,7 @@ function render() {
   if (setup) {
     q("verdict").textContent = "Set up the Bridge";
     q("verdict").className = "verdict";
+    if (!exportGeholt) { exportGeholt = true; ladeExport(); }
     q("card").hidden = !s.failure_headline;
     if (s.failure_headline) {
       q("card-title").textContent = s.failure_headline;
@@ -934,7 +971,44 @@ function loadConfig() {
     // D9: nur die Endung. Genug, um zwei Dateien zu unterscheiden, zu wenig,
     // um damit etwas anzufangen.
     q("f-token").textContent = v.ORDERTUNE_BRIDGE_TOKEN || "-";
+    zeigeExport(c.export);
   });
+}
+
+// T1-249 (Nachtrag). Der Wortlaut ist kurz, die Begruendung steht daneben im
+// Detailsatz — derselbe, den die Bridge ins Protokoll schreibt. Zwei
+// Formulierungen fuer denselben Befund waeren zwei Gelegenheiten, verschiedene
+// Antworten zu geben.
+const EXPORT_WORT = {
+  ok: "reading it",
+  not_configured: "not set",
+  no_dir: "the folder does not exist",
+  unreadable: "the folder cannot be read",
+  no_file: "empty - no report written yet",
+  fixed_name: "TWS is overwriting a single file",
+  stale: "no new file for days",
+};
+
+function zeigeExport(e) {
+  if (!e) return;
+  const dir = e.effective || "(none)";
+  if (q("f-expdir")) {
+    q("f-expdir").textContent = dir;
+    // Steht der Pfad in bridge.env, ist er eine Entscheidung; steht er nicht
+    // drin, gilt eine Vorgabe, die der Kunde nirgends nachlesen kann. Genau
+    // diese Unterscheidung hat am 2026-09-28 gefehlt.
+    q("f-expsrc").textContent = e.configured
+      ? "yes - TWS_EXPORT_DIR"
+      : "no - this is the built-in default for this machine";
+    q("f-expstate").textContent = EXPORT_WORT[e.state] || e.state || "-";
+    q("f-expdetail").textContent = e.state === "ok" ? "" : (e.detail || "");
+  }
+  if (q("s5dir")) q("s5dir").textContent = dir;
+}
+
+function ladeExport() {
+  fetch(withToken("/config")).then(r => r.json()).then(c => zeigeExport(c.export))
+    .catch(() => {});
 }
 
 q("f-portsel").addEventListener("change", (e) => {
@@ -1074,6 +1148,23 @@ q("s3").addEventListener("click", () => {
 });
 q("s4").addEventListener("click", () => {
   post("/verify", {}).then(r => note("s4msg", r));
+});
+q("s5").addEventListener("click", () => {
+  fetch(withToken("/config")).then(r => r.json()).then(c => {
+    const e = c.export || {};
+    zeigeExport(e);
+    // Ein leerer Ordner ist direkt nach der Einrichtung der erwartbare
+    // Zustand: die TWS exportiert Handelsberichte, und ohne Handel gibt es
+    // nichts zu exportieren. Er gilt hier deshalb als bestanden — alles
+    // andere waere dieselbe Anschuldigung, die T1-206 abgeschafft hat.
+    const gut = e.state === "ok" || e.state === "no_file";
+    note("s5msg", {ok: gut, message: gut
+      ? (e.state === "ok"
+         ? "The Bridge can read this folder."
+         : "The folder exists and is empty. TWS writes the first file once "
+           + "there is a trade to report.")
+      : (e.detail || "Could not check the folder.")});
+  }).catch(() => note("s5msg", {ok: false, message: "Could not check the folder."}));
 });
 
 function loadLog() {

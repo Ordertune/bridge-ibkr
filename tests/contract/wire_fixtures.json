@@ -41,12 +41,12 @@
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.29.1",
+  "bridgeVersion": "0.29.2",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -59,7 +59,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -85,11 +85,50 @@
       }
     }
   },
+  "heartbeatWithExportStatus": {
+    "_why": [
+      "T1-249 (Nachtrag 2026-09-28). Dieser Block reiste seit 0.29.0 auf der",
+      "Leitung und hatte KEINE Fixture. Die Folge war beinahe ein Totalausfall:",
+      "`exportStatus` ist auf der Plattform `.strict()`, die Bridge bekam ein",
+      "neues Feld `exportDir` — und ein unbekanntes Feld darin wirft nicht den",
+      "Export-Block weg, sondern den GANZEN Herzschlag mit 422. Die Bridge haette",
+      "gehandelt und fuer die Plattform tot ausgesehen. Genau der Fehler, den",
+      "v0.1.0 sechzig Sekunden im Takt gemacht hat, nur eine Ebene tiefer.",
+      "`exportDir` ist der Pfad, den die Bridge liest. Er ist hier drin, weil sein",
+      "Fehlen den Owner drei Tage gekostet hat: der Export lag vor, die Bridge las",
+      "ihn nicht, und niemand konnte den Pfad mit dem Feld in der TWS vergleichen."
+    ],
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.29.2",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [],
+        "accountId": "DUN950877"
+      },
+      "exportStatus": {
+        "readAt": "2026-09-28T07:15:00Z",
+        "filesRead": 1,
+        "ownFills": 1,
+        "foreignRows": 4,
+        "otherAccountRows": 0,
+        "quarantinedRows": 0,
+        "newestFileDay": "20260925",
+        "exportDirConfigured": true,
+        "accountKnown": true,
+        "exportDir": "C:\\IBExport"
+      }
+    }
+  },
   "heartbeatWithOpenOrders": {
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -136,7 +175,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -151,7 +190,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -165,7 +204,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.29.1",
+      "bridgeVersion": "0.29.2",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,

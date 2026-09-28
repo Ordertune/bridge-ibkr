@@ -161,6 +161,44 @@ TRENNZEICHEN = (";", ",")
 _TAG_IM_NAMEN = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
 
 
+def ist_berichtsdatei(p: Path) -> bool:
+    """Ist das eine Handelsbericht-Datei der TWS?
+
+    ## Der Befund vom 2026-09-28
+
+    Hier stand dreimal `p.suffix.lower() == ".csv"`. Auf dem Windows-VPS des
+    Owners lag `C:\IBExport\trades.20260925` — 9 KB, vollstaendig, mit den
+    138 manuell verkauften ABNB und dem Kauf ueber 33. **Ohne Endung.** Der
+    Leser verwarf sie ungesehen, die Bereitschaftspruefung meldete „noch kein
+    Bericht", und die Plattform sah nie eine Zeile davon.
+
+    Das Bittere daran: die Datei heisst so, **weil unsere eigene Anleitung es
+    so verlangt.** In `config.py` steht woertlich „leave 'Export filename'
+    EMPTY there so TWS writes one dated file per trading day" — und genau
+    dann vergibt die TWS keinen Suffix.
+
+    ## Die Regel
+
+    Entschieden wird am **Tag im Namen**, nicht an der Endung. Der Tag ist
+    das, was die Datei fachlich ausmacht; die Endung ist eine Laune der
+    TWS-Fassung. Dasselbe Argument stand schon ueber `_TAG_IM_NAMEN`: „bewusst
+    nicht an einen Dateinamen gebunden" — nur war der Gedanke an der
+    Auswahlstelle nicht zu Ende gefuehrt.
+
+    Eine Datei, die den Tag traegt und trotzdem kein Bericht ist, kostet
+    nichts: die Kopfzeilen-Pruefung faengt sie ab und legt sie in die
+    Quarantaene. Eine Datei, die ein Bericht IST und nicht gelesen wird,
+    kostet einen Nachtrag — und das ist der teurere Fehler.
+    """
+    if not p.is_file():
+        return False
+    if _TAG_IM_NAMEN.search(p.name) is not None:
+        return True
+    # Ein Kunde mit gesetztem Dateinamen bekommt eine `.csv` ohne Tag. Sie
+    # bleibt zulaessig; der Tag steht dann in der Spalte `Date`.
+    return p.suffix.lower() == ".csv"
+
+
 @dataclass(frozen=True)
 class ArchivAusfuehrung:
     """Sieht aus wie eine `Execution`, soweit der Abgleich hinsieht.
@@ -268,7 +306,7 @@ def dateien(verzeichnis: Path, *, seit_tag: str | None = None) -> list[tuple[str
     ueber die Ausfuehrungskennung macht das folgenlos.
     """
     try:
-        roh = [p for p in verzeichnis.iterdir() if p.is_file() and p.suffix.lower() == ".csv"]
+        roh = [p for p in verzeichnis.iterdir() if ist_berichtsdatei(p)]
     except OSError:
         return []
 
@@ -501,7 +539,7 @@ def pruefe(verzeichnis: Path | str, *, heute: str | None = None) -> Bereitschaft
         )
 
     try:
-        eintraege = [p for p in basis.iterdir() if p.is_file() and p.suffix.lower() == ".csv"]
+        eintraege = [p for p in basis.iterdir() if ist_berichtsdatei(p)]
     except OSError as exc:
         return Bereitschaft(
             "unreadable",
@@ -634,7 +672,7 @@ def check_bericht(verzeichnis: Path | str) -> list[str]:
         try:
             dateien_hier = sorted(
                 p.name for p in Path(basis).iterdir()
-                if p.is_file() and p.suffix.lower() == ".csv"
+                if ist_berichtsdatei(p)
             )
         except OSError:
             dateien_hier = []

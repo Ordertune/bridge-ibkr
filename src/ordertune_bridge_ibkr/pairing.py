@@ -45,7 +45,7 @@ from typing import Any
 
 import httpx
 
-from . import __version__, env_file
+from . import __version__, env_file, trade_reports
 from .fingerprint import compute_fingerprint
 
 log = logging.getLogger(__name__)
@@ -190,6 +190,23 @@ IBKR_TRADING_MODE=paper
 IBKR_CLIENT_ID={client_id}
 
 # ----------------------------------------------------------------------------
+# TWS trade export  (USER EDITABLE)
+# ----------------------------------------------------------------------------
+# The folder TWS writes its trade reports to. This is how a fill that happened
+# while the Bridge was off gets recovered -- without it, such a fill is lost
+# to Ordertune for good.
+#
+# In TWS: Global Configuration -> Export Reports. Switch on "Export trade
+# reports periodically", point it at this folder, and leave "Export filename"
+# EMPTY so TWS writes one dated file per trading day.
+#
+# The line below carries the default for this machine. It was NOT written here
+# before -- and on 2026-09-28 that cost three days: a complete export sat on
+# disk, the Bridge read a different assumption, and nobody could see either.
+# A default nobody can see is a default nobody can correct.
+TWS_EXPORT_DIR={export_dir}
+
+# ----------------------------------------------------------------------------
 # Optional behavior tweaks  (USER EDITABLE)
 # ----------------------------------------------------------------------------
 ORDER_SUBMIT_DELAY_MS=100
@@ -234,6 +251,13 @@ def write_credentials(
     try:
         if path.exists():
             alt = path.read_text(encoding="utf-8")
+            # Der Exportpfad wird NUR ergaenzt, wenn er fehlt. Wer ihn selbst
+            # gesetzt hat, behaelt ihn — eine erneute Kopplung darf eine
+            # Nutzerentscheidung nicht ueberschreiben. Vorhandene Dateien aus
+            # Fassungen vor 0.29.2 tragen die Zeile nicht, und ohne sie steht
+            # der Pfad nirgends, wo ihn jemand nachlesen koennte.
+            if "TWS_EXPORT_DIR" not in env_file.parse(alt):
+                aenderungen["TWS_EXPORT_DIR"] = trade_reports.standard_verzeichnis()
             neu = env_file.apply_changes(alt, aenderungen)
         else:
             neu = _VORLAGE.format(
@@ -244,6 +268,7 @@ def write_credentials(
                 client_id="17",
                 log_level="INFO",
                 update_check="true",
+                export_dir=trade_reports.standard_verzeichnis(),
             )
         env_file.write_atomic(path, neu)
     except OSError as exc:
