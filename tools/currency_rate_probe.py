@@ -149,21 +149,58 @@ def _zahl(roh: object) -> float | None:
     return None if math.isnan(f) else f  # NaN faellt raus
 
 
+# IBKR nennt die Ledger-Zeilen mit Praefix: `$LEDGER-ExchangeRate`, nicht
+# `ExchangeRate`. Gemessen am 2026-09-28 — die erste Fassung dieser Sonde suchte
+# den nackten Namen und meldete „kein Kurs", waehrend er zwei Zeilen tiefer
+# stand.
+LEDGER_PRAEFIX = "$LEDGER-"
+# Die Suffixe `-P` und `-S` gehoeren zu Unterkonten (Paxos-Krypto, CFD) und
+# tragen eigene, meist leere Zahlen. Sie duerfen nie in eine Summe geraten,
+# deshalb wird nach der Normalisierung EXAKT verglichen, nicht per Praefix.
+
+
+def normalisiere_tag(tag: str) -> str:
+    """`$LEDGER-ExchangeRate` und `ExchangeRate` sind derselbe Gegenstand."""
+    return tag.removeprefix(LEDGER_PRAEFIX)
+
+
 def segmente(werte: list[Kontowert], tag: str) -> dict[str, float]:
     """Die Zeilen eines Tags je echter Waehrung — ohne die Sammelzeile."""
     return {
         w.waehrung.upper(): w.wert
         for w in werte
-        if w.tag == tag and w.waehrung and w.waehrung.upper() not in SAMMELZEILEN
+        if normalisiere_tag(w.tag) == tag
+        and w.waehrung
+        and w.waehrung.upper() not in SAMMELZEILEN
     }
 
 
 def sammelzeile(werte: list[Kontowert], tag: str) -> float | None:
     """Der Wert der Sammelzeile `BASE` — die Probe fuer die Richtung."""
     for w in werte:
-        if w.tag == tag and w.waehrung.upper() in SAMMELZEILEN:
+        if normalisiere_tag(w.tag) == tag and w.waehrung.upper() in SAMMELZEILEN:
             return w.wert
     return None
+
+
+def netliq_tag(werte: list[Kontowert]) -> str:
+    """Welcher Tag traegt den Depotwert JE WAEHRUNG?
+
+    Zwei Zeilen heissen aehnlich und meinen Verschiedenes:
+
+        NetLiquidation                    EUR  997.317,88   ← das GANZE Konto,
+                                                              in Basiswaehrung
+        $LEDGER-NetLiquidationByCurrency  EUR  1.000.775,19  ← nur das
+                                                              EUR-Segment
+
+    Die Richtungsprobe braucht die zweite. Die erste dazuzumischen ergaebe eine
+    Summe, die es nicht gibt — das EUR-Segment wuerde doppelt gezaehlt. Nur wenn
+    das Ledger fehlt, ist die Kontozeile die beste verfuegbare Auskunft.
+    """
+    for w in werte:
+        if normalisiere_tag(w.tag) == "NetLiquidationByCurrency":
+            return "NetLiquidationByCurrency"
+    return "NetLiquidation"
 
 
 def vereinige(
@@ -185,7 +222,7 @@ def vereinige(
 
 
 def pruefe_richtung(
-    werte: list[Kontowert], *, toleranz: float = 0.001
+    werte: list[Kontowert], *, toleranz: float = 0.0005
 ) -> Richtungsurteil:
     """In welche Richtung rechnet `ExchangeRate`?
 
@@ -207,8 +244,9 @@ def pruefe_richtung(
     50.000 USD neben 996.914 EUR liegen beide Rechnungen 0,8 % auseinander.
     """
     kurse = segmente(werte, "ExchangeRate")
-    betraege = segmente(werte, "NetLiquidation")
-    basis = sammelzeile(werte, "NetLiquidation")
+    tag = netliq_tag(werte)
+    betraege = segmente(werte, tag)
+    basis = sammelzeile(werte, tag)
 
     if not kurse:
         return Richtungsurteil(
@@ -218,7 +256,7 @@ def pruefe_richtung(
     if basis is None:
         return Richtungsurteil(
             "unentscheidbar", None, None, None,
-            "Keine Sammelzeile BASE zu NetLiquidation — ohne sie gibt es keine Probe.",
+            f"Keine Sammelzeile BASE zu {tag} — ohne sie gibt es keine Probe.",
         )
 
     gemeinsam = sorted(set(kurse) & set(betraege))
@@ -233,9 +271,21 @@ def pruefe_richtung(
         betraege[c] / kurse[c] for c in gemeinsam if kurse[c] != 0.0
     )
 
-    grenze = max(abs(basis) * toleranz, 1.0)
-    passt_mal = abs(summe_mal - basis) <= grenze
-    passt_geteilt = abs(summe_geteilt - basis) <= grenze
+    # Nicht „liegt innerhalb einer Grenze", sondern „trifft, waehrend die andere
+    # danebenliegt". Der Unterschied ist an den echten Zahlen vom 2026-09-28
+    # entscheidend: dort war A exakt und B um 0,1013 % daneben — bei einer
+    # Grenze von 0,1 % haette die Entscheidung an der dritten Nachkommastelle
+    # gehangen. Eine Probe, die so knapp ausgeht, ist keine.
+    #
+    # IBKR bildet BASE aus genau diesen Zahlen. Die richtige Hypothese trifft
+    # also bis auf Rundung, und die falsche muss SPUERBAR danebenliegen.
+    rel_mal = abs(summe_mal - basis) / abs(basis) if basis else float("inf")
+    rel_geteilt = abs(summe_geteilt - basis) / abs(basis) if basis else float("inf")
+    TRIFFT = toleranz  # der Sieger muss praktisch exakt sein
+    DANEBEN = 0.0002  # der Verlierer muss mindestens 0,02 % danebenliegen
+
+    passt_mal = rel_mal <= TRIFFT and rel_geteilt >= DANEBEN
+    passt_geteilt = rel_geteilt <= TRIFFT and rel_mal >= DANEBEN
 
     if passt_mal and not passt_geteilt:
         return Richtungsurteil(
@@ -247,18 +297,19 @@ def pruefe_richtung(
             "basis_zu_segment", summe_mal, summe_geteilt, basis,
             "Summe(Wert : Kurs) trifft die Sammelzeile, Summe(Wert x Kurs) nicht.",
         )
-    if passt_mal and passt_geteilt:
+    if min(rel_mal, rel_geteilt) > TRIFFT:
         return Richtungsurteil(
             "unentscheidbar", summe_mal, summe_geteilt, basis,
-            "Beide Rechnungen treffen die Sammelzeile. Das heisst nicht, dass beide stimmen, "
-            "sondern dass dieses Konto sie nicht auseinanderhaelt — ein einziges Segment, "
-            "lauter Kurse von 1,0, oder ein Fremdsegment, das zu klein gegen das Hauptsegment "
-            "ist. Die Richtung braucht ein Konto mit einem spuerbaren zweiten Segment.",
+            "Keine der beiden Rechnungen trifft die Sammelzeile. IBKR bildet BASE anders, "
+            "als dieser Entwurf annimmt — das gehoert in den Spec, bevor gebaut wird.",
         )
     return Richtungsurteil(
         "unentscheidbar", summe_mal, summe_geteilt, basis,
-        "Keine der beiden Rechnungen trifft die Sammelzeile. IBKR bildet BASE anders, "
-        "als dieser Entwurf annimmt — das gehoert in den Spec, bevor gebaut wird.",
+        "Die beiden Rechnungen liegen zu nah beieinander. Das heisst nicht, dass beide "
+        "stimmen, sondern dass dieses Konto sie nicht auseinanderhaelt — ein einziges "
+        "Segment, lauter Kurse von 1,0, oder ein Fremdsegment, das zu klein gegen das "
+        "Hauptsegment ist. Die Richtung braucht ein Konto mit einem spuerbaren zweiten "
+        "Segment.",
     )
 
 
@@ -429,6 +480,50 @@ def selftest() -> int:
     # die Manipulation ueberhaupt greift.
     check("I  Gegentest: unvereinigt zaehlt doppelt",
           len(ledger + updates) == 4 and len(v) == 3)
+
+    # J — DIE ECHTEN ZAHLEN. Gemessen am 2026-09-28 auf DUT106306, mit den
+    # Tag-Namen, wie IBKR sie wirklich schickt. Das ist der Rueckfall-Riegel
+    # gegen genau den Fehler, den diese Sonde zweimal gemacht hat: sie suchte
+    # `ExchangeRate` und `NetLiquidation`, IBKR schickt `$LEDGER-ExchangeRate`
+    # und `$LEDGER-NetLiquidationByCurrency`.
+    echt = [
+        Kontowert("$LEDGER-NetLiquidationByCurrency", "BASE", 997_317.877),
+        Kontowert("$LEDGER-NetLiquidationByCurrency", "EUR", 1_000_775.19),
+        Kontowert("$LEDGER-NetLiquidationByCurrency", "USD", -3_930.049),
+        Kontowert("$LEDGER-ExchangeRate", "BASE", 1.00),
+        Kontowert("$LEDGER-ExchangeRate", "EUR", 1.00),
+        Kontowert("$LEDGER-ExchangeRate", "USD", 0.8797124),
+        # Die Kontozeile traegt denselben Namen ohne Praefix und einen ANDEREN
+        # Wert — sie darf die Summe nicht verfaelschen.
+        Kontowert("NetLiquidation", "EUR", 997_317.88),
+        # Unterkonto-Zeilen. Duerfen nie in eine Summe geraten.
+        Kontowert("NetLiquidation-P", "EUR", 0.00),
+        Kontowert("NetLiquidation-S", "EUR", 0.00),
+    ]
+    check("J  Der Kurs wird im Ledger gefunden",
+          segmente(echt, "ExchangeRate") == {"EUR": 1.00, "USD": 0.8797124},
+          str(segmente(echt, "ExchangeRate")))
+    check("J  Der Depotwert je Waehrung kommt aus dem Ledger",
+          netliq_tag(echt) == "NetLiquidationByCurrency", netliq_tag(echt))
+    check("J  Die Kontozeile faelscht die Summe nicht",
+          segmente(echt, "NetLiquidationByCurrency") == {"EUR": 1_000_775.19, "USD": -3_930.049},
+          str(segmente(echt, "NetLiquidationByCurrency")))
+    uj = pruefe_richtung(echt)
+    check("J  Richtung: Segment -> Basis", uj.richtung == "segment_zu_basis", uj.begruendung)
+    usd_j, _ = in_plattformwaehrung(echt, uj)
+    check("J  Depotwert 1.133.686,27 USD",
+          usd_j is not None and abs(usd_j - 1_133_686.27) < 1.0, f"{usd_j}")
+    # GEGENTEST auf die Entscheidungsregel: an diesen Zahlen lag die falsche
+    # Hypothese nur 0,1013 % daneben. Mit einer schlichten 0,1-%-Grenze haette
+    # die Probe an der dritten Nachkommastelle gehangen — hier wird belegt,
+    # dass sie das nicht mehr tut.
+    rel_falsch = abs(sum(
+        v / {"EUR": 1.00, "USD": 0.8797124}[c]
+        for c, v in {"EUR": 1_000_775.19, "USD": -3_930.049}.items()
+    ) - 997_317.877) / 997_317.877
+    check("J  Gegentest: die falsche Hypothese liegt nur 0,1 % daneben",
+          0.0009 < rel_falsch < 0.0011, f"{rel_falsch:.6f}")
+    check("J  und wird trotzdem sicher verworfen", uj.richtung == "segment_zu_basis")
 
     print(f"\n  {bestanden} bestanden, {fehlgeschlagen} fehlgeschlagen")
     return 0 if fehlgeschlagen == 0 else 1
