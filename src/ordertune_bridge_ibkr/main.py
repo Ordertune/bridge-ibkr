@@ -38,6 +38,7 @@ nicht verloren — sie warten im Socket und kommen beim naechsten `sleep()`.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import threading
@@ -2088,7 +2089,53 @@ def run_loop(
 
         # Pumpt die ib_insync-Schleife. Ein blosses time.sleep() wuerde hier
         # die Rueckmeldungen von IBKR aussperren.
-        ibkr.sleep(tick_s)
+        #
+        # T1-251: und genau hier faellt der naechtliche TWS-Neustart herein.
+        #
+        # `run_loop` hatte zwei Ausgaenge — das Stopp-Signal und
+        # `is_connected() == False`. Den zweiten hat der haeufigste
+        # Verbindungsverlust nie genommen: bricht die Leitung WAEHREND des
+        # Schlafs, wirft ib_insync `ConnectionError: Socket disconnect` aus
+        # `util.sleep`, und die Ausnahme ging an der Schleifenbedingung vorbei,
+        # durch `run_supervised` hindurch, aus `main` heraus — bis in den
+        # Absturzdialog von PyInstaller.
+        #
+        # Damit war die gesamte Wiederverbindung aus T1-152d fuer den Fall,
+        # fuer den sie gebaut wurde, unerreichbar. Der Riegel existierte, nur
+        # auf dem anderen Weg.
+        #
+        # Gemessen beim Owner am 2026-09-28: die TWS startet sich taeglich neu,
+        # die Bridge starb jedes Mal in einen Dialog, den auf einem VPS niemand
+        # sieht — und blieb als Vorgang stehen, weshalb sich die alte Datei
+        # nicht einmal loeschen liess.
+        try:
+            ibkr.sleep(tick_s)
+        except (KeyboardInterrupt, SystemExit):
+            # Eine Anweisung, kein Zustand — sie geht weiter nach oben.
+            raise
+        except BaseException as exc:  # noqa: BLE001 - siehe Begruendung
+            # `BaseException` und nicht `Exception`: `asyncio.CancelledError`
+            # erbt seit Python 3.8 von `BaseException`, und genau sie steht im
+            # Rueckverfolgungsbericht des Owners in der OBERSTEN Zeile:
+            #
+            #     File "asyncio\tasks.py", line 605, in sleep
+            #     asyncio.exceptions.CancelledError
+            #
+            # Mit `except Exception` waere dieser Riegel an dem Fall
+            # vorbeigegangen, fuer den er gebaut ist. Die Zusicherung hat es
+            # beim ersten Lauf gefunden — deshalb steht sie dort mit genau
+            # dieser Ausnahme in der Liste.
+            #
+            # Ein Abbruch im Schlaf ist ein ZUSTAND, keine Anweisung. Er wird
+            # behandelt wie `is_connected() == False`: die Schleife endet, und
+            # der Aufseher darueber verbindet neu.
+            log.warning(
+                "The connection to TWS broke while waiting (%s: %s). Ending "
+                "this session; the supervisor reconnects.",
+                type(exc).__name__,
+                exc,
+            )
+            return
 
 
 # ── T1-152d: die Bridge kommt von allein zurueck ─────────────────────────────
@@ -2159,6 +2206,7 @@ def run_supervised(
     stop: threading.Event,
     on_tick: Callable[[], None] | None = None,
     on_reconnected: Callable[[], None] | None = None,
+    on_disconnected: Callable[[], None] | None = None,
     loop: Callable[..., None] = run_loop,
     reconnect: Callable[..., bool] = reconnect_forever,
 ) -> None:
@@ -2172,13 +2220,47 @@ def run_supervised(
     ohne TWS fahren koennen. Im Betrieb stehen dort die Vorgaben.
     """
     while True:
-        loop(ibkr, heartbeat=heartbeat, pending=pending, stop=stop, on_tick=on_tick)
+        try:
+            loop(
+                ibkr, heartbeat=heartbeat, pending=pending, stop=stop, on_tick=on_tick
+            )
+        except BaseException as exc:  # noqa: BLE001 - siehe Begruendung
+            # T1-251 — der zweite Riegel, und er faengt bewusst ALLES.
+            #
+            # Der erste sitzt in `run_loop` um den Schlaf. Dieser hier ist die
+            # Zusage, die diese Funktion ueberhaupt gibt: **aus diesem Aufseher
+            # faellt nichts heraus ausser dem Stopp.** Was hier durchginge,
+            # endete auf einem VPS im Absturzdialog — ein Fenster, das niemand
+            # sieht, vor einem Vorgang, der nicht mehr arbeitet und trotzdem
+            # die Datei belegt.
+            #
+            # `BaseException` und nicht `Exception`: `asyncio.CancelledError`
+            # erbt seit Python 3.8 von `BaseException`, und genau sie steht im
+            # gemessenen Rueckverfolgungsbericht des Owners ganz oben.
+            # `KeyboardInterrupt` und `SystemExit` gehen weiter — ein Strg-C
+            # ist eine Anweisung, kein Zustand.
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            log.warning(
+                "The session ended with %s: %s. Treating it as a lost "
+                "connection and reconnecting.",
+                type(exc).__name__,
+                exc,
+            )
         if stop.is_set():
             return
         log.warning(
             "Lost the connection to IBKR TWS/Gateway. This is what a nightly "
             "TWS restart looks like. Reconnecting."
         )
+        # T1-251: VOR dem Warten, nicht danach. Die Wartezeiten wachsen bis auf
+        # eine Minute je Versuch — in dieser Zeit stuende sonst eine Flaeche da,
+        # die „TWS connected" behauptet, waehrend nichts verbunden ist.
+        if on_disconnected is not None:
+            try:
+                on_disconnected()
+            except Exception as exc:  # pragma: no cover - Beiwerk
+                log.debug("Could not report the disconnect: %s", exc)
         if not reconnect(ibkr, stop):
             return
         if on_reconnected is not None:
@@ -2567,6 +2649,34 @@ def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> Non
         log.debug("Cockpit state update failed: %s", exc)
 
 
+def report_disconnect(cockpit: Any | None) -> None:
+    """T1-251 — waehrend die Bridge neu verbindet, sagt sie das auch.
+
+    Bis hierher gab es nur die Gegenrichtung (`report_reconnect`). Verlor die
+    Bridge die Leitung, blieb auf der Flaeche stehen, was zuletzt gegolten
+    hatte: TWS verbunden, Konto da, Auftragszugriff erlaubt. Bei einer Trennung
+    von Sekunden faellt das nicht auf; beim naechtlichen Neustart der TWS steht
+    es minutenlang da und behauptet etwas, das nicht mehr stimmt.
+
+    Genau die Klasse, die dieses Projekt mehrfach eingesammelt hat: **eine
+    Meldung darf nicht behaupten, was sie nicht sieht.**
+
+    Der Wert bleibt bewusst grob — verbunden ja/nein. Ein Fortschrittsbalken
+    ueber Wiederverbindungsversuche waere eine Genauigkeit, die niemandem hilft:
+    zu tun ist ohnehin nichts, die Bridge kommt von allein zurueck.
+    """
+    if cockpit is None:
+        return
+    try:
+        cockpit.store.update(
+            tws_connected=False,
+            account_known=False,
+            write_access="unknown",
+        )
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Cockpit state update failed: %s", exc)
+
+
 def stop_cockpit(cockpit: Any | None, client_id: int) -> None:
     if cockpit is None:
         return
@@ -2700,6 +2810,86 @@ def _token_changed(alter_token: str) -> bool:
 
 
 def main() -> int:
+    r"""Der eine Einstieg — und er wirft nichts.
+
+    ## Der Fehler, aus dem das entstanden ist (T1-251)
+
+    Owner-Befund 2026-09-28. Die TWS startet sich taeglich selbst neu. Jedes Mal
+    stand danach auf dem Windows-VPS dieses Fenster:
+
+        Failed to execute script 'launcher' due to unhandled exception:
+        Socket disconnect
+
+        File "ordertune_bridge_ibkr\main.py", line 2091, in run_loop
+        File "ordertune_bridge_ibkr\ibkr_client.py", line 710, in sleep
+        ConnectionError: Socket disconnect
+
+    Drei Folgen, und die dritte ist die unangenehmste:
+
+      1. Die Bridge war weg, bis jemand sich auf den VPS verband und sie von
+         Hand startete — obwohl die Wiederverbindung seit T1-152d gebaut ist.
+      2. Der Dialog ist **modal**. Auf einem Server sieht ihn niemand, also
+         klickt ihn niemand weg, also bleibt der Vorgang stehen — im
+         Taskmanager sichtbar, ohne zu arbeiten.
+      3. Weil der Vorgang steht, **laesst sich die EXE nicht loeschen**. Der
+         Owner musste vor jedem Fassungswechsel erst in den Taskmanager. Genau
+         die Beobachtung, die wie ein eigener Fehler aussah und keiner war.
+
+    ## Was dieser Rahmen zusagt
+
+    Aus `main` kommt eine Zahl, nie eine Ausnahme. Ein unerwarteter Fehler wird
+    protokolliert, dem Nutzer in der Sprache dieses Programms gesagt — und der
+    Vorgang **endet**. Ein endender Vorgang gibt die Datei frei; ein Dialog tut
+    das nicht.
+
+    Der Rahmen ersetzt keine Behandlung. Der Verbindungsverlust gehoert in
+    `run_supervised` und wird dort behandelt; was hier ankommt, ist per
+    Definition etwas, mit dem niemand gerechnet hat.
+    """
+    try:
+        return _main()
+    except (KeyboardInterrupt, SystemExit):
+        # Eine Anweisung, kein Zustand. Strg-C soll sich wie Strg-C verhalten.
+        raise
+    except BaseException as exc:  # noqa: BLE001 - der Rahmen faengt alles
+        return _unerwartetes_ende(exc)
+
+
+def _unerwartetes_ende(exc: BaseException) -> int:
+    """Protokollieren, sagen, beenden. In dieser Reihenfolge.
+
+    Das Protokoll zuerst: es ist das Einzige, was einen Neustart ueberlebt und
+    das Einzige, was der Support spaeter lesen kann. Die Anzeige danach und
+    bewusst abgefangen — ein Fehler beim Anzeigen eines Fehlers darf den Ausgang
+    nicht noch einmal verdecken.
+    """
+    try:
+        log.critical(
+            "Bridge stopped on an unexpected error (pid %s).",
+            os.getpid(),
+            exc_info=exc,
+        )
+    except Exception:  # pragma: no cover - defensiv
+        pass
+
+    text = (
+        f"{type(exc).__name__}: {exc}\n\n"
+        "The Bridge has stopped. It is safe to start it again.\n"
+        "If this keeps happening, send the log file to Ordertune."
+    )
+    try:
+        print(f"\nOrdertune Bridge stopped on an unexpected error.\n{text}",
+              file=sys.stderr, flush=True)
+    except Exception:  # pragma: no cover - fensterlos gebaut, kein stderr
+        pass
+    try:
+        windows_ui.message_box(text, "Ordertune Bridge")
+    except Exception:  # pragma: no cover - defensiv
+        pass
+    return 1
+
+
+def _main() -> int:
     argv = sys.argv[1:]
 
     # T1-213 D-1 — der Owner holt sich die Konsole zurueck.
@@ -3163,6 +3353,7 @@ def main() -> int:
             stop=stop,
             on_tick=lambda: handle_deferred_cancels(api),
             on_reconnected=_on_reconnected,
+            on_disconnected=lambda: report_disconnect(cockpit),
         )
     finally:
         # T1-152d: das Ende wird sichtbar. Am 2026-09-04 stand nach dem
@@ -3185,7 +3376,18 @@ def main() -> int:
     if widerruf is not None:
         return _abort(widerruf, log_file, argv)
 
-    log.info("Bridge exited normally.")
+    # T1-251: die Nummer des Vorgangs, an beiden Enden.
+    #
+    # Owner-Befund 2026-09-28: „Mir wird regelmaessig das Loeschen der Datei
+    # verweigert, weil Prozesse im Hintergrund noch aktiv seien." Die Ursache
+    # dafuer war der Absturzdialog — ein modales Fenster haelt den Vorgang am
+    # Leben, und ein lebender Vorgang belegt seine EXE. Das ist behoben.
+    #
+    # Falls es trotzdem noch einmal vorkommt, soll es nicht wieder eine
+    # Vermutung sein. Steht diese Zeile im Protokoll, hat der Vorgang sein Ende
+    # erreicht, und was dann noch im Taskmanager steht, ist etwas anderes.
+    # Fehlt sie, hat er es nicht — und die Zeile davor sagt, wo er haengt.
+    log.info("Bridge exited normally (pid %s).", os.getpid())
     return 0
 
 
