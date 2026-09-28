@@ -41,12 +41,12 @@
     "0.4.0, und ohne Aussage bleibt der Riegel zu."
   ],
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.28.0",
+  "bridgeVersion": "0.29.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -59,7 +59,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -89,7 +89,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -136,7 +136,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -151,7 +151,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -165,7 +165,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.28.0",
+      "bridgeVersion": "0.29.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -245,6 +245,7 @@
     "body": {
       "brokerExecId": "00015963.6a82ffde.01.01",
       "brokerPermId": "1433603962",
+      "brokerAccountId": "DUN950877",
       "symbol": "FTNT",
       "side": "buy",
       "qty": 1.0,
@@ -262,6 +263,7 @@
     "body": {
       "brokerExecId": "00018d30.6a830453.01.01",
       "brokerPermId": "1433603965",
+      "brokerAccountId": "DUN950877",
       "symbol": "FTNT",
       "side": "sell",
       "qty": 1.0,

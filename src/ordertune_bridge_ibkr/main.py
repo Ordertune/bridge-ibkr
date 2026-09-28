@@ -815,6 +815,22 @@ def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
         )
 
 
+# T1-249: die letzte Messung ueber den TWS-Export.
+#
+# Sie reist mit dem naechsten Herzschlag zur Plattform. Absichtlich eine
+# MESSUNG und kein Urteil: was gelesen wurde, wie viel davon uns gehoerte,
+# und wann. Ob das gut ist, entscheidet die Plattform.
+#
+# `None` heisst „in dieser Sitzung wurde noch kein Archiv angefasst" und ist
+# ausdruecklich etwas anderes als „nichts gefunden".
+_letzte_export_messung: dict[str, Any] | None = None
+
+
+def export_messung() -> dict[str, Any] | None:
+    """Die letzte Messung ueber den TWS-Export, oder None."""
+    return _letzte_export_messung
+
+
 # T1-94: welche fremden Ausfuehrungen diese Sitzung schon gemeldet hat.
 #
 # Reine Sparsamkeit, KEINE Sicherung: der Abruf laeuft im Minutentakt und
@@ -1051,6 +1067,29 @@ def _archiv_fuellungen(
         lesung.gelesene_dateien,
         seit,
     )
+
+    # T1-249 — dieselben Zahlen, die oben ins Protokoll gehen, gehen jetzt
+    # auch zur Plattform. Sie standen immer schon in der Lesung; sie haben nur
+    # nie den Rechner des Kunden verlassen.
+    global _letzte_export_messung
+    _letzte_export_messung = {
+        # Die Z-Form, nicht `+00:00`: die Plattform weist den Offset mit 422
+        # ab. Derselbe Fallstrick, den T1-78 an Ack und Ergebnis schon einmal
+        # gefunden hat.
+        "readAt": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "filesRead": lesung.gelesene_dateien,
+        "ownFills": len(lesung.fuellungen),
+        "foreignRows": lesung.fremde,
+        "otherAccountRows": lesung.fremdes_konto,
+        "quarantinedRows": len(lesung.quarantaene),
+        # Der juengste Tag, den eine angefasste DATEI trug. Daran erkennt die
+        # Plattform einen Export, der seit Tagen nichts Neues liefert — auch
+        # dann, wenn keine Zeile davon uns gehoerte.
+        "newestFileDay": lesung.neuester_dateitag,
+    }
+
     return list(lesung.fuellungen)
 
 
@@ -1345,6 +1384,10 @@ def _handle_heartbeat(
             # drei Formen gestellt hat: liegt beim Broker wirklich das, was wir
             # gesendet haben?
             open_orders=_open_orders_fuer_bericht(ibkr),
+            # T1-249: was der TWS-Export hergibt. `None`, solange in dieser
+            # Sitzung kein Archiv angefasst wurde — das ist etwas anderes als
+            # „nichts gefunden", und die Plattform unterscheidet es.
+            export_status=export_messung(),
         )
         return snap, None
     except Exception as exc:
