@@ -275,6 +275,7 @@ class OrdertuneApiClient:
         account: str | None = None,
         open_orders: list[dict[str, Any]] | None = None,
         export_status: dict[str, Any] | None = None,
+        fx_rate_usd: float | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -316,6 +317,17 @@ class OrdertuneApiClient:
         # Mehrkonten-Fall, in dem die Bridge ausdruecklich nicht raet.
         if account:
             snapshot["accountId"] = account
+        # T1-252 — der GEDREHTE Kurs: `equity * fxRateUsd` ist der Depotwert
+        # in USD. Weggelassen, wenn er sich nicht zweifelsfrei bilden liess;
+        # die Plattform blockiert dann wie vor T1-252.
+        #
+        # Das Feld ist bewusst OPTIONAL auf der Leitung. Eine aeltere Plattform
+        # kennt es nicht und ignoriert es, eine neuere sieht sein Fehlen als
+        # „kein Kurs" — beides ist der Zustand von heute. Deshalb braucht
+        # dieser Vorgang keinen Stichtag und keinen Zwang zur Aktualisierung;
+        # im Feld laufen 0.22.0 bis 0.30.0.
+        if fx_rate_usd is not None:
+            snapshot["fxRateUsd"] = float(fx_rate_usd)
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 

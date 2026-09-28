@@ -440,6 +440,63 @@ def test_heartbeat_carries_the_account_currency(key: str) -> None:
     )
 
 
+def test_heartbeat_carries_the_turned_exchange_rate() -> None:
+    """T1-252 — `fxRateUsd` ist GEDREHT, und das ist der ganze Punkt.
+
+    IBKR fuehrt seine Kurse gegen die Basiswaehrung des Kontos. Bei einem
+    EUR-Konto heisst `0,8797124` *1 USD = 0,8797124 EUR* — die Gegenrichtung zu
+    der, die die Plattform braucht. Gedreht wird in der Bridge, weil nur sie die
+    Sammelzeile `BASE` sieht, an der sich die Richtung nachrechnen laesst.
+
+    Der Vertrag haelt deshalb nicht nur fest, DASS ein Kurs mitreist, sondern
+    dass `equity * fxRateUsd` der Depotwert in USD ist.
+    """
+    expected = FIXTURES["heartbeatForeignCurrencyWithRate"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+        fx_rate_usd=snap["fxRateUsd"],
+    )
+    assert rec.body == expected
+    # Die Richtung, ausgerechnet statt behauptet.
+    assert abs(snap["equity"] * snap["fxRateUsd"] - 102729.36) < 0.01
+    # GEGENTEST: die ungedrehte Richtung ergaebe etwas ganz anderes und darf
+    # hier nicht stehen.
+    assert abs(snap["equity"] / snap["fxRateUsd"] - 79501.62) < 0.01
+
+
+def test_heartbeat_omits_the_rate_when_there_is_none() -> None:
+    """Fehlt der Kurs, fehlt das Feld — kein `null`, keine 1,0.
+
+    Eine 1,0 hiesse „keine Umrechnung noetig" und waere bei einem EUR-Konto
+    eine Luege, die niemand an den Zahlen sieht. Ein fehlendes Feld heisst
+    „kein Kurs", und die Plattform blockiert dann wie vor T1-252 — so verhaelt
+    sich auch jede Bridge vor 0.31.0.
+    """
+    expected = FIXTURES["heartbeatForeignCurrency"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+        fx_rate_usd=None,
+    )
+    assert rec.body == expected
+    assert "fxRateUsd" not in rec.body["accountSnapshot"]
+
+
 def test_heartbeat_no_longer_speaks_the_0_2_x_dialect() -> None:
     """Die alten Feldnamen duerfen nirgends mehr auftauchen.
 

@@ -38,15 +38,28 @@
     "Endzustaende ist die Pruefung nicht gemacht, und ein Feld, das mehr",
     "behauptet als es geprueft hat, waere derselbe Fehler in Gruen. Fehlt es,",
     "heisst das 'keine Aussage', nicht 'nein': so verhaelt sich jede Bridge vor",
-    "0.4.0, und ohne Aussage bleibt der Riegel zu."
+    "0.4.0, und ohne Aussage bleibt der Riegel zu.",
+    "",
+    "T1-252 / Bridge 0.31.0 — NICHT brechend: fxRateUsd kommt hinzu, ein",
+    "optionales Feld am Kontoschnappschuss. Es traegt den GEDREHTEN Kurs zur",
+    "Plattformwaehrung, also die Zahl, fuer die equity * fxRateUsd der",
+    "Depotwert in USD ist. Gedreht wird in der Bridge: IBKR fuehrt seine Kurse",
+    "gegen die BASISWAEHRUNG des Kontos, und nur die Bridge sieht die",
+    "Sammelzeile BASE, an der sich die Richtung nachrechnen laesst. Eine",
+    "falsche Richtung waere kein Fehler, den jemand sieht, sondern ein stiller",
+    "Faktor von 22,6 Prozent auf jede Stueckzahl.",
+    "",
+    "Fehlt das Feld, heisst das 'kein Kurs' und nicht 'Kurs 1,0': die Plattform",
+    "blockiert die Mengenrechnung dann wie vor T1-252. So verhaelt sich jede",
+    "Bridge vor 0.31.0, und deshalb braucht dieser Vorgang keinen Stichtag."
   ],
   "contractVersion": "t1-94",
-  "bridgeVersion": "0.30.0",
+  "bridgeVersion": "0.31.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -59,7 +72,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -101,7 +114,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -128,7 +141,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -175,7 +188,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -185,12 +198,28 @@
       }
     }
   },
+  "heartbeatForeignCurrencyWithRate": {
+    "_comment": "T1-252 — dasselbe EUR-Konto, jetzt mit Kurs. `fxRateUsd` ist GEDREHT: `equity * fxRateUsd` ist der Depotwert in USD, hier 90372.29 x 1.1367351 = 102729.36. Gedreht wird in der Bridge, weil nur dort die Sammelzeile BASE liegt, an der sich die Richtung nachrechnen laesst — IBKR fuehrt seine Kurse gegen die Basiswaehrung des Kontos, nicht gegen USD. Die Plattform saehe nur eine Zahl und muesste raten, und falsch geraten sind 22,6 Prozent auf jede Stueckzahl. Das Feld ist OPTIONAL: fehlt es, blockiert die Plattform wie vor T1-252, und genau so verhaelt sich jede Bridge vor 0.31.0.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.31.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 22300.0,
+        "equity": 90372.29,
+        "currency": "EUR",
+        "positions": [],
+        "fxRateUsd": 1.1367351420759786
+      }
+    }
+  },
   "heartbeatUnknownCurrency": {
     "_comment": "T1-85 — der Client konnte die Kontowaehrung nicht eindeutig bestimmen (mehrere Waehrungssegmente). null heisst 'weiss ich nicht' und ist eine Aussage; ein geratenes USD waere ein stiller Faktor auf jede Stueckzahl.",
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -204,7 +233,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.30.0",
+      "bridgeVersion": "0.31.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,

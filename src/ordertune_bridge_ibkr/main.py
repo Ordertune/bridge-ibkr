@@ -1527,6 +1527,10 @@ def _handle_heartbeat(
             # `heartbeat` das Feld weg, und die Plattform behandelt den
             # Snapshot als nicht identifiziert.
             account=snap.account,
+            # T1-252: der gedrehte Kurs zur Plattformwaehrung. `None` heisst
+            # „nicht zweifelsfrei bildbar" — dann laesst `heartbeat` das Feld
+            # weg und die Plattform blockiert wie bisher.
+            fx_rate_usd=snap.fx_rate_usd,
             # T1-114: die Antwort auf `reqOpenOrders`, die bis hierher nur als
             # Ja/Nein fuer die Schreibrechte ausgewertet und dann verworfen
             # wurde. Sie beantwortet die Frage, die der Owner an drei Tagen in

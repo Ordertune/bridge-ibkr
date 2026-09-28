@@ -11,6 +11,7 @@ from typing import Any
 
 from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 
+from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
 from .write_access import (
     CONFIRMED as READ_ONLY_CONFIRMED,
     SUSPECTED as READ_ONLY_SUSPECTED,
@@ -61,6 +62,20 @@ class AccountSnapshot:
     # `None` heisst „nicht eindeutig bestimmbar" — ein Login mit mehreren
     # Konten. Das ist eine Aussage und keine Vermutung.
     account: str | None = None
+    # T1-252 — der GEDREHTE Kurs zur Plattformwaehrung: `equity * fx_rate_usd`
+    # ist der Depotwert in USD.
+    #
+    # Gedreht wird hier und nicht auf der Plattform, weil nur hier die
+    # Sammelzeile `BASE` liegt, an der sich die Richtung nachrechnen laesst
+    # (`account_fx.richtung_ist_segment_zu_basis`). IBKR fuehrt seine Kurse
+    # gegen die Basiswaehrung des Kontos: bei einem EUR-Konto heisst
+    # `0,8797124` *1 USD = 0,8797124 EUR*, also die Gegenrichtung. Die
+    # Plattform saehe nur eine Zahl und muesste raten — und falsch geraten sind
+    # 22,6 Prozent auf jede Stueckzahl.
+    #
+    # `None` heisst „kein Kurs". Die Plattform blockiert dann wie bisher; ein
+    # geratener Kurs waere Genauigkeit, die niemand sieht.
+    fx_rate_usd: float | None = None
 
 
 # Sammelzeilen des Kontos, die keine echte Waehrung benennen.
@@ -168,6 +183,8 @@ class IbkrClient:
         # Abfrage abgeschlossen wurde.
         self._positions_known = False
         self._multi_account_warned = False
+        # T1-252: derselbe Grund wie oben — ein Zustand, kein Ereignis.
+        self._fx_logged = False
         # T1-101 B-2: die 321er aus dem Verbindungsfenster, mit ihrem Text.
         self._validation_errors: list[str] = []
         self._write_access = WriteAccess()
@@ -363,6 +380,12 @@ class IbkrClient:
 
         self._log_account_currency(acct_values, currency, equity)
 
+        # T1-252: die Waehrung wird NICHT zweimal hergeleitet. `loese_kurs_auf`
+        # bekommt das Ergebnis von oben — zwei Herleitungen derselben Sache
+        # sind zwei Gelegenheiten, verschieden zu antworten.
+        fx = loese_kurs_auf(acct_values, currency)
+        self._log_fx(currency, fx)
+
         positions = self._positions()
 
         return AccountSnapshot(
@@ -372,7 +395,33 @@ class IbkrClient:
             positions=positions,
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
             account=self._trading_account(),
+            fx_rate_usd=fx.kurs,
         )
+
+    def _log_fx(self, currency: str | None, fx: FxErgebnis) -> None:
+        """Sag, ob aus diesem Depotwert eine Stueckzahl werden kann.
+
+        Einmal je Sitzung, nicht je Herzschlag — dieselbe Ueberlegung wie beim
+        Mehrkonten-Hinweis. Ein Konto in fremder Waehrung ohne Kurs ist ein
+        Zustand, kein Ereignis, und eine Zeile je Minute waere Rauschen.
+        """
+        if currency is None or currency == PLATTFORM_WAEHRUNG:
+            return
+        if self._fx_logged:
+            return
+        self._fx_logged = True
+        if fx.kurs is None:
+            log.warning(
+                "This account is denominated in %s and Ordertune could not "
+                "determine an exchange rate: %s Position sizes stay blocked "
+                "until it can — a wrong rate would misprice every order "
+                "silently. Switch the calculation basis to a fixed base amount "
+                "in USD to keep trading.",
+                currency,
+                fx.grund,
+            )
+        else:
+            log.info("Account currency %s. %s", currency, fx.grund)
 
 
     def _positions(self) -> list[dict[str, Any]] | None:
