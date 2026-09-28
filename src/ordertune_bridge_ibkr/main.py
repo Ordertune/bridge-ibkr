@@ -1178,6 +1178,59 @@ def _archiv_fuellungen(
     return list(lesung.fuellungen)
 
 
+def miss_den_export(
+    ibkr: IbkrClient,
+    *,
+    export_dir: str | None,
+    report_store: Any | None,
+) -> list[Any]:
+    """T1-249 (Nachtrag 2026-09-28) — das Archiv wird JEDEN Takt gemessen.
+
+    ## Der Fehler, aus dem das entstanden ist
+
+    Der Aufruf von `_archiv_fuellungen` stand mitten in
+    `_handle_order_reconcile` — hinter dessen erster Abbruchbedingung:
+
+        rows = api.get_unresolved()
+        if not rows:
+            return          # <- hier war Schluss
+
+    Damit hing die Export-MESSUNG an einer Frage, die mit ihr nichts zu tun
+    hat: „gibt es gerade einen ungeklaerten Auftrag?". Auf einem ruhigen Konto
+    lautet die Antwort immer nein. Dann wurde das Archiv nie gelesen,
+    `_letzte_export_messung` blieb `None`, und der Herzschlag liess das Feld
+    weg — was auf der Plattform „diese Bridge sagt nichts dazu" heisst.
+
+    Gemessen am 2026-09-28 auf dem VPS des Owners: Bridge 0.29.2, Herzschlag im
+    Minutentakt, Cockpit zeigte den Pfad und „reading it" — und in zwoelf
+    aufeinanderfolgenden Herzschlaegen stand auf der Plattform `exportStatus:
+    FEHLT`. Das Cockpit las `trade_reports.pruefe`, ein anderer Weg; es sah
+    also richtig aus und belegte das Falsche.
+
+    ## Warum vor dem Herzschlag
+
+    Der Herzschlag traegt `export_messung()` mit. Liefe die Messung danach,
+    ginge jeder Herzschlag mit dem Stand des VORIGEN Takts raus — und der
+    allererste mit gar keinem. Ein Takt Verzug ist hier nicht schlimm, aber er
+    ist auch nicht noetig.
+
+    Der Rueckgabewert ist derselbe wie bisher: die Fuellungen aus dem Archiv,
+    die der Abgleich danach braucht. Gelesen wird also weiterhin **einmal** je
+    Takt, nur nicht mehr als Nebenwirkung von etwas anderem.
+    """
+    # T1-119 — mit welchem Depot diese Sitzung verbunden ist. `None` bei
+    # mehreren verwalteten Konten; dann wird das Archiv bewusst nicht gelesen,
+    # denn eine Fuellung dem falschen Buch zuzuschlagen ist teurer als sie
+    # nicht zu lesen. `_archiv_fuellungen` meldet diesen Fall als Messung.
+    try:
+        konto = ibkr.trading_account()
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("Could not resolve the connected account: %s", exc)
+        konto = None
+
+    return _archiv_fuellungen(export_dir, report_store, konto)
+
+
 def _handle_order_reconcile(
     api: OrdertuneApiClient,
     ibkr: IbkrClient,
@@ -1185,6 +1238,7 @@ def _handle_order_reconcile(
     *,
     export_dir: str | None = None,
     report_store: Any | None = None,
+    aus_archiv: list[Any] | None = None,
 ) -> None:
     """T1-98 — was die Plattform als offen fuehrt, gegen das, was IBKR kennt.
 
@@ -1286,7 +1340,16 @@ def _handle_order_reconcile(
     # Was es wirklich kann, schreibt die TWS selbst auf die Platte. Absichtlich
     # unabhaengig vom Abruf oben: ein Fehler beim Broker darf das Archiv nicht
     # mitreissen, und umgekehrt.
-    aus_archiv = _archiv_fuellungen(export_dir, report_store, verbundenes_konto)
+    # Gereicht statt selbst gelesen: `miss_den_export` hat den Takt schon
+    # gemessen, bevor der Herzschlag rausging. Ein zweites Lesen hier waere
+    # eine zweite Messung desselben Takts — und die zweite faende, dank der
+    # fortgeschriebenen Marke, weniger Zeilen als die erste.
+    #
+    # `None` heisst „niemand hat gemessen"; dann liest dieser Weg wie frueher
+    # selbst. Das haelt die Funktion fuer sich genommen gueltig, statt sie von
+    # einer Reihenfolge abhaengig zu machen, die man beim Lesen nicht sieht.
+    if aus_archiv is None:
+        aus_archiv = _archiv_fuellungen(export_dir, report_store, verbundenes_konto)
     _pruefe_zeitzone(heutige, aus_archiv)
 
     fills_by_ref: dict[str, Any] = {}
@@ -3008,6 +3071,27 @@ def main() -> int:
             # Zuerst das Lebenszeichen, dann die Fremdsicht. Umgekehrt haette
             # ein langsamer Abruf den Heartbeat verzoegert, und der ist das
             # Einzige, woran die Plattform erkennt, dass die Bridge lebt.
+            # T1-249 (Nachtrag 2026-09-28): ZUERST messen, dann melden.
+            #
+            # Die Messung stand bis hierher mitten im Abgleich, hinter dessen
+            # Abbruch „keine ungeklaerten Auftraege". Auf einem ruhigen Konto
+            # wurde das Archiv damit nie gelesen und der Herzschlag trug das
+            # Feld nie — zwoelf Takte am Stueck gemessen, auf einer Bridge, die
+            # das Verzeichnis richtig eingestellt hatte.
+            #
+            # Faengt alles ab: eine unlesbare Platte darf das Lebenszeichen
+            # nicht aufhalten. Ein Fehlschlag heisst hier nur, dass dieser Takt
+            # ohne frische Messung meldet.
+            try:
+                archiv_fuellungen = miss_den_export(
+                    ibkr,
+                    export_dir=config.tws_export_dir,
+                    report_store=trade_report_store,
+                )
+            except Exception as exc:  # pragma: no cover - defensiv
+                log.warning("Could not read the TWS trade export: %s", exc)
+                archiv_fuellungen = None
+
             snap, beat_error = _handle_heartbeat(api, ibkr)
 
             # Der Herzschlag ist der verlaessliche Melder: er laeuft jede
@@ -3034,6 +3118,7 @@ def main() -> int:
                 session_connected_at,
                 export_dir=config.tws_export_dir,
                 report_store=trade_report_store,
+                aus_archiv=archiv_fuellungen,
             )
             # Ganz zuletzt, und nur lesend: der Zustandsblock. Er darf keinen
             # der drei Wege oben aufhalten.
