@@ -46,6 +46,15 @@ def test_ohne_exportverzeichnis_wird_trotzdem_gemeldet() -> None:
     assert m["filesRead"] == 0
 
 
+def test_die_meldung_nennt_den_pfad() -> None:
+    """Ein Vorgabewert, den niemand sieht, ist einer, den niemand berichtigt."""
+    main._archiv_fuellungen("C:/IBExport", _Store(), None)
+
+    m = main.export_messung()
+    assert m is not None
+    assert m["exportDir"] == "C:/IBExport"
+
+
 def test_ohne_konto_wird_ebenfalls_gemeldet() -> None:
     """Ohne scharfes Konto wird nichts gelesen — auch das ist eine Aussage."""
     main._archiv_fuellungen("C:/IBExport", _Store(), None)
@@ -71,6 +80,9 @@ def test_die_meldung_traegt_immer_dieselben_felder() -> None:
         "newestFileDay",
         "exportDirConfigured",
         "accountKnown",
+        # T1-249 (Nachtrag): WELCHER Pfad. Ohne ihn konnte der Owner nicht
+        # sehen, wo die Bridge ueberhaupt sucht.
+        "exportDir",
     }
     assert ohne == erwartet
 

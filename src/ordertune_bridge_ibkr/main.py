@@ -833,6 +833,7 @@ def export_messung() -> dict[str, Any] | None:
 
 def _export_messung(
     *,
+    verzeichnis: str | None,
     gelesen: int,
     eigene: int,
     fremde: int,
@@ -867,6 +868,11 @@ def _export_messung(
         # geht.
         "exportDirConfigured": verzeichnis_gesetzt,
         "accountKnown": konto_bekannt,
+        # T1-249 (Nachtrag 2026-09-28) — WELCHER Pfad. Der Owner hat drei Tage
+        # lang einen vollstaendigen Export auf der Platte gehabt und konnte
+        # nirgends sehen, wo die Bridge ueberhaupt sucht. Ein Vorgabewert, den
+        # niemand sieht, ist ein Vorgabewert, den niemand berichtigen kann.
+        "exportDir": verzeichnis,
     }
     if lesefehler is not None:
         koerper["readError"] = lesefehler
@@ -1070,6 +1076,7 @@ def _archiv_fuellungen(
     # Ein Nichtwissen zu melden ist nicht dasselbe wie nichts zu melden.
     if not export_dir or report_store is None or not konto:
         _letzte_export_messung = _export_messung(
+            verzeichnis=export_dir,
             gelesen=0,
             eigene=0,
             fremde=0,
@@ -1088,6 +1095,7 @@ def _archiv_fuellungen(
         # Auch ein Lesefehler ist eine Aussage. Ohne sie saehe ein Archiv, das
         # sich nicht lesen laesst, aus wie eines, das nicht existiert.
         _letzte_export_messung = _export_messung(
+            verzeichnis=export_dir,
             gelesen=0,
             eigene=0,
             fremde=0,
@@ -1153,6 +1161,7 @@ def _archiv_fuellungen(
     # auch zur Plattform. Sie standen immer schon in der Lesung; sie haben nur
     # nie den Rechner des Kunden verlassen.
     _letzte_export_messung = _export_messung(
+        verzeichnis=export_dir,
         gelesen=lesung.gelesene_dateien,
         eigene=len(lesung.fuellungen),
         fremde=lesung.fremde,
