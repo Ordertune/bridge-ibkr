@@ -620,18 +620,42 @@ class IbkrClient:
         Begruendung, die nach einem Mengenfehler klingt und in Wahrheit ein
         Einheitenfehler waere.
 
-        Deshalb 0 bei fremder Waehrung: der Aufrufer ueberspringt den Abgleich
-        (`live_equity > 0`) statt falsch zu urteilen. Stillschweigend ist das
-        nicht — der Heartbeat warnt im Minutentakt, und in `full_equity` laesst
-        die Plattform es gar nicht erst bis hierher kommen.
+        Bis T1-252 stand hier deshalb 0 bei fremder Waehrung: der Aufrufer
+        ueberspringt den Abgleich (`live_equity > 0`) statt falsch zu urteilen.
+        Die Begruendung endete mit dem Satz *„und in `full_equity` laesst die
+        Plattform es gar nicht erst bis hierher kommen"*.
+
+        **Dieser Satz ist seit T1-252 falsch.** Die Plattform rechnet jetzt um
+        und laesst ein EUR-Konto in `full_equity` handeln — und damit war der
+        Abgleich fuer genau die Konten abgeschaltet, die der Vorgang
+        freischaltet. Der Riegel gegen einen veralteten serverseitigen
+        Depotwert haette dort dauerhaft gefehlt, ohne dass es jemandem auffiele.
+
+        Jetzt wird umgerechnet, mit demselben gedrehten Kurs, den auch der
+        Herzschlag traegt. Laesst er sich nicht bilden, bleibt es bei 0 — dann
+        laesst die Plattform ohnehin nichts durch, und die alte Begruendung
+        gilt unveraendert.
         """
         acct_values: list[AccountValue] = self._ib.accountValues()
-        if resolve_account_currency(acct_values) != "USD":
+        waehrung = resolve_account_currency(acct_values)
+        if waehrung is None:
             return 0.0
+
+        betrag = 0.0
         for v in acct_values:
-            if v.tag == "NetLiquidation" and v.currency.upper() == "USD":
-                return float(v.value)
-        return 0.0
+            if v.tag == "NetLiquidation" and v.currency.upper() == waehrung:
+                betrag = float(v.value)
+                break
+        if betrag <= 0.0:
+            return 0.0
+
+        if waehrung == PLATTFORM_WAEHRUNG:
+            return betrag
+
+        fx = loese_kurs_auf(acct_values, waehrung)
+        if fx.kurs is None:
+            return 0.0
+        return betrag * fx.kurs
 
     def place_order(self, contract: Contract, order: Order) -> Any:
         """Submit an order via ib_insync. Returns Trade object."""

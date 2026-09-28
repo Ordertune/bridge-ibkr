@@ -99,6 +99,11 @@ class FxErgebnis:
     #: `Depotwert x kurs = Depotwert in USD`. `None` heisst: nicht bildbar.
     kurs: float | None
     #: Immer gesetzt. Bei `kurs is None` der Grund, sonst die Herleitung.
+    #:
+    #: **Englisch**, obwohl die Kommentare hier deutsch sind: dieser Text geht
+    #: ueber `_log_fx` in das Protokoll auf dem Rechner des Kunden. Ein
+    #: deutscher Halbsatz in einer englischen Zeile ist kein Stilfehler,
+    #: sondern ein Nutzertext in der falschen Sprache.
     grund: str
 
 
@@ -189,12 +194,12 @@ def loese_kurs_auf(
     Gelegenheiten, verschieden zu antworten.
     """
     if basiswaehrung is None:
-        return FxErgebnis(None, "Die Kontowaehrung ist nicht eindeutig.")
+        return FxErgebnis(None, "The account currency is not unambiguous.")
 
     basis = basiswaehrung.upper()
     kurse = segmente(werte, "ExchangeRate")
     if not kurse:
-        return FxErgebnis(None, "IBKR liefert keine ExchangeRate-Zeile.")
+        return FxErgebnis(None, "IBKR did not report any ExchangeRate line.")
 
     # Die Probe auf die Basiswaehrung. Sie ist per Definition 1,0 — steht dort
     # etwas anderes, passen die Waehrungsangabe und die Kurstabelle nicht
@@ -204,32 +209,32 @@ def loese_kurs_auf(
     eigener = kurse.get(basis)
     if eigener is None:
         return FxErgebnis(
-            None, f"Keine ExchangeRate-Zeile fuer die Kontowaehrung {basis}."
+            None, f"No ExchangeRate line for the account currency {basis}."
         )
     if abs(eigener - 1.0) > BASIS_KURS_TOLERANZ:
         return FxErgebnis(
             None,
-            f"Der Kurs der Kontowaehrung {basis} ist {eigener}, nicht 1,0 — "
-            "Waehrungsangabe und Kurstabelle passen nicht zusammen.",
+            f"The rate for the account currency {basis} is {eigener}, not 1.0 — "
+            "the currency and the rate table do not match.",
         )
 
     if basis == PLATTFORM_WAEHRUNG:
         # Nichts zu drehen. Der Kurs reist trotzdem mit, damit auf der
         # Plattform EINE Regel gilt statt einer mit Ausnahme.
-        return FxErgebnis(1.0, "Das Konto wird bereits in USD gefuehrt.")
+        return FxErgebnis(1.0, "The account is already denominated in USD.")
 
     kurs = kurse.get(PLATTFORM_WAEHRUNG)
     if kurs is None or kurs <= 0.0:
         return FxErgebnis(
-            None, f"Kein brauchbarer Kurs fuer {PLATTFORM_WAEHRUNG} in der Antwort."
+            None, f"No usable {PLATTFORM_WAEHRUNG} rate in the response."
         )
 
     segment_zu_basis = richtung_ist_segment_zu_basis(werte)
     if segment_zu_basis is None:
         return FxErgebnis(
             None,
-            "Die Kursrichtung laesst sich an diesem Konto nicht belegen — "
-            "eine geratene Richtung waere ein stiller Faktor auf jede Stueckzahl.",
+            "The rate direction cannot be established on this account — a guessed "
+            "direction would silently skew every position size.",
         )
 
     # Segment -> Basis heisst: 1 USD = `kurs` Einheiten der Kontowaehrung.
@@ -237,11 +242,11 @@ def loese_kurs_auf(
     # der Kehrwert. Andernfalls zeigt der Kurs schon in die richtige Richtung.
     gedreht = (1.0 / kurs) if segment_zu_basis else kurs
     if not math.isfinite(gedreht) or gedreht <= 0.0:
-        return FxErgebnis(None, "Der gedrehte Kurs ist keine brauchbare Zahl.")
+        return FxErgebnis(None, "The inverted rate is not a usable number.")
 
-    richtung = "Segment->Basis" if segment_zu_basis else "Basis->Segment"
+    richtung = "segment->base" if segment_zu_basis else "base->segment"
     return FxErgebnis(
         gedreht,
-        f"1 {PLATTFORM_WAEHRUNG} = {kurs} {basis} ({richtung}), "
-        f"gedreht: 1 {basis} = {gedreht:.6f} {PLATTFORM_WAEHRUNG}.",
+        f"1 {PLATTFORM_WAEHRUNG} = {kurs} {basis} ({richtung}); "
+        f"inverted: 1 {basis} = {gedreht:.6f} {PLATTFORM_WAEHRUNG}.",
     )

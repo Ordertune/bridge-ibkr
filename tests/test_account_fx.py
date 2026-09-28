@@ -173,7 +173,7 @@ def test_die_probe_auf_die_basiswaehrung_greift() -> None:
     ]
     ergebnis = loese_kurs_auf(krumm, "EUR")
     assert ergebnis.kurs is None
-    assert "1,0" in ergebnis.grund
+    assert "not 1.0" in ergebnis.grund
     # GEGENTEST: mit 1,0 an derselben Stelle kommt sehr wohl ein Kurs heraus —
     # der Beleg, dass die Probe und nicht etwas anderes gegriffen hat.
     krumm[3] = _w("$LEDGER-ExchangeRate", "EUR", "1.00")
@@ -192,7 +192,7 @@ def test_ein_winziges_fremdsegment_entscheidet_die_richtung_nicht() -> None:
     assert richtung_ist_segment_zu_basis(winzig) is None
     ergebnis = loese_kurs_auf(winzig, "EUR")
     assert ergebnis.kurs is None
-    assert "geratene Richtung" in ergebnis.grund
+    assert "guessed" in ergebnis.grund
 
 
 def test_rundung_bricht_die_probe_nicht() -> None:
@@ -217,3 +217,112 @@ def test_unbrauchbare_zahlen_ergeben_keinen_kurs() -> None:
             _w("$LEDGER-ExchangeRate", "USD", kaputt),
         ]
         assert loese_kurs_auf(werte, "EUR").kurs is None, kaputt
+
+
+# ── Der Sizing-Abgleich rechnet mit ─────────────────────────────────────────
+#
+# QA-Befund T1-252 (BUG-1): `get_live_equity` gab bei fremder Waehrung 0
+# zurueck, und der Aufrufer ueberspringt den Abgleich bei `live_equity > 0`.
+# Damit war der Riegel gegen einen veralteten serverseitigen Depotwert fuer
+# genau die Konten abgeschaltet, die T1-252 freischaltet. Die Begruendung im
+# Quelltext endete mit „und in `full_equity` laesst die Plattform es gar nicht
+# erst bis hierher kommen" — ein Satz, der durch T1-252 selbst falsch wurde.
+
+
+class _FakeIB:
+    def __init__(self, werte: list[FakeAccountValue]) -> None:
+        self._werte = werte
+
+    def accountValues(self) -> list[FakeAccountValue]:
+        return self._werte
+
+
+def _client(werte: list[FakeAccountValue]):
+    from ordertune_bridge_ibkr.ibkr_client import IbkrClient
+
+    c = IbkrClient(host="127.0.0.1", port=7497, client_id=991)
+    c._ib = _FakeIB(werte)  # type: ignore[assignment]
+    return c
+
+
+def test_der_abgleich_rechnet_ein_eur_konto_um() -> None:
+    werte = [*ECHT, _w("NetLiquidation", "EUR", "997317.88")]
+    # Die Kontozeile steht schon in ECHT; doppelt schadet nicht, die Suche
+    # nimmt die erste.
+    equity = _client(werte).get_live_equity()
+    assert abs(equity - 1_133_686.28) < 0.02, equity
+
+
+def test_gegentest_ohne_kurs_bleibt_der_abgleich_aus() -> None:
+    """Ohne Kurs ist 0 weiterhin richtig — dann sperrt die Plattform ohnehin."""
+    ohne = [
+        _w("NetLiquidation", "EUR", "997317.88"),
+        _w("$LEDGER-NetLiquidationByCurrency", "BASE", "997317.877"),
+        _w("$LEDGER-NetLiquidationByCurrency", "EUR", "1000775.19"),
+    ]
+    assert _client(ohne).get_live_equity() == 0.0
+
+
+def test_ein_usd_konto_bleibt_unveraendert() -> None:
+    usd = [
+        _w("NetLiquidation", "USD", "309018.00"),
+        _w("$LEDGER-NetLiquidationByCurrency", "BASE", "309018.00"),
+        _w("$LEDGER-NetLiquidationByCurrency", "USD", "309018.00"),
+        _w("$LEDGER-ExchangeRate", "USD", "1.00"),
+    ]
+    assert _client(usd).get_live_equity() == 309_018.00
+
+
+def test_ohne_eindeutige_waehrung_bleibt_es_bei_null() -> None:
+    mehrdeutig = [
+        _w("NetLiquidation", "EUR", "997317.88"),
+        _w("NetLiquidation", "USD", "50000.00"),
+    ]
+    assert _client(mehrdeutig).get_live_equity() == 0.0
+
+
+def test_die_drift_verschwindet_durch_die_umrechnung() -> None:
+    """Der eigentliche Beleg: Server und Bridge kommen auf dieselbe Menge.
+
+    Ohne die Umrechnung rechnete die Bridge mit 997.317,88 (EUR) gegen die
+    serverseitigen 1.133.686,28 (USD) — 12,3 % Drift, und jeder Einstieg auf
+    einem EUR-Konto waere als `sizing_drift` abgelehnt worden, sobald der
+    Abgleich ueberhaupt liefe.
+    """
+    from ordertune_bridge_ibkr.position_sizing import (
+        SizingConfig,
+        recompute_qty,
+        sizing_drift_exceeds_threshold,
+    )
+
+    cfg = SizingConfig(
+        equity_mode="full_equity", position_size_pct=2.0, base_equity_amount=None
+    )
+    server_qty = round(1_133_686.28 * 0.02 / 100.0)
+
+    equity = _client([*ECHT, _w("NetLiquidation", "EUR", "997317.88")]).get_live_equity()
+    assert not sizing_drift_exceeds_threshold(
+        server_qty, recompute_qty(cfg, 100.0, equity)
+    )
+    # GEGENTEST: mit dem alten Verhalten (EUR ungerechnet) haette es gedriftet.
+    assert sizing_drift_exceeds_threshold(
+        server_qty, recompute_qty(cfg, 100.0, 997_317.88)
+    )
+
+
+def test_der_grund_ist_englisch() -> None:
+    """QA-Befund T1-252 (BUG-5): `grund` geht in das Protokoll des Kunden.
+
+    `_log_fx` baut daraus eine englische Zeile. Ein deutscher Halbsatz darin
+    ist kein Stilfehler, sondern ein Nutzertext in der falschen Sprache.
+    """
+    deutsch = ("waehrung", "waehrung", "kurs", "nicht", "keine", "der ", "die ", "das ")
+    faelle = [
+        loese_kurs_auf(ECHT, None),
+        loese_kurs_auf([_w("NetLiquidation", "EUR", "1")], "EUR"),
+        loese_kurs_auf(ECHT, "EUR"),
+    ]
+    for f in faelle:
+        klein = f.grund.lower()
+        treffer = [d for d in deutsch if d in klein]
+        assert not treffer, f"{f.grund!r} enthaelt {treffer}"
