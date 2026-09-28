@@ -18,6 +18,23 @@ drei der vier Festlegungen aus T1-85 (Quelle, Aktualitaet, Ausfall) fallen weg.
 Trifft sie nicht zu, braucht der Vorgang eine eigene Kursquelle und wird ein
 anderer. **Die Annahme ist ungeprueft.** Dieses Skript prueft sie.
 
+## Es gibt ZWEI Quellen, und die erste Fassung fragte nur eine
+
+Gemessen am 2026-09-28 auf `DUT106306` (EUR-Papierkonto): `accountValues()`
+lieferte **keine einzige** `ExchangeRate`-Zeile und nicht einmal eine
+Sammelzeile `BASE`. Das sah nach einer widerlegten Annahme aus und war ein
+Fehler der Sonde.
+
+`accountValues()` wird von `reqAccountUpdates` gespeist und meldet das Konto in
+**seiner** Basiswaehrung — ein Kurs hat dort gar nichts zu suchen. Die Kurse
+liegen im **Ledger**, und an den kommt man ueber `reqAccountSummary` mit der
+Kennung `$LEDGER:ALL`. In ib_insync ist das `accountSummary()`; die Kennung
+steht fest in `reqAccountSummaryAsync` (ib.py, Zeile 1894).
+
+Eine Abwesenheit an der Stelle, an der die Sache nie lag, belegt nichts.
+Deshalb liest die Sonde jetzt **beide** Quellen und sagt zu jeder Zeile, woher
+sie stammt.
+
 ## Die zweite Frage: in welche Richtung?
 
 Das ist die gefaehrlichere Haelfte. IBKR fuehrt seine Kurse gegen die
@@ -147,6 +164,24 @@ def sammelzeile(werte: list[Kontowert], tag: str) -> float | None:
         if w.tag == tag and w.waehrung.upper() in SAMMELZEILEN:
             return w.wert
     return None
+
+
+def vereinige(
+    primaer: list[Kontowert], sekundaer: list[Kontowert]
+) -> list[Kontowert]:
+    """Beide Quellen zu einer Sicht — bei Gleichstand gewinnt die primaere.
+
+    `accountSummary()` (Ledger) und `accountValues()` (reqAccountUpdates)
+    ueberschneiden sich in einigen Tags. Zwei Zeilen fuer dasselbe Paar aus Tag
+    und Waehrung waeren in der Richtungsprobe eine doppelte Summe — und die
+    Probe rechnet dann an einer Zahl, die es nicht gibt.
+    """
+    sicht: dict[tuple[str, str], Kontowert] = {}
+    for w in sekundaer:
+        sicht[(w.tag, w.waehrung.upper())] = w
+    for w in primaer:
+        sicht[(w.tag, w.waehrung.upper())] = w
+    return list(sicht.values())
 
 
 def pruefe_richtung(
@@ -373,6 +408,28 @@ def selftest() -> int:
     check("H  Gegenprobe: dieselbe Regel entscheidet bei grossem Segment",
           pruefe_richtung(a).richtung == "segment_zu_basis")
 
+    # I — die Vereinigung beider Quellen. Ohne sie zaehlt die Richtungsprobe
+    # ein Segment doppelt, sobald beide Quellen denselben Tag melden.
+    ledger = [
+        Kontowert("NetLiquidation", "EUR", 996_914.07),
+        Kontowert("ExchangeRate", "EUR", 1.0),
+    ]
+    updates = [
+        Kontowert("NetLiquidation", "EUR", 111_111.11),  # dieselbe Zelle, anderer Wert
+        Kontowert("TotalCashValue", "EUR", 685_151.94),  # nur hier
+    ]
+    v = vereinige(ledger, updates)
+    check("I  Ledger gewinnt bei Gleichstand",
+          segmente(v, "NetLiquidation") == {"EUR": 996_914.07},
+          str(segmente(v, "NetLiquidation")))
+    check("I  Zeilen nur aus der zweiten Quelle bleiben",
+          segmente(v, "TotalCashValue") == {"EUR": 685_151.94})
+    check("I  keine Dublette", len(v) == 3, str(len(v)))
+    # GEGENTEST: ohne Vereinigung waere die Summe eine andere. Der Beleg, dass
+    # die Manipulation ueberhaupt greift.
+    check("I  Gegentest: unvereinigt zaehlt doppelt",
+          len(ledger + updates) == 4 and len(v) == 3)
+
     print(f"\n  {bestanden} bestanden, {fehlgeschlagen} fehlgeschlagen")
     return 0 if fehlgeschlagen == 0 else 1
 
@@ -403,16 +460,33 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
         ib.sleep(3.0)
 
         konten = [k for k in ib.managedAccounts() if k]
-        roh = ib.accountValues()
 
-        werte = [
-            Kontowert(v.tag, v.currency or "", z)
-            for v in roh
-            if (z := _zahl(v.value)) is not None
-        ]
+        def als_werte(roh: list) -> list[Kontowert]:
+            return [
+                Kontowert(v.tag, v.currency or "", z)
+                for v in roh
+                if (z := _zahl(v.value)) is not None
+            ]
+
+        # Quelle 1: reqAccountUpdates. Meldet das Konto in SEINER Basiswaehrung.
+        roh_updates = ib.accountValues()
+        # Quelle 2: reqAccountSummary mit $LEDGER:ALL. Hier liegen die Kurse.
+        # Blockiert beim ersten Aufruf (rund 250 ms), danach nicht mehr.
+        try:
+            roh_summary = ib.accountSummary()
+        except Exception as exc:  # noqa: BLE001 — eine fehlende Quelle ist ein Befund, kein Absturz
+            print(f"\n  accountSummary() nicht lesbar: {exc}")
+            roh_summary = []
+
+        w_updates = als_werte(roh_updates)
+        w_summary = als_werte(roh_summary)
+        # Das Ledger gewinnt: es ist die Quelle, die nach Waehrung aufschluesselt.
+        werte = vereinige(w_summary, w_updates)
 
         print("\n════ Das Konto ════")
         zeile("Verwaltete Konten", ", ".join(konten) or "(keine)")
+        zeile("Zeilen aus accountValues()", len(w_updates))
+        zeile("Zeilen aus accountSummary()", f"{len(w_summary)}  ($LEDGER:ALL)")
         if len(konten) > 1:
             print("  ACHTUNG: mehrere Konten. Die Bridge verweigert hier die Deutung")
             print("           (Advisory-Fall, eigener Vorgang). Die Zahlen unten")
@@ -425,15 +499,18 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
             zeile(f"NetLiquidation {w}", f"{v:,.2f}")
 
         print("\n════ Frage 1 — liefert IBKR einen Kurs? ════")
+        kurse_u = segmente(w_updates, "ExchangeRate")
+        kurse_s = segmente(w_summary, "ExchangeRate")
+        zeile("aus accountValues()", ", ".join(f"{k}={v}" for k, v in sorted(kurse_u.items())) or "keine")
+        zeile("aus accountSummary()", ", ".join(f"{k}={v}" for k, v in sorted(kurse_s.items())) or "keine")
         kurse = segmente(werte, "ExchangeRate")
         if kurse:
-            print("  JA. ExchangeRate-Zeilen:")
-            for w, v in sorted(kurse.items()):
-                zeile(f"  {w}", f"{v}")
+            quelle = "accountSummary() / $LEDGER:ALL" if kurse_s else "accountValues()"
+            print(f"  JA — der Kurs kommt aus {quelle}.")
         else:
-            print("  NEIN — keine einzige ExchangeRate-Zeile in der Antwort.")
-            print("  Damit trifft die Annahme von T1-252 nicht zu. Der Vorgang")
-            print("  braucht eine eigene Kursquelle, und die drei Festlegungen")
+            print("  NEIN — in KEINER der beiden Quellen eine ExchangeRate-Zeile.")
+            print("  Erst damit ist die Annahme von T1-252 widerlegt. Der Vorgang")
+            print("  braucht dann eine eigene Kursquelle, und die drei Festlegungen")
             print("  aus T1-85 (Quelle, Aktualitaet, Ausfall) kommen zurueck.")
 
         print("\n════ Frage 2 — in welche Richtung rechnet er? ════")
@@ -465,9 +542,11 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
             print("  Keine Kaufkraft-Zeile in der Antwort — Variante B entfaellt damit.")
 
         if alle_tags:
-            print("\n════ Alle Zeilen, wie sie ankommen ════")
-            for v in sorted(roh, key=lambda x: (x.tag, x.currency or "")):
-                print(f"  {v.tag:<32} {(v.currency or '-'):<6} {v.value}")
+            for name, quelle in (("accountValues()", roh_updates),
+                                 ("accountSummary() / $LEDGER:ALL", roh_summary)):
+                print(f"\n════ Alle Zeilen aus {name} ════")
+                for v in sorted(quelle, key=lambda x: (x.tag, x.currency or "")):
+                    print(f"  {v.tag:<32} {(v.currency or '-'):<6} {v.value}")
 
         print("\n── Fuer den Spec: das gehoert nach AC-1 und AC-2 ──")
         return 0
