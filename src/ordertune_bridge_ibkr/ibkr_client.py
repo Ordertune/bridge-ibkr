@@ -535,6 +535,37 @@ class IbkrClient:
         """
         return self._trading_account()
 
+    def managed_accounts(self) -> list[str] | None:
+        """ALLE Konten unter diesem Login — T1-276.
+
+        ## Was hier anders ist als in `_trading_account`
+
+        `_trading_account` unten beantwortet „wo wird gehandelt" und gibt bei
+        mehreren Konten ausdruecklich `None` zurueck: raten waere ein stiller
+        Faktor auf jede Bestandszahl. Diese Haltung bleibt unveraendert, und
+        diese Methode aendert an ihr nichts.
+
+        Sie beantwortet eine ANDERE Frage: was haengt unter dem Login? Bis T1-276
+        wurde dieselbe Liste geholt, auf ein Ja/Nein reduziert und weggeworfen.
+        Dass die Bridge nicht raten soll, begruendet nur, **nicht zu entscheiden**
+        — nicht, **nichts zu sagen**.
+
+        `None` heisst „nicht erhoben" (keine Verbindung, oder die Abfrage warf).
+        Eine leere Liste heisst „der Login verwaltet keines" und ist eine
+        Aussage. Die Plattform unterscheidet beides, also darf diese Stelle es
+        nicht zusammenfalten.
+
+        **Keine Nebenwirkung auf die Mengenrechnung.** Der Aufrufer darf aus
+        dieser Liste NICHT schliessen, dass Positionen oder Kontowerte jetzt
+        ueber alle Konten gelesen werden duerfen — die Grenze aus BUG-99-1 haengt
+        weiterhin an `_trading_account()`.
+        """
+        try:
+            konten = [a for a in self._ib.managedAccounts() if a]
+        except Exception:  # pragma: no cover - defensiv, wie unten
+            return None
+        return konten
+
     def _trading_account(self) -> str | None:
         """Das eine Konto, auf dem gehandelt wird — oder `None` bei mehreren.
 

@@ -10,6 +10,7 @@ Alle 5 Bridge-Endpoints:
 Auth-Chain-Header:
   Authorization: Bearer <TOKEN>
   X-Bridge-Fingerprint: <hex>
+  X-Bridge-Instance: <kennung dieses Prozesses>   (T1-277)
   X-Bridge-Version: <version>
 
 WIRE-FORMAT (T1-78)
@@ -40,6 +41,7 @@ from typing import Any
 import httpx
 
 from . import __version__
+from .instance_id import instanzkennung
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +236,15 @@ class OrdertuneApiClient:
             headers={
                 "Authorization": f"Bearer {token}",
                 "X-Bridge-Fingerprint": fingerprint,
+                # T1-277: hier und nicht je Aufruf. Die Kopfzeile gehoert auf
+                # JEDE Anfrage — Herzschlag, Handshake, Auftrags-Poll, ACK und
+                # Ergebnis —, und als Vorgabe des Clients kann kein kuenftiger
+                # Endpunkt sie vergessen.
+                #
+                # Eine Zaehlung, die nur am Herzschlag haengt, waere durch
+                # Weglassen des Herzschlags umgehbar: Poll und Herzschlag sind
+                # getrennte Endpunkte, und wer nur pollt, bekommt weiter Auftraege.
+                "X-Bridge-Instance": instanzkennung(),
                 "X-Bridge-Version": __version__,
                 "User-Agent": f"ordertune-bridge-ibkr/{__version__}",
             },
@@ -244,7 +255,11 @@ class OrdertuneApiClient:
 
     # ── Endpoints ──────────────────────────────────────────────────────────
 
-    def handshake(self, capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+    def handshake(
+        self,
+        capabilities: dict[str, Any] | None = None,
+        managed_accounts: list[str] | None = None,
+    ) -> dict[str, Any]:
         """POST /handshake → {bridgeVersion, capabilities?}
 
         `connection_id` wird NICHT mitgeschickt: der Token löst die Verbindung
@@ -256,6 +271,15 @@ class OrdertuneApiClient:
         body: dict[str, Any] = {"bridgeVersion": __version__}
         if capabilities is not None:
             body["capabilities"] = capabilities
+        # T1-276: dieselbe Ueberlegung wie bei `capabilities` — der Handshake
+        # liegt VOR dem ersten Herzschlag, und ohne diese Stelle waere die
+        # Depotzahl in der ersten Minute jeder Verbindung unbekannt.
+        #
+        # `None` heisst „nicht erhoben" und wird weggelassen; eine leere Liste
+        # ist eine Aussage und wird gesendet. Dieselbe Regel wie bei `positions`
+        # im Herzschlag, und aus demselben Grund (T1-99).
+        if managed_accounts is not None:
+            body["managedAccounts"] = list(managed_accounts)
         r = _request_with_retry(
             "POST", self._client,
             f"{self._base}/api/bridge/v1/handshake",
@@ -276,6 +300,7 @@ class OrdertuneApiClient:
         open_orders: list[dict[str, Any]] | None = None,
         export_status: dict[str, Any] | None = None,
         fx_rate_usd: float | None = None,
+        managed_accounts: list[str] | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -328,6 +353,19 @@ class OrdertuneApiClient:
         # im Feld laufen 0.22.0 bis 0.30.0.
         if fx_rate_usd is not None:
             snapshot["fxRateUsd"] = float(fx_rate_usd)
+        # T1-276 — ALLE Konten unter diesem Login, nicht nur das Handelskonto.
+        #
+        # Die Ergaenzung zu `accountId` oben: dort steht, WO gehandelt wird (und
+        # bei mehreren verwalteten Konten ausdruecklich nichts), hier steht, WAS
+        # unter dem Login haengt. Erst beide zusammen trennen „alte Fassung" von
+        # „mehrere Konten" — bis T1-276 trug ein fehlendes `accountId` beides.
+        #
+        # `None` heisst „nicht erhoben" und wird weggelassen, ein leeres Array
+        # ist eine Aussage. Setzt eine Plattform ab T1-276 voraus; gegen eine
+        # aeltere gaebe es ein 422, weil der Koerper dort `.strict()` geprueft
+        # wird. Deshalb geht die Plattform zuerst live.
+        if managed_accounts is not None:
+            snapshot["managedAccounts"] = list(managed_accounts)
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 
