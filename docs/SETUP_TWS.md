@@ -81,20 +81,27 @@ ist die sichere Wahl.
 
 ### Spalten
 
-Klick auf **Auswählen…** und alle Spalten aktivieren. Zwingend nötig sind:
+Klick auf **Auswählen…** und alle Spalten aktivieren. Das sind die, nach denen
+die Bridge sucht:
 
-`Account`, `Order Ref.`, `ID`, `Symbol`, `Action`, `Quantity`, `Price`, `Date`,
-`Time`, `Commission`, `Exch.`
+`Account`, `Order Ref.`, `ID`, `Quantity`, `Price`, `Date`, `Time`, `Symbol`,
+`Action`, `Commission`, `Exch.`
 
-Fehlt eine der ersten sieben, lehnt die Bridge die Datei ab und nennt im
-Protokoll die fehlende Spalte. Sie liest keine Datei halb.
+Sieben davon tragen: `Account`, `Order Ref.`, `ID`, `Quantity`, `Price`, `Date`
+und `Time` — das ist `PFLICHTSPALTEN` in `trade_reports.py`. Fehlt eine davon,
+lehnt die Bridge die Datei **vollständig** ab und nennt im Protokoll die
+fehlende Spalte. Sie liest keine Datei halb.
+
+Die anderen vier will sie, kommt aber ohne sie aus: eine Datei ohne `Symbol`,
+`Action`, `Commission` oder `Exch.` wird gelesen. Kein Grund, sie wegzulassen —
+eine Füllung ohne ihre Gebühr muss später von Hand nachgearbeitet werden.
 
 ### Anderer Ordner
 
 Wer nicht `C:\IBExport` nutzen will, trägt den Pfad in `bridge.env` ein:
 
 ```
-TWS_EXPORT_DIR=D:\Ordertune\Exports
+TWS_EXPORT_DIR=C:\Users\You\Documents\IBExport
 ```
 
 Die Bridge liest diesen Ordner nur. Sie schreibt nichts hinein und lädt die

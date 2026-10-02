@@ -335,11 +335,55 @@ def test_the_check_shows_what_it_found_when_it_is_fine(tmp_path) -> None:
     (tmp_path / "trades.20260924.csv").write_text(
         "Account;Order Ref.;ID;Quantity;Price;Date;Time\n", encoding="utf-8"
     )
+    # T1-282: der Tag steht hier, und das ist der ganze Befund.
+    #
+    # Ohne ihn lief diese Zusicherung gegen das relative Frischefenster von vier
+    # Tagen (T1-249): ab dem 2026-09-29 meldete `pruefe()` `stale`, der Block
+    # druckte den Konfigurations-Zweig, und der Test war rot — ohne dass jemand
+    # die Datei angefasst hatte. Sie war ab ihrem Schreibtag genau so lange
+    # gueltig wie ihr eigenes Fenster.
     text = "\n".join(
-        trade_reports.check_bericht(tmp_path, )
+        trade_reports.check_bericht(tmp_path, heute="20260924")
     )
     assert "trades.20260924.csv" in text
     assert "report file(s) found" in text
+
+
+def test_the_check_says_stale_when_the_newest_file_is_old(tmp_path) -> None:
+    """T1-282 — der Zweig, der die Ausgabe uebernommen hat, bekommt eine eigene.
+
+    Dass `stale` den Block uebernimmt, war vier Tage unbemerkt richtig und danach
+    unbemerkt falsch. Hier steht er fest: juengste Datei fuenf Tage alt, Tag
+    gesetzt.
+    """
+    (tmp_path / "trades.20260924.csv").write_text(
+        "Account;Order Ref.;ID;Quantity;Price;Date;Time\n", encoding="utf-8"
+    )
+    text = "\n".join(
+        trade_reports.check_bericht(tmp_path, heute="20260929")
+    )
+    assert "stale" in text
+    # Das Datum gehoert in die Meldung: „veraltet" ohne Tag laesst den Leser
+    # raten, wie weit es her ist.
+    assert "20260924" in text
+    assert "report file(s) found" not in text
+
+
+def test_the_day_defaults_to_today(tmp_path) -> None:
+    """T1-282 — ohne Argument bleibt alles, wie es war.
+
+    Der Vorgabewert ist der Ortstag. Eine Datei von heute muss also auch ohne
+    `heute` als gut gelten, sonst waere die Korrektur eine Verhaltensaenderung.
+    """
+    from datetime import datetime
+
+    heute = datetime.now().strftime("%Y%m%d")  # noqa: DTZ005 - Ortstag, wie in pruefe()
+    (tmp_path / f"trades.{heute}.csv").write_text(
+        "Account;Order Ref.;ID;Quantity;Price;Date;Time\n", encoding="utf-8"
+    )
+    text = "\n".join(trade_reports.check_bericht(tmp_path))
+    assert "report file(s) found" in text
+    assert f"trades.{heute}.csv" in text
 
 
 def test_the_installer_hands_the_path_over_at_the_right_moment() -> None:
@@ -698,3 +742,40 @@ def test_the_cockpit_does_not_call_an_empty_folder_a_failure() -> None:
         "Der leere Ordner teilt sich die Flaeche wieder mit jedem anderen Befund."
     )
     assert "No trade report yet" in seite
+
+
+def test_no_assertion_pins_a_date_against_the_relative_window() -> None:
+    """T1-282 — die Regel gegen den Rueckfall.
+
+    Der Befund war nicht ein falscher Test, sondern eine **Gattung**: ein festes
+    Fixture-Datum gegen ein relatives Fenster. Wer die naechste Zusicherung
+    schreibt, soll nicht darauf angewiesen sein, diese Spec gelesen zu haben.
+
+    Die Regel: wer `check_bericht` mit einem **datierten** Dateinamen prueft, gibt
+    `heute=` mit. Genau eine Ausnahme ist zugelassen und sie ist benannt — die
+    Zusicherung, die den Vorgabewert prueft und ihre Datei deshalb auf den
+    Ortstag datiert.
+
+    Geprueft wird die Quelle dieser Datei selbst. Das ist bewusst grob: eine
+    Textsuche kann umgangen werden, aber sie faellt dem auf, der sie umgeht, und
+    sie kostet nichts.
+    """
+    quelle = Path(__file__).read_text("utf-8")
+    AUSNAHME = "test_the_day_defaults_to_today"
+
+    # Die Quelle in Funktionen schneiden, damit die Ausnahme sich benennen laesst.
+    bloecke = quelle.split("\ndef ")
+    for block in bloecke:
+        name = block.split("(", 1)[0].strip()
+        if name == AUSNAHME:
+            continue
+        if "check_bericht(" not in block:
+            continue
+        # Datierte Dateinamen im Block? Dann muss der Tag gesetzt sein.
+        if re.search(r"trades\.\d{8}\.csv", block) and "heute=" not in block:
+            raise AssertionError(
+                f"{name} prueft `check_bericht` mit einem datierten Dateinamen, "
+                "ohne `heute=` zu setzen. Diese Zusicherung laeuft dann gegen das "
+                "relative Frischefenster aus T1-249 und verfaellt nach vier "
+                "Tagen — genau der Befund aus T1-282."
+            )
