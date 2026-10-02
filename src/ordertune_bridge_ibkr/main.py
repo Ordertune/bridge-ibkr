@@ -1541,6 +1541,15 @@ def _handle_heartbeat(
             # Sitzung kein Archiv angefasst wurde — das ist etwas anderes als
             # „nichts gefunden", und die Plattform unterscheidet es.
             export_status=export_messung(),
+            # T1-276: ALLE Konten unter diesem Login, nicht nur das Handelskonto
+            # in `account` oben. Die Liste wurde bis hierher geholt, auf ein
+            # Ja/Nein reduziert und verworfen — genau die Fehlerklasse dieser
+            # Reihe: wir haben die Messung und benutzen sie nicht.
+            #
+            # `None` heisst „nicht erhoben"; dann laesst `heartbeat` das Feld weg
+            # und die Plattform liest „diese Fassung sagt es nicht". Eine leere
+            # Liste ist eine Aussage und geht raus.
+            managed_accounts=ibkr.managed_accounts(),
         )
         return snap, None
     except Exception as exc:
@@ -2787,14 +2796,23 @@ def _meldungstext(failure: failures.Failure, log_file: Path | None) -> str:
 
 
 def _handshake_or_none(
-    api: OrdertuneApiClient, fingerprint: str
+    api: OrdertuneApiClient,
+    fingerprint: str,
+    managed_accounts: list[str] | None = None,
 ) -> tuple[OrdertuneApiClient, Exception | None]:
     """Den Handschlag versuchen und den Fehler zurueckgeben statt ihn zu werfen.
 
     Der Aufrufer entscheidet, ob daraus ein Abbruch wird oder ein Assistent.
     """
     try:
-        api.handshake(capabilities=IBKR_CAPABILITIES)
+        # T1-276: die Depotliste reist schon im Handschlag mit — er liegt VOR
+        # dem ersten Herzschlag, und ohne diese Stelle waere die Depotzahl in der
+        # ersten Minute jeder Verbindung unbekannt. Dieselbe Ueberlegung, aus der
+        # T1-176 C die Faehigkeiten hierher gezogen hat.
+        api.handshake(
+            capabilities=IBKR_CAPABILITIES,
+            managed_accounts=managed_accounts,
+        )
         log.info("Handshake successful — Bridge is active.")
         return api, None
     except Exception as exc:  # noqa: BLE001 - die Zuordnung macht `failures`
@@ -3138,7 +3156,9 @@ def _main() -> int:
     # Abbruch, und das ist richtig: ein wartender Vorgang ohne jemanden davor
     # meldet keinen Herzschlag und ist von einem Absturz nicht zu
     # unterscheiden.
-    api, handshake_fehler = _handshake_or_none(api, fingerprint)
+    api, handshake_fehler = _handshake_or_none(
+        api, fingerprint, managed_accounts=ibkr.managed_accounts()
+    )
     if handshake_fehler is not None:
         erneuerbar = failures.renewable_failure(
             handshake_fehler, str(config.ordertune_api_base)
@@ -3172,7 +3192,9 @@ def _main() -> int:
             connection_id=config.ordertune_bridge_connection_id,
             fingerprint=fingerprint,
         )
-        api, handshake_fehler = _handshake_or_none(api, fingerprint)
+        api, handshake_fehler = _handshake_or_none(
+            api, fingerprint, managed_accounts=ibkr.managed_accounts()
+        )
         if handshake_fehler is not None:
             # Einmal wird nachgefasst, nicht endlos. Scheitert auch die frische
             # Kopplung, liegt es an etwas, das der Assistent nicht loest.

@@ -51,15 +51,21 @@
     "",
     "Fehlt das Feld, heisst das 'kein Kurs' und nicht 'Kurs 1,0': die Plattform",
     "blockiert die Mengenrechnung dann wie vor T1-252. So verhaelt sich jede",
-    "Bridge vor 0.31.0, und deshalb braucht dieser Vorgang keinen Stichtag."
+    "Bridge vor 0.31.0, und deshalb braucht dieser Vorgang keinen Stichtag.",
+    "",
+    "T1-277: die Instanzkennung reist als KOPFZEILE (X-Bridge-Instance), nicht im",
+    "Koerper — deshalb steht sie in keiner Fixture hier. Geprueft wird sie auf",
+    "beiden Seiten eigens: Python in tests/test_t1_277_instanz.py (Kopfzeile auf",
+    "JEDER Anfrage), t1 in scripts/verify-t1-277-*.ts (Form, und dass ihr Fehlen",
+    "nie abweist)."
   ],
-  "contractVersion": "t1-94",
-  "bridgeVersion": "0.31.0",
+  "contractVersion": "t1-276",
+  "bridgeVersion": "0.32.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -68,11 +74,29 @@
       }
     }
   },
+  "handshakeWithManagedAccounts": {
+    "method": "POST",
+    "path": "/api/bridge/v1/handshake",
+    "body": {
+      "bridgeVersion": "0.32.0",
+      "capabilities": {
+        "supportsFractionalShares": false,
+        "fractionalQtyPrecision": 0,
+        "minNotionalUsd": null,
+        "supportsBulkSend": true
+      },
+      "managedAccounts": [
+        "DU1234567",
+        "DU7654321",
+        "DU1112223"
+      ]
+    }
+  },
   "heartbeat": {
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -98,6 +122,72 @@
       }
     }
   },
+  "heartbeatWithManagedAccounts": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.32.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [
+          {
+            "symbol": "AAPL",
+            "qty": 15.0,
+            "avgEntryPriceUsd": 187.42,
+            "marketValueUsd": 2900.25,
+            "unrealizedPlUsd": 88.95,
+            "lastPrice": 193.35,
+            "lastPriceCurrency": "USD"
+          }
+        ],
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        },
+        "managedAccounts": [
+          "DU1234567",
+          "DU7654321",
+          "DU1112223"
+        ]
+      }
+    }
+  },
+  "heartbeatWithEmptyManagedAccounts": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.32.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [
+          {
+            "symbol": "AAPL",
+            "qty": 15.0,
+            "avgEntryPriceUsd": 187.42,
+            "marketValueUsd": 2900.25,
+            "unrealizedPlUsd": 88.95,
+            "lastPrice": 193.35,
+            "lastPriceCurrency": "USD"
+          }
+        ],
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        },
+        "managedAccounts": []
+      }
+    }
+  },
   "heartbeatWithExportStatus": {
     "_why": [
       "T1-249 (Nachtrag 2026-09-28). Dieser Block reiste seit 0.29.0 auf der",
@@ -114,7 +204,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -141,7 +231,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -188,7 +278,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -203,7 +293,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -219,7 +309,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -233,7 +323,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.31.0",
+      "bridgeVersion": "0.32.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
