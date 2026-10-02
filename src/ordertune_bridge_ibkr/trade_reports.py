@@ -620,7 +620,9 @@ def check_requested(argv: list[str]) -> bool:
     return CHECK_FLAG in argv
 
 
-def check_bericht(verzeichnis: Path | str) -> list[str]:
+def check_bericht(
+    verzeichnis: Path | str, *, heute: str | None = None
+) -> list[str]:
     r"""Der Block, den `--check-reports` ausgibt. Zeile fuer Zeile.
 
     ## Woher das kommt
@@ -664,7 +666,16 @@ def check_bericht(verzeichnis: Path | str) -> list[str]:
         "",
     ]
 
-    bereit = pruefe(basis)
+    # T1-282: der Tag wird durchgereicht, nicht hier gelesen.
+    #
+    # `pruefe()` nimmt ihn seit T1-249 entgegen — diese Ebene hat ihn nie
+    # angeboten, und damit war der GUTE Fall dieses Blocks nicht deterministisch
+    # pruefbar: er haengt am Frischefenster von vier Tagen, also an der Wanduhr
+    # des Laufs. Die Zusicherung dazu war ab ihrem Schreibtag genau vier Tage
+    # gueltig und ist am 2026-09-29 verfallen — nicht kaputtgegangen.
+    #
+    # `None` heisst unveraendert „heute", der Betrieb aendert sich nicht.
+    bereit = pruefe(basis, heute=heute)
     zeilen.append(f"  Result: {bereit.zustand}")
     zeilen.append(f"  {bereit.text}")
 
