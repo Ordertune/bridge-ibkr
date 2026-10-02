@@ -564,7 +564,25 @@ class IbkrClient:
             konten = [a for a in self._ib.managedAccounts() if a]
         except Exception:  # pragma: no cover - defensiv, wie unten
             return None
-        return konten
+        # QA-Befund B1 (T1-276): eine LEERE Liste ist „noch nicht geliefert",
+        # nicht „keine Konten".
+        #
+        # `ib_insync` fuellt `managedAccounts()` erst, wenn die Antwort des
+        # Brokers eintrifft, und der Handschlag liegt im Startlauf unmittelbar
+        # hinter `connect()` — genau dort ist das Rennen. Ein angemeldetes Login
+        # hat **immer** mindestens ein Konto; eine leere Liste kann also nie eine
+        # wahre Aussage ueber den Bestand sein.
+        #
+        # `[]` hier durchzulassen hiesse: die Plattform speichert „gemeldet, und
+        # es sind keine", die Flaeche sagt es dem Admin, und der naechste
+        # Herzschlag schreibt ein `0 → 3` ins Pruefprotokoll — ein Depotzuwachs,
+        # den es nie gab, mit gesetzlicher Aufbewahrungsfrist.
+        #
+        # Dieselbe Unterscheidung wie `_positions_known` fuer die Positionen und
+        # wie `_trading_account()` vier Zeilen tiefer, das `[]` bereits als
+        # `None` liest. Dass dieselbe Datei dieselbe Eingabe zweimal verschieden
+        # gelesen hat, war der Befund.
+        return konten or None
 
     def _trading_account(self) -> str | None:
         """Das eine Konto, auf dem gehandelt wird — oder `None` bei mehreren.

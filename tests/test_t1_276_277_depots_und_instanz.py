@@ -255,6 +255,35 @@ def test_mehrere_konten_liste_voll_handelskonto_leer() -> None:
     assert c._trading_account() is None
 
 
+def test_leere_liste_heisst_nicht_erhoben_nicht_keine_konten() -> None:
+    """QA-Befund B1 — der Randfall, der eine Luege war.
+
+    `ib_insync` fuellt `managedAccounts()` erst, wenn der Broker antwortet. Ein
+    angemeldetes Login hat immer mindestens ein Konto, also kann eine leere Liste
+    nie „keine Konten" heissen. Sie als Aussage weiterzugeben hiesse: die Flaeche
+    behauptet „none are managed", und das Pruefprotokoll bekommt einen
+    Depotzuwachs `0 → 3`, den es nie gab.
+    """
+    c = _ibkr(FakeIB(_accounts=[]))
+    assert c.managed_accounts() is None
+
+
+def test_leere_liste_wird_auf_der_leitung_weggelassen() -> None:
+    """Und die Folge auf der Leitung: kein Feld, also „nicht erhoben"."""
+    rec = _Recorder()
+    api = _client(rec)
+    c = _ibkr(FakeIB(_accounts=[]))
+    api.heartbeat(
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
+        positions=None,
+        gateway_status="ok",
+        managed_accounts=c.managed_accounts(),
+    )
+    assert "managedAccounts" not in rec.calls[0][3]["accountSnapshot"]
+
+
 def test_kein_kontakt_heisst_nicht_erhoben_und_nicht_leer() -> None:
     """`None` statt `[]` — sonst meldete ein Verbindungsabriss „keine Depots“."""
     c = _ibkr(FakeIB(raises=True))
