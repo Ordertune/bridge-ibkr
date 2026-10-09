@@ -28,7 +28,10 @@ def _messung_zuruecksetzen():
 
 
 class _Store:
-    def seit_tag(self) -> str | None:
+    # T1-282-Nachtrag 2026-10-09: spiegelt die echte Signatur von
+    # `TradeReportStore.seit_tag(*, heute=None)`. Ein Double, das die
+    # Schnittstelle nicht nachbildet, faellt beim ersten Durchreichen um.
+    def seit_tag(self, *, heute: object = None) -> str | None:
         return None
 
     def vermerken(self, tag: str | None) -> None:  # pragma: no cover

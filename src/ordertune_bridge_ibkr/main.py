@@ -1049,11 +1049,35 @@ def _archiv_fuellungen(
     export_dir: str | None,
     report_store: Any | None,
     konto: str | None,
+    *,
+    heute: datetime | None = None,
 ) -> list[Any]:
     """T1-207 — was das Archiv der TWS zu diesem Konto hergibt.
 
     Faengt alles ab und gibt im Zweifel eine leere Liste zurueck. Ein
     unlesbares Archiv ist ein Befund, kein Abbruch.
+
+    ## `heute` — der Nachtrag zu T1-282 (2026-10-09)
+
+    `TradeReportStore.seit_tag(*, heute=None)` kann einen Tag entgegennehmen,
+    diese Funktion konnte es nicht und reichte keinen weiter. Damit war jede
+    Zusicherung ueber den GUTEN Fall nur so lange gueltig wie das
+    Erstlauf-Fenster von 14 Tagen — sie war am Schreibtag gruen und verfiel
+    danach lautlos.
+
+    Zwei Zusicherungen in `test_t1_207_trade_reports.py` sind genau so
+    gestorben: sie legen `trades.20260918.csv` an, und ab dem 2026-10-02
+    liefert `seit_tag()` einen spaeteren Tag als den der Datei. Gemessen am
+    2026-10-09: `seit_tag()` sagt `20260925`, die Datei traegt `20260918`,
+    also wird sie nicht gelesen und `_archiv_fuellungen` gibt `[]` zurueck.
+    Die Bridge-CI war seit dem 28.09. rot.
+
+    **Das ist wortgleich der Befund aus `2f47744`** („der Pruefblock haengt
+    nicht mehr an der Wanduhr"), wo dasselbe fuer `check_bericht` behoben
+    wurde — diese beiden Aufrufer wurden dabei uebersehen. Ohne Argument gilt
+    unveraendert die Uhr; im Betrieb aendert sich nichts.
+
+    ## Das Konto
 
     Ohne scharfes Konto wird nichts gelesen: auf einer Maschine koennen Papier-
     und Echtkonto denselben Ordner beschreiben, und eine Fuellung dem falschen
@@ -1089,7 +1113,9 @@ def _archiv_fuellungen(
             konto_bekannt=bool(konto),
         )
         return []
-    seit = report_store.seit_tag()
+    # T1-282-Nachtrag: der Tag reist mit, sonst ist der Parameter oben
+    # Zierde und die Zusicherungen verfallen weiter.
+    seit = report_store.seit_tag(heute=heute)
     try:
         lesung = trade_reports.lies_archiv(export_dir, konto, seit_tag=seit)
     except Exception as exc:  # pragma: no cover - defensiv
