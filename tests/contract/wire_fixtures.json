@@ -60,12 +60,12 @@
     "nie abweist)."
   ],
   "contractVersion": "t1-276",
-  "bridgeVersion": "0.32.0",
+  "bridgeVersion": "0.33.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -78,7 +78,7 @@
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -96,7 +96,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -126,7 +126,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -161,7 +161,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -204,7 +204,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -231,7 +231,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -269,16 +269,64 @@
           "tif": "DAY",
           "totalQuantity": 1.0
         }
-      ]
+      ],
+      "openOrdersTruncated": false
     },
-    "_comment": "T1-114 — der Rueckbericht. `openOrders` ist die Antwort auf reqOpenOrders, gefiltert auf die eigenen Auftraege. Beantwortet, ob beim Broker wirklich das liegt, was gesendet wurde: OCA-Gruppe, Zeitbedingung, Limit. Feld FEHLT = nicht erhoben; leeres Array = keine offenen Auftraege."
+    "_comment": "T1-114 — der Rueckbericht. `openOrders` ist die Antwort auf reqOpenOrders, gefiltert auf die eigenen Auftraege. Beantwortet, ob beim Broker wirklich das liegt, was gesendet wurde: OCA-Gruppe, Zeitbedingung, Limit. Feld FEHLT = nicht erhoben; leeres Array = keine offenen Auftraege. T1-312: `openOrdersTruncated` reist als Geschwisterfeld und sagt, ob die Liste gekuerzt wurde. `false` heisst vollstaendig — eine Luecke darf dann als `not_at_broker` gedeutet werden."
+  },
+  "heartbeatWithTruncatedOpenOrders": {
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.33.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [
+          {
+            "symbol": "AAPL",
+            "qty": 15.0,
+            "avgEntryPriceUsd": 187.42,
+            "marketValueUsd": 2900.25,
+            "unrealizedPlUsd": 88.95,
+            "lastPrice": 193.35,
+            "lastPriceCurrency": "USD"
+          }
+        ],
+        "capabilities": {
+          "supportsFractionalShares": false,
+          "fractionalQtyPrecision": 0,
+          "minNotionalUsd": null,
+          "supportsBulkSend": true
+        }
+      },
+      "openOrders": [
+        {
+          "dispatchId": "ad23c4db-5feb-4b8e-8e41-d3602ca492aa",
+          "brokerOrderId": "865",
+          "status": "Submitted",
+          "ocaGroup": "OCA_ALAB_2026-08-21_Peak_Reload",
+          "ocaType": 3,
+          "goodAfterTime": null,
+          "goodTillDate": null,
+          "lmtPrice": 290.52,
+          "orderType": "LMT",
+          "tif": "DAY",
+          "totalQuantity": 1.0
+        }
+      ],
+      "openOrdersTruncated": true
+    },
+    "_comment": "T1-312 — derselbe Bericht, aber GEKUERZT. Die Bridge hat bei MAX_OPEN_ORDERS_REPORTED abgebrochen, also fehlen eigene Auftraege. Die Plattform darf aus einer Luecke dann KEINEN Befund machen: `matchBrokerOrder` liefert `not_reported` statt `not_at_broker`, die Zeile schweigt. Gemessen am 2026-10-09 stand genau dieser Fall in Produktion — 57 offene Auftraege, 50 berichtet, sieben Zeilen behaupteten faelschlich, der Broker fuehre sie nicht mehr."
   },
   "heartbeatForeignCurrency": {
     "_comment": "T1-85 — der Fall, der den Spec ausgeloest hat: ein EUR-gefuehrtes Konto. Der Depotwert ist echt und wird auch so gemeldet; die Plattform blockiert daraus die Mengenrechnung, statt die Zahl als USD zu verbuchen. Bis 0.2.x kam hier equityUsd 0 an und alles sah gesund aus.",
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -293,7 +341,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -309,7 +357,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -323,7 +371,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.32.0",
+      "bridgeVersion": "0.33.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,

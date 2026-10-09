@@ -158,6 +158,7 @@ _TRADES_BY_DISPATCH: dict[str, Any] = {}
 # gelesen — dabei ist er die einzige Angabe, die einen Neustart der Bridge
 # ueberlebt: `orderId` ist sitzungsgebunden, die Ablagen oben sind fluechtig.
 from .order_reference import (  # noqa: F401  (Weiterverwendung durch Importeure)
+    MAX_OPEN_ORDERS_REPORTED,
     ORDER_REF_PREFIX,
     build_order_ref,
     dispatch_id_from_order_ref,
@@ -1470,19 +1471,37 @@ def _parse_iso(value: Any) -> datetime | None:
     return parsed
 
 
-def _open_orders_fuer_bericht(ibkr: IbkrClient) -> list[dict[str, Any]] | None:
+def _open_orders_fuer_bericht(
+    ibkr: IbkrClient,
+) -> tuple[list[dict[str, Any]], bool] | None:
     """Die eigenen offenen Auftraege fuer den Rueckbericht, oder `None`.
 
     `None` heisst „nicht erhoben" und laesst das Feld auf der Leitung weg. Das
     ist wichtig: eine leere Liste ist die Aussage „nichts offen", und die
     Plattform darf daraus schliessen duerfen. Scheitert die Abfrage, sagen wir
     lieber nichts als etwas Falsches.
+
+    T1-312 — gibt zusaetzlich zurueck, ob die Liste gekuerzt wurde. Ohne diese
+    Angabe deutet die Plattform jede Luecke als „nicht mehr beim Broker".
     """
     try:
-        return wire_open_orders(ibkr.open_trades())
+        auftraege, gekuerzt = wire_open_orders(ibkr.open_trades())
     except Exception as exc:  # pragma: no cover — Verbindungsfehler
         log.debug("open-order report skipped: %s", exc)
         return None
+    if gekuerzt:
+        # T1-312: sichtbar machen, dass der Deckel greift. Die Flaeche sagt
+        # dazu bewusst nichts (Owner-Entscheid 2026-10-09) — die Trunkierung
+        # ist ein Betriebsereignis und gehoert hierher.
+        log.warning(
+            "open-order report truncated: reporting %d of at least %d own "
+            "orders (cap %d). Orders beyond the cap are not checked against "
+            "the broker; the platform will stay silent on them.",
+            len(auftraege),
+            len(auftraege) + 1,
+            MAX_OPEN_ORDERS_REPORTED,
+        )
+    return auftraege, gekuerzt
 
 
 def _handle_heartbeat(
@@ -1536,7 +1555,10 @@ def _handle_heartbeat(
             # wurde. Sie beantwortet die Frage, die der Owner an drei Tagen in
             # drei Formen gestellt hat: liegt beim Broker wirklich das, was wir
             # gesendet haben?
-            open_orders=_open_orders_fuer_bericht(ibkr),
+            # T1-312: dazu die Angabe, ob die Liste gekuerzt wurde. Ohne sie
+            # deutet die Plattform jede Luecke als „nicht mehr beim Broker" —
+            # am 2026-10-09 sieben Mal, alle falsch.
+            open_orders_report=_open_orders_fuer_bericht(ibkr),
             # T1-249: was der TWS-Export hergibt. `None`, solange in dieser
             # Sitzung kein Archiv angefasst wurde — das ist etwas anderes als
             # „nichts gefunden", und die Plattform unterscheidet es.
