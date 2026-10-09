@@ -297,7 +297,7 @@ class OrdertuneApiClient:
         capabilities: dict[str, Any] | None = None,
         cpu_load: float | None = None,
         account: str | None = None,
-        open_orders: list[dict[str, Any]] | None = None,
+        open_orders_report: tuple[list[dict[str, Any]], bool] | None = None,
         export_status: dict[str, Any] | None = None,
         fx_rate_usd: float | None = None,
         managed_accounts: list[str] | None = None,
@@ -398,8 +398,16 @@ class OrdertuneApiClient:
         # Liste heisst „keine offenen Auftraege" und ist eine Aussage. Dieselbe
         # Unterscheidung wie bei `positions` seit T1-99 — sie zu verwechseln
         # hat dort zwei echte Positionen aus den Buechern genommen.
-        if open_orders is not None:
-            body["openOrders"] = open_orders
+        #
+        # T1-312: `openOrdersTruncated` reist als Geschwisterfeld und NUR
+        # zusammen mit der Liste. Ein Flag ohne Liste waere eine Aussage ueber
+        # nichts. Erwogen und verworfen war, `openOrders` in ein Objekt mit
+        # `items` und `truncated` zu verwandeln — ausdrucksstaerker, aber es
+        # bricht jede Gegenstelle, die die alte Form kennt.
+        if open_orders_report is not None:
+            auftraege, gekuerzt = open_orders_report
+            body["openOrders"] = auftraege
+            body["openOrdersTruncated"] = gekuerzt
 
         _request_with_retry(
             "PUT", self._client,

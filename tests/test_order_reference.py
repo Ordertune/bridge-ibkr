@@ -152,7 +152,7 @@ def test_nur_eigene_auftraege_gehen_mit():
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
     fremd = _Trade(_Order(orderRef="manual-123", orderId=99))
-    out = wire_open_orders([_unser(orderId=865), fremd])
+    out, _ = wire_open_orders([_unser(orderId=865), fremd])
     assert len(out) == 1
     assert out[0]["brokerOrderId"] == "865"
     assert out[0]["dispatchId"] == UUID
@@ -162,7 +162,7 @@ def test_der_fall_vom_2026_08_21():
     """Die weggefallene Zeitbedingung wird als solche berichtet."""
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
-    out = wire_open_orders(
+    out, _ = wire_open_orders(
         [
             _unser(
                 orderId=865,
@@ -186,7 +186,7 @@ def test_der_fall_vom_2026_08_21():
 def test_ein_in_tws_geaendertes_limit_wird_sichtbar():
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
-    out = wire_open_orders([_unser(lmtPrice=90.67)])
+    out, _ = wire_open_orders([_unser(lmtPrice=90.67)])
     assert out[0]["lmtPrice"] == 90.67
 
 
@@ -194,35 +194,99 @@ def test_ohne_aufloesbaren_vermerk_faellt_der_auftrag_weg():
     """Ohne Zuordnung ist die Zeile eine Behauptung ohne Adresse."""
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
-    assert wire_open_orders([_Trade(_Order(orderRef=""))]) == []
-    assert wire_open_orders([_Trade(_Order(orderRef="ot-"))]) == []
+    assert wire_open_orders([_Trade(_Order(orderRef=""))]) == ([], False)
+    assert wire_open_orders([_Trade(_Order(orderRef="ot-"))]) == ([], False)
 
 
 def test_kein_limit_bleibt_null_statt_null_komma_null():
     """IBKR schreibt 0.0 fuer „kein Limit" — das ist kein Preis."""
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
-    out = wire_open_orders([_unser(orderType="MOC", lmtPrice=0.0)])
+    out, _ = wire_open_orders([_unser(orderType="MOC", lmtPrice=0.0)])
     assert out[0]["lmtPrice"] is None
     assert out[0]["orderType"] == "MOC"
 
 
-def test_die_liste_ist_gedeckelt():
+def test_die_liste_ist_gedeckelt_UND_sagt_es():
+    """T1-312 — wer kuerzt, schuldet die Auskunft.
+
+    ## Warum dieser Test umgeschrieben wurde statt ergaenzt
+
+    Die alte Fassung prueft, DASS abgeschnitten wird, und fragt nie nach der
+    Folge. Genau das war der Fehler: die Bridge kuerzte korrekt und schwieg
+    darueber, und die Plattform deutete jede entstehende Luecke als „der
+    Broker fuehrt diesen Auftrag nicht mehr".
+
+    Gemessen am 2026-10-09 in Produktion: 57 offene Auftraege, 50 berichtet,
+    sieben Zeilen mit einer Warnung, die bei einem Stop-Bein heisst, die
+    Absicherung sei fort. Keiner der sieben war bei IBKR verschwunden.
+
+    Eine Zusicherung, die das Abschneiden festschreibt, ohne nach der
+    Begleitaussage zu fragen, misst das Falsche — sie haette den Fehler
+    gedeckt statt ihn zu finden.
+    """
     from ordertune_bridge_ibkr.order_reference import (
         MAX_OPEN_ORDERS_REPORTED,
         wire_open_orders,
     )
 
     viele = [_unser(orderId=i) for i in range(MAX_OPEN_ORDERS_REPORTED + 20)]
-    assert len(wire_open_orders(viele)) == MAX_OPEN_ORDERS_REPORTED
+    out, gekuerzt = wire_open_orders(viele)
+    assert len(out) == MAX_OPEN_ORDERS_REPORTED
+    assert gekuerzt is True, "Gekuerzt und verschwiegen — genau der Fehler T1-312."
+
+
+def test_genau_am_deckel_ist_keine_kuerzung():
+    """Die Grenze zu erreichen ist kein Verlust.
+
+    `truncated` beschreibt, dass etwas WEGGEFALLEN ist, nicht dass die Liste
+    voll ist. Ein `true` hier wuerde alle Luecken stumm schalten, obwohl der
+    Bericht vollstaendig ist — und damit echte Befunde unterdruecken.
+    """
+    from ordertune_bridge_ibkr.order_reference import (
+        MAX_OPEN_ORDERS_REPORTED,
+        wire_open_orders,
+    )
+
+    genau = [_unser(orderId=i) for i in range(MAX_OPEN_ORDERS_REPORTED)]
+    out, gekuerzt = wire_open_orders(genau)
+    assert len(out) == MAX_OPEN_ORDERS_REPORTED
+    assert gekuerzt is False
+
+
+def test_der_deckel_zaehlt_eigene_nicht_beliebige():
+    """T1-312 — der Deckel greift NACH dem is_ours-Filter.
+
+    Bis hierher stand `[:MAX_OPEN_ORDERS_REPORTED]` im Schleifenkopf: gezaehlt
+    wurden die ersten N BELIEBIGEN Auftraege. Ein Konto mit vielen von Hand
+    getippten TWS-Auftraegen bekam dadurch einen leeren Bericht, obwohl eigene
+    Auftraege im Markt lagen — und alle trugen dann die Falschwarnung.
+
+    Mit der alten Reihenfolge waere `out` hier leer und `gekuerzt` dennoch
+    False gewesen: der schlimmste von beiden Faellen.
+    """
+    from ordertune_bridge_ibkr.order_reference import (
+        MAX_OPEN_ORDERS_REPORTED,
+        wire_open_orders,
+    )
+
+    fremde = [
+        _Trade(_Order(orderRef=f"manual-{i}", orderId=1000 + i))
+        for i in range(MAX_OPEN_ORDERS_REPORTED + 10)
+    ]
+    eigene = [_unser(orderId=i) for i in range(10)]
+    out, gekuerzt = wire_open_orders(fremde + eigene)
+
+    assert len(out) == 10, "Fremde Auftraege duerfen keine Plaetze verbrauchen."
+    assert gekuerzt is False, "Nichts Eigenes ist weggefallen."
 
 
 def test_leere_und_kaputte_eingaben():
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
-    assert wire_open_orders([]) == []
-    assert wire_open_orders(None) == []
-    assert wire_open_orders([object()]) == []
+    assert wire_open_orders([]) == ([], False)
+    assert wire_open_orders(None) == ([], False)
+    assert wire_open_orders([object()]) == ([], False)
 
 
 # ── T1-115: der Besitzanspruch braucht einen Nachweis ───────────────────────
@@ -258,4 +322,4 @@ def test_der_rueckbericht_folgt_derselben_regel():
     from ordertune_bridge_ibkr.order_reference import wire_open_orders
 
     getippt = _Trade(_Order(orderRef="ot-INTC-7690-Day_Ripper", orderId=1))
-    assert wire_open_orders([getippt]) == []
+    assert wire_open_orders([getippt]) == ([], False)

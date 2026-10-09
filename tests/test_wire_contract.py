@@ -867,13 +867,56 @@ def test_heartbeat_with_open_orders_matches_contract() -> None:
         ],
         gateway_status="connected",
         capabilities=snap["capabilities"],
-        open_orders=expected["openOrders"],
+        open_orders_report=(
+            expected["openOrders"],
+            expected["openOrdersTruncated"],
+        ),
     )
 
     assert rec.body == expected, (
         "Rueckbericht weicht vom Vertrag ab. Beide Repos fuehren diese Datei "
         "byte-gleich — eine Abweichung hier heisst, dass eine Seite etwas "
         "anderes sendet, als die andere liest."
+    )
+
+
+def test_heartbeat_marks_a_truncated_open_order_report() -> None:
+    """T1-312 — ein gekuerzter Bericht sagt, dass er gekuerzt ist.
+
+    Ohne dieses Feld kann die Plattform eine abgeschnittene Liste nicht von
+    einer vollstaendigen unterscheiden und deutet jede Luecke als „der Broker
+    fuehrt diesen Auftrag nicht mehr". Am 2026-10-09 traf das sieben Zeilen,
+    alle falsch — die Auftraege lagen sauber in TWS.
+    """
+    expected = FIXTURES["heartbeatWithTruncatedOpenOrders"]["body"]
+    snap = expected["accountSnapshot"]
+    pos = snap["positions"][0]
+
+    rec = _Recorder()
+    _client(rec).heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[
+            {
+                "symbol": pos["symbol"],
+                "qty": pos["qty"],
+                "avg_cost": pos["avgEntryPriceUsd"],
+                "market_price": pos["lastPrice"],
+                "currency": pos["lastPriceCurrency"],
+                "market_value": pos["marketValueUsd"],
+                "unrealized_pnl": pos["unrealizedPlUsd"],
+            }
+        ],
+        gateway_status="connected",
+        capabilities=snap["capabilities"],
+        open_orders_report=(expected["openOrders"], True),
+    )
+
+    assert rec.body["openOrdersTruncated"] is True
+    assert rec.body == expected, (
+        "Der gekuerzte Rueckbericht weicht vom Vertrag ab. Beide Repos fuehren "
+        "diese Datei byte-gleich."
     )
 
 
@@ -894,6 +937,9 @@ def test_heartbeat_omits_open_orders_when_not_collected() -> None:
         gateway_status="connected",
     )
     assert "openOrders" not in rec.body
+    # T1-312: ohne Liste auch kein Flag. Ein `false` ohne Liste waere eine
+    # Aussage ueber nichts.
+    assert "openOrdersTruncated" not in rec.body
 
     rec2 = _Recorder()
     _client(rec2).heartbeat(
@@ -902,6 +948,7 @@ def test_heartbeat_omits_open_orders_when_not_collected() -> None:
         currency="USD",
         positions=None,
         gateway_status="connected",
-        open_orders=[],
+        open_orders_report=([], False),
     )
     assert rec2.body["openOrders"] == []
+    assert rec2.body["openOrdersTruncated"] is False

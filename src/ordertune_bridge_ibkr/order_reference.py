@@ -207,9 +207,37 @@ def is_ours(order_ref: object) -> bool:
 # Befund — ein in TWS geaendertes Limit, eine verschluckte OCA-Gruppe, eine
 # weggefallene Zeitbedingung.
 
-#: Wie viele Auftraege hoechstens mitgehen. Der Herzschlag ist ein
-#: Lebenszeichen und darf nicht an einer langen Liste haengen.
-MAX_OPEN_ORDERS_REPORTED = 50
+#: Wie viele EIGENE Auftraege hoechstens mitgehen.
+#:
+#: T1-312 — von 50 auf 250, und der Deckel zaehlt jetzt, was GEMELDET wird,
+#: nicht was geprueft wurde.
+#:
+#: ## Warum 50 zu wenig war
+#:
+#: Gemessen am 2026-10-09: der Owner hatte 57 offene Auftraege, sieben fielen
+#: weg. Die Plattform kann eine abgeschnittene Liste nicht von einer
+#: vollstaendigen unterscheiden und deutete jede Luecke als „der Broker fuehrt
+#: diesen Auftrag nicht mehr" — bei einem Stop-Bein also: die Absicherung sei
+#: fort. Keiner der sieben war bei IBKR verschwunden.
+#:
+#: 250 ist der doppelte Kopfraum ueber dem strukturellen Maximum: Day Ripper
+#: erzeugt drei Auftraege je Position (Entry, Stop, MOC), und am 2026-10-09
+#: standen 42 Entries im Markt — bei voller Fuellung rund 126.
+#:
+#: ## Warum die alte Begruendung nicht trug
+#:
+#: „Der Herzschlag ist ein Lebenszeichen und darf nicht an einer langen Liste
+#: haengen." Gemessen sind es 272 Byte je Eintrag: 50 Auftraege sind 13 kB,
+#: 250 sind 68 kB — alle 60 Sekunden, ohne Body-Limit auf der Gegenseite.
+#: Die Last war nie das Problem.
+#:
+#: ## Diese Zahl ist an die Plattform gebunden
+#:
+#: Die Zod-Schranke in `snapshot-validation.ts` muss MINDESTENS so gross sein.
+#: Ist sie kleiner, antwortet der Heartbeat-Handler mit 422, und dann faellt
+#: der GANZE Snapshot aus — Bestand, Konto, Lebenszeichen. Beim Ausrollen
+#: deshalb: Plattform zuerst, Bridge danach.
+MAX_OPEN_ORDERS_REPORTED = 250
 
 
 def _als_zahl(wert: object) -> float | None:
@@ -231,7 +259,7 @@ def _text(wert: object) -> str | None:
     return s or None
 
 
-def wire_open_orders(trades: object) -> list[dict[str, object]]:
+def wire_open_orders(trades: object) -> tuple[list[dict[str, object]], bool]:
     """Die offenen Auftraege, die UNS gehoeren, im Drahtformat.
 
     Fremde Auftraege im selben Konto bleiben draussen — sie gehen die
@@ -241,9 +269,29 @@ def wire_open_orders(trades: object) -> list[dict[str, object]]:
     Der Vermerk reist als `dispatchId` mit, damit die Plattform ohne Rateweg
     zuordnen kann. Ein Auftrag, dessen Vermerk sich nicht aufloesen laesst,
     faellt weg: ohne Zuordnung ist die Zeile eine Behauptung ohne Adresse.
+
+    ## T1-312 — zwei Rueckgabewerte statt einem
+
+    Gibt `(liste, gekuerzt)` zurueck. Eine Funktion, die kuerzt und es fuer
+    sich behaelt, ist genau der Fehler, den T1-312 behebt: die Plattform sah
+    eine Liste und hielt sie fuer vollstaendig. Wer kuerzt, schuldet die
+    Auskunft an den Aufrufer.
+
+    ## Der Deckel greift NACH dem Filter
+
+    Bis T1-312 stand `[:MAX_OPEN_ORDERS_REPORTED]` im Schleifenkopf — gezaehlt
+    wurden also die ersten 50 BELIEBIGEN Auftraege, nicht die ersten 50
+    eigenen. Ein Konto mit vielen von Hand getippten TWS-Auftraegen bekam
+    dadurch einen leeren oder kurzen Bericht, obwohl eigene Auftraege im Markt
+    lagen; die verbrauchten Plaetze standen ihnen zu.
+
+    Jetzt bricht die Schleife erst ab, wenn 250 EIGENE beisammen sind. Dass
+    danach noch fremde Auftraege folgen koennten, ist belanglos — sie gehoeren
+    ohnehin nicht in den Bericht und machen ihn nicht unvollstaendig.
     """
     out: list[dict[str, object]] = []
-    for trade in list(trades or [])[:MAX_OPEN_ORDERS_REPORTED]:
+    truncated = False
+    for trade in list(trades or []):
         order = getattr(trade, "order", None)
         if order is None:
             continue
@@ -252,6 +300,12 @@ def wire_open_orders(trades: object) -> list[dict[str, object]]:
         dispatch_id = dispatch_id_from_order_ref(getattr(order, "orderRef", None))
         if dispatch_id is None:
             continue
+        # T1-312: erst hier, nach dem Filter. Und erst, wenn ein EIGENER
+        # Auftrag tatsaechlich wegfaellt — die blosse Erreichung der Grenze
+        # ist noch kein Verlust und darf das Flag nicht setzen.
+        if len(out) >= MAX_OPEN_ORDERS_REPORTED:
+            truncated = True
+            break
         status = getattr(getattr(trade, "orderStatus", None), "status", None)
         out.append(
             {
@@ -274,4 +328,4 @@ def wire_open_orders(trades: object) -> list[dict[str, object]]:
                 "totalQuantity": _als_zahl(getattr(order, "totalQuantity", None)),
             }
         )
-    return out
+    return out, truncated

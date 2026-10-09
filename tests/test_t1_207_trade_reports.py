@@ -444,7 +444,14 @@ def test_archiv_fuellungen_zieht_die_marke_nach(tmp_path: Path) -> None:
     _schreibe(ordner)
     store = TradeReportStore(tmp_path / "state")
 
-    fuellungen = _archiv_fuellungen(str(ordner), store, KONTO)
+    # T1-282-Nachtrag 2026-10-09: der Tag wird GENANNT. Ohne ihn galt diese
+    # Zusicherung nur so lange wie das Erstlauf-Fenster von 14 Tagen — sie war
+    # am Schreibtag gruen und verfiel danach lautlos. Genau das ist passiert:
+    # ab dem 2026-10-02 lag `trades.20260918.csv` ausserhalb des Fensters, und
+    # die CI war seit dem 28.09. rot.
+    fuellungen = _archiv_fuellungen(
+        str(ordner), store, KONTO, heute=datetime(2026, 9, 18)
+    )
 
     assert len(fuellungen) == 5
     assert not store.erstlauf
@@ -571,7 +578,15 @@ def test_kontoabweichung_wird_laut(tmp_path: Path, caplog) -> None:
     store = TradeReportStore(tmp_path / "state")
 
     with caplog.at_level(logging.WARNING):
-        assert _archiv_fuellungen(str(ordner), store, "DU1234567") == []
+        # Derselbe Nachtrag: ohne `heute` liest diese Zusicherung ein leeres
+        # Archiv und ist dann aus dem FALSCHEN Grund gruen — sie belegt nicht
+        # mehr die Kontoabweichung, sondern nur noch das Altersfenster.
+        assert (
+            _archiv_fuellungen(
+                str(ordner), store, "DU1234567", heute=datetime(2026, 9, 18)
+            )
+            == []
+        )
 
     meldungen = [r.getMessage() for r in caplog.records]
     assert any("none belong to account" in m for m in meldungen)
@@ -663,3 +678,65 @@ def test_ohne_gemeinsame_ausfuehrung_wird_nichts_behauptet(tmp_path: Path) -> No
 
     assert _pruefe_zeitzone([], archiv) is None
     assert _pruefe_zeitzone([_live("fremde.kennung.01.01", datetime.now(timezone.utc))], archiv) is None
+
+
+def test_keine_zusicherung_haengt_wieder_an_der_wanduhr() -> None:
+    """Die Regel gegen den dritten Rueckfall (T1-282-Nachtrag, 2026-10-09).
+
+    ## Warum es diese Regel gibt
+
+    Zweimal ist hier dieselbe Zusicherungsgattung lautlos gestorben:
+
+    - `2f47744` (2026-10-02): `check_bericht` reichte kein `heute` an
+      `pruefe()` weiter. Die Zusicherung war ab ihrem Schreibtag genau so
+      lange gueltig wie das Frischefenster von vier Tagen.
+    - 2026-10-09: dieselbe Sache bei `_archiv_fuellungen` und
+      `TradeReportStore.seit_tag()`, nur mit dem Erstlauf-Fenster von 14
+      Tagen. Die CI war seit dem 28.09. rot, und niemand hat es gesehen,
+      **weil beide Zusicherungen am Tag des Schreibens gruen waren.**
+
+    Eine Zusicherung, die eine datierte Datei anlegt und den Tag nicht nennt,
+    misst das Altersfenster statt die Sache. Sie verfaellt, sie geht nicht
+    kaputt — und der Unterschied ist, dass niemand einen Verursacher findet.
+
+    ## Was gemessen wird
+
+    Jeder Aufruf von `_archiv_fuellungen` in dieser Datei, der auf eine
+    datierte Testdatei trifft, muss `heute=` setzen. Gelesen wird der
+    Quelltext OHNE Kommentare — sonst belegt eine Grabinschrift die Regel
+    (die C5-Falle aus T1-311).
+    """
+    import re
+    from pathlib import Path as _P
+
+    quelle = _P(__file__).read_text("utf-8")
+    # Kommentarzeilen und Docstring dieser Regel heraus, damit die Erwaehnung
+    # von `_archiv_fuellungen` im Text oben nicht als Aufruf zaehlt.
+    ohne_kommentar = "\n".join(
+        z for z in quelle.split("\n") if not z.lstrip().startswith("#")
+    )
+    ohne_kommentar = ohne_kommentar.split(
+        "def test_keine_zusicherung_haengt_wieder_an_der_wanduhr"
+    )[0]
+
+    # Jeder Aufruf samt seiner Argumentliste, auch ueber Zeilen gebrochen.
+    aufrufe = re.findall(
+        r"_archiv_fuellungen\((.*?)\)\s*(?:==|\n|$)", ohne_kommentar, re.S
+    )
+    assert aufrufe, "Kein Aufruf gefunden — diese Regel misst dann nichts."
+
+    ohne_tag = [
+        a.strip()[:70]
+        for a in aufrufe
+        # Nur Aufrufe mit einem SCHARFEN Konto. Die Riegelfaelle (`None`, "")
+        # kehren vor dem Lesen um; ohne geoeffnetes Archiv gibt es kein
+        # Altersfenster, das eine Zusicherung ueberholen koennte.
+        if "str(ordner)" in a
+        and "heute=" not in a
+        and not re.search(r",\s*(None|[\"\']{2})\s*,?\s*$", a.strip())
+    ]
+    assert not ohne_tag, (
+        "Diese Aufrufe lesen eine datierte Datei, nennen aber ihren Tag nicht. "
+        "Sie sind ab heute gueltig, bis das Erstlauf-Fenster sie ueberholt:\n  "
+        + "\n  ".join(ohne_tag)
+    )
