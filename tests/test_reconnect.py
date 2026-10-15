@@ -230,6 +230,10 @@ class FakeIb:
     def positions(self) -> list[Any]:
         return []
 
+    def accountValues(self) -> list[Any]:
+        # Ein gesundes Konto-Abo: `connect()` muss nichts nachfragen.
+        return [object()]
+
 
 def test_connecting_twice_attaches_the_error_hook_once() -> None:
     """Sonst stuende jede 321er-Meldung nach einer Nacht doppelt in der Liste."""
