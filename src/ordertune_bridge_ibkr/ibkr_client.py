@@ -6,6 +6,7 @@ Poll-Loop. ib_insync erlaubt beides via internem util.run().
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,6 +87,15 @@ _AGGREGATE_CURRENCY_MARKERS = {"BASE", ""}
 # Start unter Last steht — aber endlich, weil ein haengender Client fuer den
 # Nutzer aussieht wie ein abgestuerzter.
 POSITIONS_TIMEOUT_S = 20.0
+
+# Das Konto-Abo bekommt dieselbe Frist wie die Positionen: dieselbe Lage beim
+# Start, dieselbe Abwaegung zwischen Last und Haengen.
+ACCOUNT_VALUES_TIMEOUT_S = 20.0
+
+# Wie oft ein leeres Konto-Abo hoechstens neu angefragt wird. Jeder Versuch
+# kann die Schleife bis zu `ACCOUNT_VALUES_TIMEOUT_S` anhalten; alle fuenf
+# Minuten ist das vertretbar, jede Minute waere es ein Drittel der Zeit.
+ACCOUNT_RESUBSCRIBE_INTERVAL_S = 300.0
 
 # T1-152: die Auffanggrenze fuer JEDE Abfrage, die ueber `IB._run()` laeuft.
 #
@@ -182,6 +192,9 @@ class IbkrClient:
         # Zeilen und ist trotzdem eine gueltige Auskunft. Es zaehlt, dass die
         # Abfrage abgeschlossen wurde.
         self._positions_known = False
+        # Wann das Konto-Abo zuletzt neu angefragt wurde (`time.monotonic`).
+        # `None` heisst: in dieser Sitzung noch nie.
+        self._account_resubscribed_at: float | None = None
         self._multi_account_warned = False
         # T1-252: derselbe Grund wie oben — ein Zustand, kein Ereignis.
         self._fx_logged = False
@@ -234,9 +247,11 @@ class IbkrClient:
         # hat, weiss diese Sitzung nichts ueber das Depot.
         self._validation_errors.clear()
         self._positions_known = False
+        self._account_resubscribed_at = None
         self._ib.connect(self._host, self._port, clientId=self._client_id)
         log.info("Connected to IBKR TWS.")
         self._confirm_positions_subscription()
+        self._confirm_account_subscription()
         self._confirm_write_access()
 
     def _confirm_write_access(self) -> None:
@@ -344,6 +359,80 @@ class IbkrClient:
             len(self._ib.positions()),
         )
 
+    def _confirm_account_subscription(self) -> None:
+        """Das Konto-Abo nach dem Verbinden pruefen — dieselbe Luecke wie T1-99.
+
+        `_confirm_positions_subscription` hat am 2026-08-18 die Positionen aus
+        dem Zeitueberlauf geholt. Das Konto-Abo, das damals ausgefallen war
+        (`account updates for U... request timed out`), blieb ungeprueft.
+
+        Gemessen beim Owner am 2026-10-14: TWS verbunden, Herzschlag gruen, und
+        ueber Stunden kein einziger Kontowert. Die Bridge meldete Waehrung
+        `null` und Depotwert 0, die Plattform zeigte „could not determine your
+        account currency", und die Mengenrechnung stand. Erst die naechste
+        Wiederverbindung hat es aufgeloest — denn ib_insync fragt das Abo nur
+        beim Verbinden an und nie wieder.
+        """
+        if self._ib.accountValues():
+            return
+        self._resubscribe_account_values(force=True)
+
+    def _resubscribe_account_values(self, *, force: bool = False) -> bool:
+        """Das Konto-Abo erneut anfragen. `True`, wenn danach Werte da sind.
+
+        Begrenzt auf einen Versuch je `ACCOUNT_RESUBSCRIBE_INTERVAL_S`, ausser
+        direkt nach dem Verbinden (`force`). Bei genau einem Konto ueber
+        `reqAccountUpdates`, bei mehreren je Konto ueber den Multi-Kanal —
+        dieselbe Wahl, die ib_insync beim Verbinden trifft.
+        """
+        jetzt = time.monotonic()
+        if (
+            not force
+            and self._account_resubscribed_at is not None
+            and jetzt - self._account_resubscribed_at < ACCOUNT_RESUBSCRIBE_INTERVAL_S
+        ):
+            return False
+        self._account_resubscribed_at = jetzt
+
+        try:
+            konten = [a for a in self._ib.managedAccounts() if a]
+        except Exception:  # pragma: no cover - defensiv
+            konten = []
+        if not konten:
+            log.warning(
+                "No account values from TWS, and TWS has not named an account "
+                "yet. Will ask again in %.0fs.",
+                ACCOUNT_RESUBSCRIBE_INTERVAL_S,
+            )
+            return False
+
+        try:
+            if len(konten) == 1:
+                self._ib.run(
+                    self._ib.reqAccountUpdatesAsync(konten[0]),
+                    timeout=ACCOUNT_VALUES_TIMEOUT_S,
+                )
+            else:
+                for konto in konten:
+                    self._ib.run(
+                        self._ib.reqAccountUpdatesMultiAsync(konto),
+                        timeout=ACCOUNT_VALUES_TIMEOUT_S,
+                    )
+        except Exception as exc:
+            log.warning(
+                "Asked TWS again for the account values, but it did not answer "
+                "within %.0fs (%s: %s). Will ask again in %.0fs.",
+                ACCOUNT_VALUES_TIMEOUT_S,
+                type(exc).__name__,
+                exc,
+                ACCOUNT_RESUBSCRIBE_INTERVAL_S,
+            )
+
+        if self._ib.accountValues():
+            log.info("Account values received from TWS after asking again.")
+            return True
+        return False
+
     def disconnect(self) -> None:
         if self._ib.isConnected():
             self._ib.disconnect()
@@ -365,6 +454,11 @@ class IbkrClient:
         das zueinander nicht passt, und niemand saehe es an den Zahlen.
         """
         acct_values: list[AccountValue] = self._ib.accountValues()
+        # Leeres Konto-Abo bei stehender Verbindung: neu anfragen statt bis zur
+        # naechsten Wiederverbindung `null` zu melden. Siehe
+        # `_confirm_account_subscription`.
+        if not acct_values and self._resubscribe_account_values():
+            acct_values = self._ib.accountValues()
         currency = resolve_account_currency(acct_values)
 
         cash = 0.0
@@ -620,7 +714,9 @@ class IbkrClient:
             log.warning(
                 "No account values received from TWS yet. The account "
                 "subscription may not have delivered; Ordertune cannot size "
-                "any order until it does."
+                "any order until it does. The Bridge asks TWS again every "
+                "%.0f seconds.",
+                ACCOUNT_RESUBSCRIBE_INTERVAL_S,
             )
             return
 
