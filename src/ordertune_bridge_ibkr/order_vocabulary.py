@@ -256,3 +256,39 @@ def rejection_reason_of(trade: object) -> str | None:
     # zugegriffen hat, und genau dieser Fehlertyp war der Anlass von T1-137.
     message = unmask_wire_escapes((getattr(letzter, "message", "") or "").strip())
     return message or "Rejected by IBKR."
+
+
+# ── T1-318 — ein Storno mit Begruendung bringt sie mit ──────────────────────
+#
+# Am 2026-10-16 endeten AMD und LITE (Breakout Hunter, `OPG`) um 09:02 ET,
+# 28 Minuten vor der Auktion. IBKR quittiert ein Storno mit Code 202, und
+# `cancel_is_genuine` laesst es seit T1-88b zu Recht sofort durch. Den Text
+# dahinter hat aber niemand weitergegeben: auf t1 stand ein Ende ohne Grund,
+# und die einzige Auskunft darueber, WARUM IBKR storniert hat, lag allein im
+# Protokoll der Bridge.
+#
+# Der Verfall zum Schluss traegt dieselbe 202, aber mit LEEREM Grund
+# (`"Order storniert – Grund:"`, gemessen am 2026-08-14, siehe
+# `session-close.ts` auf t1). Nur ein Grund mit Inhalt ist eine Auskunft.
+CANCEL_CONFIRMATION_CODE = 202
+
+
+def cancel_reason_of(trade: object) -> str | None:
+    """Der Grund, den IBKR an eine Stornobestaetigung (202) gehaengt hat.
+
+    `None`, wenn kein 202 im Protokoll steht oder der Text nach dem
+    Doppelpunkt leer ist — das ist die Form des gewoehnlichen Verfalls und
+    des Stornos von Hand, und dort gibt es nichts zu berichten.
+    """
+    entries = list(getattr(trade, "log", None) or [])
+    for entry in reversed(entries):
+        if getattr(entry, "errorCode", None) != CANCEL_CONFIRMATION_CODE:
+            continue
+        message = unmask_wire_escapes((getattr(entry, "message", "") or "").strip())
+        if not message:
+            return None
+        _, sep, rest = message.partition(":")
+        if sep and not rest.strip():
+            return None
+        return message
+    return None

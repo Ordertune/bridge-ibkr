@@ -440,3 +440,32 @@ def test_unknown_wird_nicht_zweimal_gemeldet() -> None:
     _LAST_REPORTED.clear()
     assert should_report("d-rank-4", "unknown") is True
     assert should_report("d-rank-4", "unknown") is False
+
+
+# ── T1-318 — ein Storno mit Begruendung bringt sie mit ──────────────────────
+
+
+def _trade_mit_202(message: str) -> SimpleNamespace:
+    trade = make_trade("Cancelled", error_code=202, history=("Submitted",))
+    trade.log[-1].message = message
+    return trade
+
+
+def test_storno_mit_grund_bringt_den_grund_mit():
+    """2026-10-16: AMD und LITE endeten vor der Auktion, der Grund fehlte auf t1."""
+    api = FakeApi()
+    trade = _trade_mit_202(
+        "Order storniert - Grund: Die At-the-open-Order konnte nicht ausgefuehrt werden."
+    )
+    m._report_status(api, "d-317", trade, "cancelled")
+    (meldung,) = api.calls
+    assert meldung["status"] == "cancelled"
+    assert "At-the-open" in (meldung["error_message"] or "")
+
+
+def test_storno_mit_leerem_grund_bleibt_ohne_text():
+    """Der Verfall zum Schluss traegt eine 202 mit leerem Grund — keine Auskunft."""
+    api = FakeApi()
+    m._report_status(api, "d-317b", _trade_mit_202("Order storniert – Grund:"), "cancelled")
+    (meldung,) = api.calls
+    assert meldung["error_message"] is None

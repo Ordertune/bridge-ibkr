@@ -84,6 +84,7 @@ from .order_vocabulary import (
     REJECTION_CODES,
     WARNING_CODE_MAX,
     WARNING_CODE_MIN,
+    cancel_reason_of,
     is_warning_code,
     rejection_reason_of,
 )
@@ -2065,6 +2066,11 @@ def _report_status(
     # Auskunft (welcher Betrag fehlte) stand nur im Protokoll der Bridge und
     # erreichte die Plattform nie.
     fehlertext = rejection_reason(trade) if mapped == "rejected" else None
+    # T1-318: ein Storno durch IBKR mit Begruendung bringt sie ebenfalls mit.
+    # Am 2026-10-16 endeten zwei Eroeffnungsauftraege vor der Auktion, und
+    # warum, stand nur hier im Protokoll.
+    if mapped == "cancelled" and filled == 0:
+        fehlertext = cancel_reason_of(trade)
 
     try:
         api.result_order(
