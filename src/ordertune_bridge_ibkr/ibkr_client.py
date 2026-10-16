@@ -13,6 +13,7 @@ from typing import Any
 from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 
 from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
+from .order_vocabulary import record_cancel_reason
 from .write_access import (
     CONFIRMED as READ_ONLY_CONFIRMED,
     SUSPECTED as READ_ONLY_SUSPECTED,
@@ -208,11 +209,14 @@ class IbkrClient:
     def _on_error(self, reqId: int, errorCode: int, errorString: str, *_: Any) -> None:
         """Sammelt die Fehler, die TWS von sich aus schickt.
 
-        Nur die 321er, und nur zur Diagnose. Alles andere haengt bereits an
-        anderen Wegen — dieser Rueckruf darf nichts entscheiden.
+        Die 321er zur Diagnose, und seit T1-318 der Grund einer 202 — beides
+        wird nur abgelegt. Dieser Rueckruf darf nichts entscheiden.
         """
         if errorCode == VALIDATION_ERROR_CODE:
             self._validation_errors.append(str(errorString or "").strip())
+        # T1-318: der Grund einer Stornobestaetigung. ib_insync haengt ihn
+        # nicht an `trade.log`; ohne diese Zeile erreicht er t1 nie.
+        record_cancel_reason(reqId, errorCode, str(errorString or ""))
 
     def connect(self) -> None:
         """Verbindet — und vertraegt es, ein zweites Mal gerufen zu werden.

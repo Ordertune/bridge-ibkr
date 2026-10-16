@@ -38,6 +38,11 @@ from types import SimpleNamespace
 import pytest
 
 from ordertune_bridge_ibkr import main as m
+from ordertune_bridge_ibkr.order_vocabulary import (
+    cancel_reason_of,
+    clear_cancel_reasons,
+    record_cancel_reason,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -45,9 +50,11 @@ def _reset_module_state():
     """Modulweite Ablagen zwischen den Zusicherungen leeren."""
     m._LAST_REPORTED.clear()
     m._PENDING_CANCEL_CHECKS.clear()
+    clear_cancel_reasons()
     yield
     m._LAST_REPORTED.clear()
     m._PENDING_CANCEL_CHECKS.clear()
+    clear_cancel_reasons()
 
 
 class FakeApi:
@@ -121,14 +128,38 @@ def test_the_deferred_check_reports_working_when_the_order_lives() -> None:
 
 
 def test_a_genuine_cancellation_is_reported_immediately() -> None:
-    """Code 202 ist IBKRs Stornobestaetigung. Die wird nicht verzoegert."""
+    """Code 202 ist IBKRs Stornobestaetigung. Liegt ihr Grund schon vor, wird
+    nicht verzoegert."""
     api = FakeApi()
     on_status = m._make_on_order_status(api, {3: "disp-1"})
+    record_cancel_reason(3, 202, "Order Canceled - reason:Order would cross related resting order.")
 
     on_status(make_trade("Cancelled", error_code=202, history=["Submitted"]))
 
     assert api.statuses == ["cancelled"]
     assert m._PENDING_CANCEL_CHECKS == {}
+
+
+def test_a_genuine_cancellation_waits_for_its_reason() -> None:
+    """T1-318: die 202 mit dem Grund kommt NACH dem Zustandswechsel.
+
+    Der Storno wartet die Nachbeobachtung ab und wird danach gemeldet — mit
+    dem Grund, wenn er inzwischen eingetroffen ist.
+    """
+    api = FakeApi()
+    on_status = m._make_on_order_status(api, {3: "disp-1"})
+
+    on_status(make_trade("Cancelled", error_code=0, history=["PreSubmitted"]))
+    assert api.statuses == []
+
+    record_cancel_reason(3, 202, "Order Canceled - reason:Order would cross related resting order.")
+    m.handle_deferred_cancels(api, monotonic=lambda: 1e9)
+
+    (meldung,) = api.calls
+    assert meldung["status"] == "cancelled"
+    assert meldung["error_message"] == (
+        "Order Canceled - reason:Order would cross related resting order."
+    )
 
 
 def test_a_still_cancelled_order_is_reported_after_the_wait() -> None:
@@ -445,27 +476,28 @@ def test_unknown_wird_nicht_zweimal_gemeldet() -> None:
 # ── T1-318 — ein Storno mit Begruendung bringt sie mit ──────────────────────
 
 
-def _trade_mit_202(message: str) -> SimpleNamespace:
-    trade = make_trade("Cancelled", error_code=202, history=("Submitted",))
-    trade.log[-1].message = message
-    return trade
-
-
 def test_storno_mit_grund_bringt_den_grund_mit():
     """2026-10-16: AMD und LITE endeten vor der Auktion, der Grund fehlte auf t1."""
     api = FakeApi()
-    trade = _trade_mit_202(
-        "Order storniert - Grund: Die At-the-open-Order konnte nicht ausgefuehrt werden."
+    trade = make_trade("Cancelled", error_code=0, history=("PreSubmitted",))
+    record_cancel_reason(
+        3, 202, "Order Canceled - reason:Order would cross related resting order."
     )
-    m._report_status(api, "d-317", trade, "cancelled")
+    m._report_status(api, "d-318", trade, "cancelled")
     (meldung,) = api.calls
     assert meldung["status"] == "cancelled"
-    assert "At-the-open" in (meldung["error_message"] or "")
+    assert "cross related resting order" in (meldung["error_message"] or "")
 
 
 def test_storno_mit_leerem_grund_bleibt_ohne_text():
     """Der Verfall zum Schluss traegt eine 202 mit leerem Grund — keine Auskunft."""
     api = FakeApi()
-    m._report_status(api, "d-317b", _trade_mit_202("Order storniert – Grund:"), "cancelled")
+    record_cancel_reason(3, 202, "Order Canceled - reason:")
+    m._report_status(api, "d-318b", make_trade("Cancelled", error_code=0), "cancelled")
     (meldung,) = api.calls
     assert meldung["error_message"] is None
+
+
+def test_andere_codes_werden_nicht_als_grund_abgelegt():
+    record_cancel_reason(3, 2104, "Market data farm connection is OK:usfarm")
+    assert cancel_reason_of(make_trade("Cancelled", error_code=0)) is None

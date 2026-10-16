@@ -1861,6 +1861,12 @@ def _make_on_order_status(api: OrdertuneApiClient, dispatch_id_map: dict[int, st
         if mapped == "cancelled" and not cancel_is_genuine(trade):
             _defer_cancel_check(dispatch_id, trade)
             return
+        # T1-318: auch ein echter Storno wartet kurz, solange sein Grund fehlt.
+        # Die 202 mit dem Grund kommt NACH dem Zustandswechsel (rund 0,2 s,
+        # gemessen am 2026-10-16). Wer sofort meldet, meldet ohne Grund.
+        if mapped == "cancelled" and cancel_reason_of(trade) is None:
+            _defer_cancel_check(dispatch_id, trade, quiet=True)
+            return
 
         _report_status(api, dispatch_id, trade, mapped)
 
@@ -1886,8 +1892,12 @@ def cancel_is_genuine(trade: Any) -> bool:
     return code in _GENUINE_CANCEL_CODES
 
 
-def _defer_cancel_check(dispatch_id: str, trade: Any) -> None:
-    """Merkt eine verdaechtige Stornierung zur Nachbeobachtung vor."""
+def _defer_cancel_check(dispatch_id: str, trade: Any, *, quiet: bool = False) -> None:
+    """Merkt eine Stornierung zur Nachbeobachtung vor.
+
+    `quiet` (T1-318): ein echter Storno, der nur auf seinen Grund wartet. Er
+    ist nicht verdaechtig und bekommt deshalb keine Warnung ins Protokoll.
+    """
     with _PENDING_CANCEL_LOCK:
         if dispatch_id in _PENDING_CANCEL_CHECKS:
             return
@@ -1895,6 +1905,8 @@ def _defer_cancel_check(dispatch_id: str, trade: Any) -> None:
             trade,
             time.monotonic() + CANCEL_CONFIRM_DELAY_S,
         )
+    if quiet:
+        return
     entries = getattr(trade, "log", None) or []
     code = getattr(entries[-1], "errorCode", None) if entries else None
     log.warning(
