@@ -22,6 +22,7 @@ order-execution-status-pill.tsx`
 from __future__ import annotations
 
 import re
+import threading
 
 # Innerer Zustand der Bridge -> das Wort, das der Nutzer auf t1 sieht.
 LABELS: dict[str, str] = {
@@ -256,3 +257,66 @@ def rejection_reason_of(trade: object) -> str | None:
     # zugegriffen hat, und genau dieser Fehlertyp war der Anlass von T1-137.
     message = unmask_wire_escapes((getattr(letzter, "message", "") or "").strip())
     return message or "Rejected by IBKR."
+
+
+# ── T1-318 — ein Storno mit Begruendung bringt sie mit ──────────────────────
+#
+# Am 2026-10-16 endeten AMD und LITE (Breakout Hunter, `OPG`) um 09:02 ET,
+# 28 Minuten vor der Auktion. Im Bridge-Log stand der Grund:
+#
+#   Warning 202, reqId 15070: Order Canceled - reason:Order would cross
+#   related resting order.
+#
+# Auf t1 kam davon nichts an. ib_insync fuehrt 202 unter den Warnungen
+# (wrapper.py:1097) und haengt Warnungen KEINEN Eintrag an `trade.log` — die
+# Meldung kommt ausschliesslich ueber `errorEvent`, und zwar NACH dem
+# Zustandswechsel auf `Cancelled` (gemessen: rund 0,2 s spaeter). Sie wird
+# deshalb hier je Auftragsnummer abgelegt und beim Melden nachgeschlagen.
+#
+# Der Verfall zum Schluss und der Storno von Hand tragen dieselbe 202, aber
+# mit LEEREM Grund (gemessen am 2026-08-14). Nur ein Grund mit Inhalt ist eine
+# Auskunft und wird abgelegt.
+CANCEL_CONFIRMATION_CODE = 202
+
+_CANCEL_REASONS: dict[int, str] = {}
+_CANCEL_REASONS_LOCK = threading.Lock()
+
+
+def _reason_text(message: str) -> str | None:
+    text = unmask_wire_escapes((message or "").strip())
+    if not text:
+        return None
+    _, sep, rest = text.partition(":")
+    if sep and not rest.strip():
+        return None
+    return text
+
+
+def record_cancel_reason(order_id: int, error_code: int, message: str) -> None:
+    """Legt den Grund einer 202 ab. Rueckruf aus `errorEvent`."""
+    if error_code != CANCEL_CONFIRMATION_CODE or not order_id:
+        return
+    text = _reason_text(message)
+    if text is None:
+        return
+    with _CANCEL_REASONS_LOCK:
+        _CANCEL_REASONS[int(order_id)] = text
+
+
+def cancel_reason_of(trade: object) -> str | None:
+    """Der Grund, den IBKR an die Stornobestaetigung dieses Auftrags gehaengt hat.
+
+    `None`, wenn keine 202 mit Inhalt eingetroffen ist — auch dann, wenn sie
+    schlicht noch unterwegs ist. Der Aufrufer haelt einen Storno ohne Grund
+    deshalb kurz zurueck (`main.CANCEL_CONFIRM_DELAY_S`).
+    """
+    order_id = int(getattr(getattr(trade, "order", None), "orderId", 0) or 0)
+    if not order_id:
+        return None
+    with _CANCEL_REASONS_LOCK:
+        return _CANCEL_REASONS.get(order_id)
+
+
+def clear_cancel_reasons() -> None:
+    with _CANCEL_REASONS_LOCK:
+        _CANCEL_REASONS.clear()
