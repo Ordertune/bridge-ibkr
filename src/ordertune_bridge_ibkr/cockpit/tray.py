@@ -261,42 +261,43 @@ def _win32() -> Any:
     class POINT(ctypes.Structure):
         _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
-    sig = {
-        user32.DefWindowProcW: (LRESULT, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
-        user32.RegisterClassExW: (wintypes.ATOM, [ctypes.POINTER(WNDCLASSEXW)]),
-        user32.CreateWindowExW: (wintypes.HWND, [
+    # Eine Liste, kein dict: ctypes-Funktionszeiger sind nicht hashbar.
+    sig = [
+        (user32.DefWindowProcW, LRESULT, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
+        (user32.RegisterClassExW, wintypes.ATOM, [ctypes.POINTER(WNDCLASSEXW)]),
+        (user32.CreateWindowExW, wintypes.HWND, [
             wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
             ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
             wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
         ]),
-        user32.DestroyWindow: (wintypes.BOOL, [wintypes.HWND]),
-        user32.GetMessageW: (wintypes.BOOL, [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]),
-        user32.TranslateMessage: (wintypes.BOOL, [ctypes.POINTER(wintypes.MSG)]),
-        user32.DispatchMessageW: (LRESULT, [ctypes.POINTER(wintypes.MSG)]),
-        user32.PostMessageW: (wintypes.BOOL, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
-        user32.PostQuitMessage: (None, [ctypes.c_int]),
-        user32.RegisterWindowMessageW: (wintypes.UINT, [wintypes.LPCWSTR]),
-        user32.SetTimer: (ctypes.c_size_t, [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID]),
-        user32.KillTimer: (wintypes.BOOL, [wintypes.HWND, ctypes.c_size_t]),
-        user32.CreatePopupMenu: (wintypes.HMENU, []),
-        user32.AppendMenuW: (wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]),
-        user32.TrackPopupMenu: (wintypes.BOOL, [
+        (user32.DestroyWindow, wintypes.BOOL, [wintypes.HWND]),
+        (user32.GetMessageW, wintypes.BOOL, [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]),
+        (user32.TranslateMessage, wintypes.BOOL, [ctypes.POINTER(wintypes.MSG)]),
+        (user32.DispatchMessageW, LRESULT, [ctypes.POINTER(wintypes.MSG)]),
+        (user32.PostMessageW, wintypes.BOOL, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
+        (user32.PostQuitMessage, None, [ctypes.c_int]),
+        (user32.RegisterWindowMessageW, wintypes.UINT, [wintypes.LPCWSTR]),
+        (user32.SetTimer, ctypes.c_size_t, [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID]),
+        (user32.KillTimer, wintypes.BOOL, [wintypes.HWND, ctypes.c_size_t]),
+        (user32.CreatePopupMenu, wintypes.HMENU, []),
+        (user32.AppendMenuW, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]),
+        (user32.TrackPopupMenu, wintypes.BOOL, [
             wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int,
             wintypes.HWND, wintypes.LPVOID,
         ]),
-        user32.DestroyMenu: (wintypes.BOOL, [wintypes.HMENU]),
-        user32.GetCursorPos: (wintypes.BOOL, [ctypes.POINTER(POINT)]),
-        user32.SetForegroundWindow: (wintypes.BOOL, [wintypes.HWND]),
-        user32.GetSystemMetrics: (ctypes.c_int, [ctypes.c_int]),
-        user32.CreateIconFromResourceEx: (wintypes.HICON, [
+        (user32.DestroyMenu, wintypes.BOOL, [wintypes.HMENU]),
+        (user32.GetCursorPos, wintypes.BOOL, [ctypes.POINTER(POINT)]),
+        (user32.SetForegroundWindow, wintypes.BOOL, [wintypes.HWND]),
+        (user32.GetSystemMetrics, ctypes.c_int, [ctypes.c_int]),
+        (user32.CreateIconFromResourceEx, wintypes.HICON, [
             ctypes.c_char_p, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
             ctypes.c_int, ctypes.c_int, wintypes.UINT,
         ]),
-        user32.DestroyIcon: (wintypes.BOOL, [wintypes.HICON]),
-        shell32.Shell_NotifyIconW: (wintypes.BOOL, [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]),
-        kernel32.GetModuleHandleW: (wintypes.HMODULE, [wintypes.LPCWSTR]),
-    }
-    for fn, (restype, argtypes) in sig.items():
+        (user32.DestroyIcon, wintypes.BOOL, [wintypes.HICON]),
+        (shell32.Shell_NotifyIconW, wintypes.BOOL, [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]),
+        (kernel32.GetModuleHandleW, wintypes.HMODULE, [wintypes.LPCWSTR]),
+    ]
+    for fn, restype, argtypes in sig:
         fn.restype = restype
         fn.argtypes = argtypes
 
