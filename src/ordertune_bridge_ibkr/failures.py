@@ -269,6 +269,48 @@ def bridge_laeuft_bereits(url: str) -> Failure:
 
 # ── IBKR TWS ─────────────────────────────────────────────────────────────────
 
+# TWS-Fehler 326, „client id is already in use". Derselbe Wert wie
+# `ibkr_client.CLIENT_ID_IN_USE_CODE`; hier noch einmal, damit dieser Baustein
+# ohne `ib_insync` auskommt.
+CLIENT_ID_IN_USE = 326
+
+
+def client_id_belegt(host: str, port: int, client_id: int | None) -> Failure:
+    """TWS hat gesagt, dass die Client-ID belegt ist. Gewusst, nicht geraten.
+
+    Ein Kunde schickte die Meldung `tws_api_refused` mit beiden Vermutungen
+    und einer leeren Zeile, wo der Grund haette stehen sollen. Gemeint war
+    dieser Fall. Der Text nennt deshalb ausdruecklich KEINE TWS-Einstellung:
+    die API-Freigabe ist nachweislich an, und wer sie trotzdem sucht, sucht am
+    falschen Ort.
+
+    Eine zweite Bridge desselben Windows-Benutzers faengt T1-222 schon vor dem
+    Verbinden ab. Was hier ankommt, ist alles andere: ein fremdes Programm,
+    eine Bridge unter einem anderen Benutzer, oder eine eben beendete Sitzung,
+    die TWS noch fuer offen haelt.
+    """
+    cid = f"{client_id}" if client_id is not None else "of this Bridge"
+    return Failure(
+        code="tws_client_id_in_use",
+        headline=f"TWS refused the connection: client id {cid} is already in use.",
+        detail=(
+            f"  TWS at {host}:{port} reported error {CLIENT_ID_IN_USE}. The API settings",
+            "  in TWS are fine -- the connection got as far as the client id.",
+            "",
+            "  Another API connection to the same TWS uses this id. Usually:",
+            "  - a second Bridge, possibly under another Windows user,",
+            "  - another trading tool connected to this TWS,",
+            "  - a Bridge that was just closed and that TWS still counts.",
+        ),
+        action=(
+            "Close the other connection, or give this Bridge its own id:",
+            "set IBKR_CLIENT_ID in bridge.env to a number no other",
+            "connection uses (for example 18), then start the Bridge again.",
+            "",
+            "If the Bridge was just closed, waiting a minute is often enough.",
+        ),
+    )
+
 
 def classify_connect_error(
     host: str,
@@ -287,6 +329,13 @@ def classify_connect_error(
     koennte irgendein anderer Dienst liegen, und eine falsche Gewissheit
     schickt den Nutzer in die falsche Richtung.
     """
+    # TWS hat den Grund selbst genannt (Fehler 326). Dann wird nicht geraten:
+    # die API-Freigabe ist in Ordnung, sonst waere der Handshake nie bis zur
+    # Client-ID gekommen. Erkannt am Merkmal der Ausnahme, nicht an ihrer
+    # Klasse — `failures` importiert `ib_insync` nicht.
+    if getattr(exc, "tws_error_code", None) == CLIENT_ID_IN_USE:
+        return client_id_belegt(host, port, getattr(exc, "client_id", client_id))
+
     others = tuple((p, label) for p, label in answering if p != port)
     configured_answers = any(p == port for p, _ in answering)
 
@@ -298,7 +347,9 @@ def classify_connect_error(
                 "was refused."
             ),
             detail=(
-                f"  {exc}",
+                # Ein Zeitueberlauf von ib_insync hat keinen Text. Statt einer
+                # leeren Zeile steht dann wenigstens die Art des Fehlers da.
+                f"  {str(exc) or type(exc).__name__}",
                 "",
                 "  The two usual causes:",
                 "  - 'Enable ActiveX and Socket Clients' is off in TWS.",

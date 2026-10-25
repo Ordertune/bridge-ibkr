@@ -30,6 +30,39 @@ log = logging.getLogger(__name__)
 # kurz, wenn es schiefgeht — bei ib_insync selbst sind es vier.
 WRITE_ACCESS_TIMEOUT_S = 3.0
 
+# TWS-Fehler 326: „Unable to connect as the client id is already in use".
+#
+# TWS schickt ihn mitten im Handshake und schliesst danach den Socket. Bei
+# ib_insync kommt davon nur ein `TimeoutError` ohne Text an — und aus dem
+# musste `failures.classify_connect_error` bis hierher raten, ob die
+# API-Freigabe fehlt oder die Client-ID belegt ist. Ein Kunde bekam am Ende
+# beide Vermutungen und eine leere Zeile, wo der Grund haette stehen sollen.
+CLIENT_ID_IN_USE_CODE = 326
+
+
+class ClientIdInUse(ConnectionError):
+    """TWS hat die Verbindung abgelehnt, weil die Client-ID belegt ist.
+
+    Ein `ConnectionError`, damit jeder bestehende Fang weiter greift — die
+    Wiederverbindung behandelt ihn wie jeden anderen Fehlversuch. Neu ist nur,
+    dass der Grund jetzt gewusst und nicht mehr geraten wird.
+
+    `tws_error_code` ist das Merkmal, an dem `failures` ihn erkennt, ohne
+    `ib_insync` zu importieren.
+    """
+
+    tws_error_code = CLIENT_ID_IN_USE_CODE
+
+    def __init__(self, client_id: int, tws_text: str) -> None:
+        self.client_id = client_id
+        self.tws_text = tws_text
+        super().__init__(
+            f"TWS error {CLIENT_ID_IN_USE_CODE}: client id {client_id} is "
+            f"already in use ({tws_text})" if tws_text else
+            f"TWS error {CLIENT_ID_IN_USE_CODE}: client id {client_id} is "
+            "already in use"
+        )
+
 
 @dataclass
 class AccountSnapshot:
@@ -201,6 +234,9 @@ class IbkrClient:
         self._fx_logged = False
         # T1-101 B-2: die 321er aus dem Verbindungsfenster, mit ihrem Text.
         self._validation_errors: list[str] = []
+        # Der Text eines 326ers aus dem laufenden Verbindungsversuch, oder
+        # `None`. Je Versuch geleert, wie die 321er.
+        self._client_id_refused: str | None = None
         self._write_access = WriteAccess()
         # T1-152d: haengt der Fehler-Rueckruf schon? Seit es eine
         # Wiederverbindung gibt, laeuft `connect()` mehr als einmal.
@@ -214,6 +250,9 @@ class IbkrClient:
         """
         if errorCode == VALIDATION_ERROR_CODE:
             self._validation_errors.append(str(errorString or "").strip())
+        # Am Code erkannt, nie am Text: der Wortlaut ist lokalisiert.
+        if errorCode == CLIENT_ID_IN_USE_CODE:
+            self._client_id_refused = str(errorString or "").strip()
         # T1-318: der Grund einer Stornobestaetigung. ib_insync haengt ihn
         # nicht an `trade.log`; ohne diese Zeile erreicht er t1 nie.
         record_cancel_reason(reqId, errorCode, str(errorString or ""))
@@ -252,7 +291,15 @@ class IbkrClient:
         self._validation_errors.clear()
         self._positions_known = False
         self._account_resubscribed_at = None
-        self._ib.connect(self._host, self._port, clientId=self._client_id)
+        self._client_id_refused = None
+        try:
+            self._ib.connect(self._host, self._port, clientId=self._client_id)
+        except Exception as exc:
+            # Hat TWS im Handshake 326 gesagt, ist das DER Grund — egal, als
+            # welche Ausnahme ib_insync den geschlossenen Socket meldet.
+            if self._client_id_refused is not None:
+                raise ClientIdInUse(self._client_id, self._client_id_refused) from exc
+            raise
         log.info("Connected to IBKR TWS.")
         self._confirm_positions_subscription()
         self._confirm_account_subscription()

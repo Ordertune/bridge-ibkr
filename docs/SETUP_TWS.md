@@ -197,7 +197,8 @@ IBC ist Community-Standard, kostenlos, open-source: https://github.com/IbcAlpha/
 - **Order Precaution Popups**: „Bypass Order Precautions for API Orders" nicht
   aktiviert
 - **Client-ID collision**: eine andere Anwendung nutzt bereits die Client-ID 17
-  → im `bridge.env` einen anderen Wert setzen (`IBKR_CLIENT_ID=42`)
+  → im `bridge.env` einen anderen Wert setzen (`IBKR_CLIENT_ID=42`). Die Bridge
+  erkennt das am TWS-Fehler 326 und meldet es als `tws_client_id_in_use`
 - **„TWS is not writing trade reports"** im Bridge-Fenster: Abschnitt 2 oben.
   Der Handel läuft weiter; was nicht läuft, ist das Nachtragen einer Füllung,
   die während einer Auszeit der Bridge passiert ist
