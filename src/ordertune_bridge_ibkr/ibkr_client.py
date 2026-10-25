@@ -111,6 +111,32 @@ class AccountSnapshot:
     # `None` heisst „kein Kurs". Die Plattform blockiert dann wie bisher; ein
     # geratener Kurs waere Genauigkeit, die niemand sieht.
     fx_rate_usd: float | None = None
+    # T1-335 — Margin und Tagesergebnis, in der Kontowaehrung.
+    #
+    # Nur die Felder, die IBKR wirklich geliefert hat; ein fehlender Wert
+    # fehlt auch hier, statt als 0 zu erscheinen. `None` heisst „gar nichts
+    # erhoben", und `heartbeat` laesst das Feld dann weg.
+    metrics: dict[str, float] | None = None
+
+
+# T1-335: Konto-Tags fuer die Portfolio-Seite, je Tag der Schluessel auf der
+# Leitung. Alle Betraege in der Kontowaehrung, also aus derselben Zeile wie
+# `NetLiquidation`. `Cushion` ist ein Anteil und kommt ohne Waehrung.
+_METRIC_TAGS = {
+    "InitMarginReq": "initMargin",
+    "MaintMarginReq": "maintMargin",
+    "ExcessLiquidity": "excessLiquidity",
+    "AvailableFunds": "availableFunds",
+    "BuyingPower": "buyingPower",
+    "GrossPositionValue": "grossPositionValue",
+}
+_RATIO_TAGS = {"Cushion": "cushion"}
+# Die Felder von ib_insync `PnL` und ihr Name auf der Leitung.
+_PNL_FIELDS = {
+    "dailyPnL": "dailyPnl",
+    "unrealizedPnL": "unrealizedPnl",
+    "realizedPnL": "realizedPnl",
+}
 
 
 # Sammelzeilen des Kontos, die keine echte Waehrung benennen.
@@ -241,6 +267,10 @@ class IbkrClient:
         # T1-152d: haengt der Fehler-Rueckruf schon? Seit es eine
         # Wiederverbindung gibt, laeuft `connect()` mehr als einmal.
         self._error_hook_attached = False
+        # T1-335: fuer welches Konto in DIESER Sitzung `reqPnL` laeuft.
+        # ib_insync verweigert ein zweites Abo fuer dasselbe Konto, und nach
+        # einer Trennung ist das alte weg. Deshalb je Sitzung geleert.
+        self._pnl_account: str | None = None
 
     def _on_error(self, reqId: int, errorCode: int, errorString: str, *_: Any) -> None:
         """Sammelt die Fehler, die TWS von sich aus schickt.
@@ -292,6 +322,7 @@ class IbkrClient:
         self._positions_known = False
         self._account_resubscribed_at = None
         self._client_id_refused = None
+        self._pnl_account = None
         try:
             self._ib.connect(self._host, self._port, clientId=self._client_id)
         except Exception as exc:
@@ -532,6 +563,7 @@ class IbkrClient:
         self._log_fx(currency, fx)
 
         positions = self._positions()
+        account = self._trading_account()
 
         return AccountSnapshot(
             cash=cash,
@@ -539,9 +571,75 @@ class IbkrClient:
             currency=currency,
             positions=positions,
             gateway_status="connected" if self._ib.isConnected() else "disconnected",
-            account=self._trading_account(),
+            account=account,
             fx_rate_usd=fx.kurs,
+            metrics=self._account_metrics(acct_values, currency, account),
         )
+
+    def _account_metrics(
+        self,
+        acct_values: list[AccountValue],
+        currency: str | None,
+        account: str | None,
+    ) -> dict[str, float] | None:
+        """T1-335 — Margin und Tagesergebnis fuer die Portfolio-Seite.
+
+        Nur fuer genau ein Konto mit bekannter Waehrung. Bei mehreren Konten
+        rechnet die Plattform ohnehin nichts zusammen (T1-107), und ohne
+        Waehrung waeren die Betraege Zahlen ohne Einheit.
+
+        Ein Fehler hier darf den Herzschlag nie aufhalten: im Zweifel fehlen
+        die Felder, und die Seite zeigt den Hinweis auf die neue Bridge.
+        """
+        if currency is None or not account:
+            return None
+        metrics: dict[str, float] = {}
+        for v in acct_values:
+            konto = getattr(v, "account", None)
+            if konto and konto != account:
+                continue
+            if v.tag in _METRIC_TAGS and v.currency.upper() == currency:
+                wert = _opt(v.value)
+                if wert is not None:
+                    metrics[_METRIC_TAGS[v.tag]] = wert
+            elif v.tag in _RATIO_TAGS:
+                wert = _opt(v.value)
+                if wert is not None:
+                    metrics[_RATIO_TAGS[v.tag]] = wert
+        metrics.update(self._pnl(account))
+        return metrics or None
+
+    def _pnl(self, account: str) -> dict[str, float]:
+        """Tagesergebnis aus `reqPnL`, in der Kontowaehrung.
+
+        Das Abo wird beim ersten Herzschlag der Sitzung gestellt und liefert
+        danach laufend. Der erste Herzschlag hat deshalb meist noch keine
+        Werte; IBKR meldet bis dahin `nan`, und `_opt` laesst das weg.
+        """
+        if self._pnl_account != account:
+            try:
+                self._ib.reqPnL(account)
+                self._pnl_account = account
+            except Exception as exc:
+                log.warning(
+                    "Could not subscribe to the daily P&L of the account "
+                    "(%s: %s). The portfolio page shows it once it arrives.",
+                    type(exc).__name__,
+                    exc,
+                )
+                return {}
+        try:
+            eintraege = [p for p in self._ib.pnl(account) if p.account == account]
+        except Exception:  # pragma: no cover - defensiv
+            return {}
+        if not eintraege:
+            return {}
+        out: dict[str, float] = {}
+        for feld, schluessel in _PNL_FIELDS.items():
+            wert = _opt(getattr(eintraege[0], feld, None))
+            if wert is not None:
+                out[schluessel] = wert
+        return out
 
     def _log_fx(self, currency: str | None, fx: FxErgebnis) -> None:
         """Sag, ob aus diesem Depotwert eine Stueckzahl werden kann.
