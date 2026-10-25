@@ -1577,6 +1577,8 @@ def _handle_heartbeat(
             # „nicht zweifelsfrei bildbar" — dann laesst `heartbeat` das Feld
             # weg und die Plattform blockiert wie bisher.
             fx_rate_usd=snap.fx_rate_usd,
+            # T1-335: Margin und Tagesergebnis. `None` laesst das Feld weg.
+            account_metrics=snap.metrics,
             # T1-114: die Antwort auf `reqOpenOrders`, die bis hierher nur als
             # Ja/Nein fuer die Schreibrechte ausgewertet und dann verworfen
             # wurde. Sie beantwortet die Frage, die der Owner an drei Tagen in

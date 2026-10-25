@@ -952,3 +952,40 @@ def test_heartbeat_omits_open_orders_when_not_collected() -> None:
     )
     assert rec2.body["openOrders"] == []
     assert rec2.body["openOrdersTruncated"] is False
+
+
+def test_heartbeat_carries_account_metrics() -> None:
+    """T1-335 — Margin und Tagesergebnis reisen als `accountMetrics`."""
+    expected = FIXTURES["heartbeatWithAccountMetrics"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+        account=snap["accountId"],
+        account_metrics=dict(snap["accountMetrics"]),
+    )
+    assert rec.body == expected
+    # Fehlt ein Wert, fehlt das Feld — keine 0.
+    assert "realizedPnl" not in rec.body["accountSnapshot"]["accountMetrics"]
+
+
+@pytest.mark.parametrize("metrics", [None, {}])
+def test_heartbeat_omits_empty_account_metrics(metrics: Any) -> None:
+    """Ohne Werte kein Objekt: so sieht der Koerper aus wie vor T1-335."""
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=1.0,
+        equity=2.0,
+        currency="USD",
+        positions=[],
+        gateway_status="connected",
+        account_metrics=metrics,
+    )
+    assert "accountMetrics" not in rec.body["accountSnapshot"]

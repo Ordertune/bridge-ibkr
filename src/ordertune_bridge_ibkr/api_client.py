@@ -301,6 +301,7 @@ class OrdertuneApiClient:
         export_status: dict[str, Any] | None = None,
         fx_rate_usd: float | None = None,
         managed_accounts: list[str] | None = None,
+        account_metrics: dict[str, float] | None = None,
     ) -> None:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -366,6 +367,16 @@ class OrdertuneApiClient:
         # wird. Deshalb geht die Plattform zuerst live.
         if managed_accounts is not None:
             snapshot["managedAccounts"] = list(managed_accounts)
+        # T1-335 — Margin und Tagesergebnis fuer die Portfolio-Seite.
+        #
+        # Nur die Felder, die IBKR geliefert hat; ein leeres Objekt wird gar
+        # nicht erst gesendet. Setzt eine Plattform ab T1-335 voraus, denn der
+        # Koerper wird dort `.strict()` geprueft und eine aeltere antwortet mit
+        # 422. Deshalb geht die Plattform zuerst live.
+        if account_metrics:
+            snapshot["accountMetrics"] = {
+                k: float(v) for k, v in account_metrics.items()
+            }
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 

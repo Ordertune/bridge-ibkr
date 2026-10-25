@@ -57,9 +57,17 @@
     "Koerper — deshalb steht sie in keiner Fixture hier. Geprueft wird sie auf",
     "beiden Seiten eigens: Python in tests/test_t1_277_instanz.py (Kopfzeile auf",
     "JEDER Anfrage), t1 in scripts/verify-t1-277-*.ts (Form, und dass ihr Fehlen",
-    "nie abweist)."
+    "nie abweist).",
+    "",
+    "T1-335 — NICHT brechend fuer die Plattform, aber nur gegen t1 ab T1-335:",
+    "accountMetrics kommt als optionales Objekt am Kontoschnappschuss hinzu.",
+    "Es traegt Margin (InitMarginReq, MaintMarginReq, ExcessLiquidity,",
+    "AvailableFunds, BuyingPower, GrossPositionValue, Cushion) und das",
+    "Tagesergebnis aus reqPnL, alles in der Kontowaehrung. Nur gelieferte",
+    "Felder reisen mit, ein leeres Objekt wird nicht gesendet. Weil der Koerper",
+    "strikt geprueft wird, geht die Plattform zuerst live."
   ],
-  "contractVersion": "t1-276",
+  "contractVersion": "t1-335",
   "bridgeVersion": "0.34.0",
   "handshake": {
     "method": "POST",
@@ -349,6 +357,33 @@
         "currency": "EUR",
         "positions": [],
         "fxRateUsd": 1.1367351420759786
+      }
+    }
+  },
+  "heartbeatWithAccountMetrics": {
+    "_comment": "T1-335 — Margin und Tagesergebnis fuer die Portfolio-Seite, in der Kontowaehrung (hier EUR). realizedPnl fehlt, weil IBKR fuer heute noch nan meldet: ein fehlender Wert fehlt, statt als 0 zu erscheinen. Cushion ist ein Anteil (0.42 = 42 Prozent).",
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.34.0",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 22300.0,
+        "equity": 90372.29,
+        "currency": "EUR",
+        "positions": [],
+        "accountId": "U23076419",
+        "accountMetrics": {
+          "initMargin": 31250.5,
+          "maintMargin": 28410.0,
+          "excessLiquidity": 61962.29,
+          "availableFunds": 59121.79,
+          "buyingPower": 236487.16,
+          "grossPositionValue": 68072.29,
+          "cushion": 0.42,
+          "dailyPnl": -412.37,
+          "unrealizedPnl": 1834.9
+        }
       }
     }
   },
