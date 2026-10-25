@@ -68,12 +68,12 @@
     "strikt geprueft wird, geht die Plattform zuerst live."
   ],
   "contractVersion": "t1-335",
-  "bridgeVersion": "0.34.0",
+  "bridgeVersion": "0.35.0",
   "handshake": {
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -86,7 +86,7 @@
     "method": "POST",
     "path": "/api/bridge/v1/handshake",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "capabilities": {
         "supportsFractionalShares": false,
         "fractionalQtyPrecision": 0,
@@ -104,7 +104,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -134,7 +134,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -169,7 +169,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -212,7 +212,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -239,7 +239,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -286,7 +286,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
@@ -334,7 +334,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -349,7 +349,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -365,7 +365,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 22300.0,
@@ -392,7 +392,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 0.0,
@@ -406,7 +406,7 @@
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
     "body": {
-      "bridgeVersion": "0.34.0",
+      "bridgeVersion": "0.35.0",
       "gatewayStatus": "ok",
       "accountSnapshot": {
         "cash": 24150.5,
