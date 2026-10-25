@@ -34,6 +34,8 @@ import hmac
 import json
 import logging
 import secrets
+import select
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -248,8 +250,16 @@ class _Handler(BaseHTTPRequestHandler):
 
         letzte_version = -1
         letztes_lebenszeichen = time.monotonic()
+        # Zaehlt die offenen Fenster. Das Tray-Symbol liest daraus, wann das
+        # letzte geschlossen wurde, und sagt dann einmal, dass die Bridge
+        # weiterlaeuft.
+        fenster = self.deps.get("windows")
+        if fenster is not None:
+            fenster.opened()
         try:
             while not self.stopping.is_set():
+                if self._peer_gone():
+                    return
                 state, version = self.store.get()
                 if version != letzte_version:
                     letzte_version = version
@@ -266,6 +276,46 @@ class _Handler(BaseHTTPRequestHandler):
             # Das Fenster wurde geschlossen. Kein Fehler — und vor allem kein
             # Grund, im Protokoll des Kerns aufzutauchen.
             return
+        finally:
+            if fenster is not None:
+                fenster.closed()
+
+
+    def _peer_gone(self) -> bool:
+        """Hat das Fenster die Verbindung geschlossen?
+
+        Ohne diese Pruefung faellt ein Schliessen erst beim naechsten
+        Schreiben auf — bis zu `STREAM_KEEPALIVE_S` spaeter. Fuer den Hinweis
+        im Tray ist das zu traege. Ein geschlossener Gegenpart macht den
+        Socket lesbar, und ein Lesen liefert dann nichts.
+        """
+        try:
+            lesbar, _, _ = select.select([self.connection], [], [], 0)
+            if not lesbar:
+                return False
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (OSError, ValueError):
+            return True
+
+
+class OpenWindows:
+    """Wie viele Cockpit-Fenster gerade am Ereignisstrom haengen."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count = 0
+
+    def opened(self) -> None:
+        with self._lock:
+            self._count += 1
+
+    def closed(self) -> None:
+        with self._lock:
+            self._count = max(0, self._count - 1)
+
+    def count(self) -> int:
+        with self._lock:
+            return self._count
 
 
 class _QuietServer(ThreadingHTTPServer):
@@ -317,6 +367,9 @@ class CockpitServer:
         # handelt.
         self.on_stop = on_stop
         self.token = secrets.token_urlsafe(32)
+        self.windows = OpenWindows()
+        # Das Tray-Symbol, wenn es eins gibt. Haelt `stop()` mit an.
+        self.tray: object | None = None
         self._stopping = threading.Event()
         self._httpd: _QuietServer | None = None
         self._thread: threading.Thread | None = None
@@ -342,6 +395,7 @@ class CockpitServer:
                     "diagnostics": self.diagnostics,
                     "setup": self.setup,
                     "on_stop": self.on_stop,
+                    "windows": self.windows,
                 },
             },
         )
@@ -361,6 +415,12 @@ class CockpitServer:
 
     def stop(self) -> None:
         self._stopping.set()
+        if self.tray is not None:
+            try:
+                self.tray.stop()  # type: ignore[attr-defined]
+            except Exception as exc:  # pragma: no cover - Beiwerk
+                log.debug("Tray icon did not stop cleanly: %s", exc)
+            self.tray = None
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()

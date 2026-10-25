@@ -2455,6 +2455,18 @@ def start_cockpit(
         )
         url = server.start()
         runfile.write(config.ibkr_client_id, url)
+        # Das Tray-Symbol: woran man die fensterlose Bridge erkennt, auch wenn
+        # das Fenster zu ist. Vor dem Fenster, damit es schon steht, wenn der
+        # Nutzer das Fenster gleich wieder schliesst. Ausserhalb von Windows
+        # gibt es keins.
+        from .cockpit import tray as tray_mod
+
+        server.tray = tray_mod.start_tray(
+            read_state=lambda: store.get()[0],
+            open_window=lambda: window_mod.open_window(url),
+            on_stop=_halten,
+            open_windows=server.windows.count,
+        )
         stufe = window_mod.open_window(url)
         log.info("Cockpit window: %s", stufe)
         # T1-213 — „url_only" heisst: der Kern laeuft, und der Kunde hat keinen
