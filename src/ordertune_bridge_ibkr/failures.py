@@ -32,6 +32,7 @@ Nutzertexte sind englisch, wie alle Nutzertexte des Clients.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -228,6 +229,20 @@ def classify_config_error(
 # verbunden.
 
 
+def _wo_sie_laeuft() -> tuple[str, ...]:
+    """Woran man die laufende Bridge erkennt — auf Windows am Tray-Symbol."""
+    if sys.platform == "win32":
+        return (
+            "  Nothing is wrong. The Bridge runs in the background; its icon",
+            "  sits in the notification area of the taskbar (click ^ if it",
+            "  is hidden there).",
+        )
+    return (
+        "  Nothing is wrong. The Bridge has no window of its own, so a",
+        "  second start looks like a first one.",
+    )
+
+
 def bridge_laeuft_bereits(url: str) -> Failure:
     """Die Auskunft fuer den Doppelstart. Kein Fehler, kein Verdacht.
 
@@ -241,8 +256,7 @@ def bridge_laeuft_bereits(url: str) -> Failure:
         detail=(
             "  Its window: " + url,
             "",
-            "  Nothing is wrong. The Bridge has no taskbar window of its own,",
-            "  so a second click looks like a first one.",
+            *_wo_sie_laeuft(),
         ),
         action=(
             "The running Bridge keeps working -- you do not need to do anything.",
