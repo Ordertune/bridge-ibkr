@@ -1612,7 +1612,10 @@ TERMINAL_STATES = {"filled", "cancelled", "rejected", "expired"}
 
 # Order-Typen, bei denen ein Nicht-Zustandekommen normales Marktverhalten ist
 # und kein Fehler: der Limitpreis wurde schlicht nicht erreicht.
-_LIMIT_ORDER_TYPES = {"LMT", "LOC", "MOC"}
+# T1-365: `MOC` gehoert nicht hierher. Ein MOC hat kein Limit, das verfehlt
+# werden koennte; am 2026-11-04 trug ein mitstorniertes MOC-Kind trotzdem
+# `limit_not_reached`.
+_LIMIT_ORDER_TYPES = {"LMT", "LOC"}
 
 # ── T1-88b F4: die Abbildung der IBKR-Zustaende ──────────────────────────────
 #
@@ -1778,6 +1781,13 @@ def _derive_reason_code(
         # T1-137 — zuerst das Protokoll fragen, dann erst raten.
         if trade is not None and rejection_reason(trade) is not None:
             return "rejected_by_broker"
+        # T1-365 — ein Storno, an den IBKR einen Grund gehaengt hat, ist eine
+        # Absage des Brokers. Am 2026-11-04 stand an PLTR (Breakout Hunter)
+        # `limit_not_reached`, waehrend die 202 sagte: „Order would cross
+        # related resting order." Der Verfall und der Storno von Hand tragen
+        # eine 202 mit LEEREM Grund (T1-318) und landen hier nicht.
+        if trade is not None and cancel_reason_of(trade) is not None:
+            return "rejected_by_broker"
         if order_type in _LIMIT_ORDER_TYPES and _was_ever_live(trade):
             return "limit_not_reached"
         return "expired" if mapped == "expired" else "cancelled_by_user"
@@ -1793,10 +1803,13 @@ def _was_ever_live(trade: Any) -> bool:
     if trade is None:
         return True
     entries = getattr(trade, "log", None) or []
-    return any(
-        _STATUS_MAP.get(str(getattr(e, "status", ""))) in _LIVE_STATES
-        for e in entries
-    )
+    # T1-365 — nur `Submitted` heisst „liegt an der Boerse". `PreSubmitted`
+    # heisst „IBKR hat angenommen und haelt zurueck" (z. B. ein OPG-Auftrag vor
+    # 09:30 ET, Warning 399); dort konnte kein Limit verfehlt werden.
+    return any(str(getattr(e, "status", "")) in _AT_EXCHANGE_STATES for e in entries)
+
+
+_AT_EXCHANGE_STATES = frozenset({"Submitted", "PartiallyFilled"})
 
 
 def _sum_commission(trade: Any) -> float | None:
