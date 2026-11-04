@@ -501,3 +501,37 @@ def test_storno_mit_leerem_grund_bleibt_ohne_text():
 def test_andere_codes_werden_nicht_als_grund_abgelegt():
     record_cancel_reason(3, 2104, "Market data farm connection is OK:usfarm")
     assert cancel_reason_of(make_trade("Cancelled", error_code=0)) is None
+
+
+# ── T1-365 — ein Storno mit Grund ist eine Absage, kein verfehltes Limit ─────
+
+
+def test_storno_mit_grund_heisst_rejected_by_broker() -> None:
+    """2026-11-04 PLTR: BUY LMT 173.90 OPG, PreSubmitted, dann 202 mit
+    „Order would cross related resting order." Gemeldet wurde
+    `limit_not_reached`."""
+    trade = make_trade("Cancelled", error_code=0, history=("PreSubmitted",))
+    record_cancel_reason(
+        3, 202, "Order Canceled - reason:Order would cross related resting order."
+    )
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == (
+        "rejected_by_broker"
+    )
+
+
+def test_presubmitted_ist_nicht_am_markt() -> None:
+    """Ein OPG-Auftrag vor 09:30 ET steht auf PreSubmitted (Warning 399).
+    Endet er dort ohne Grund, hat er kein Limit verfehlt."""
+    clear_cancel_reasons()
+    trade = make_trade("Cancelled", error_code=202, history=("PreSubmitted",))
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == (
+        "cancelled_by_user"
+    )
+
+
+def test_moc_traegt_nie_limit_not_reached() -> None:
+    clear_cancel_reasons()
+    trade = make_trade("Cancelled", error_code=202, history=("Submitted",))
+    assert m._derive_reason_code("cancelled", 0.0, "MOC", trade) != (
+        "limit_not_reached"
+    )
