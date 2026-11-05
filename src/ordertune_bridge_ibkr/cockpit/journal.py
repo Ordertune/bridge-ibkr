@@ -15,6 +15,7 @@ mit Ansage. `deque` mit `maxlen` wirft die aeltesten von selbst weg — der
 vollstaendige Verlauf liegt ohnehin auf der Platte, mit Tageswechsel und 30
 Tagen Aufbewahrung.
 """
+
 from __future__ import annotations
 
 import logging

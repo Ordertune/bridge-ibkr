@@ -25,6 +25,7 @@ Nach aussen gehen ISO-Zeitstempel, keine fertigen Saetze wie „vor 42 s". Das
 Alter rechnet die Flaeche selbst. Eine stehende Zeitangabe, die aussieht wie
 eine laufende, ist eine dauerhaft falsche Aussage.
 """
+
 from __future__ import annotations
 
 import threading

@@ -31,6 +31,7 @@ nichts — sie autorisiert nichts und laesst sich nicht gegen ihren Trager
 verwenden. Wer sie faelscht, faelscht eine Beobachtung, und genau deshalb ist
 sie auf der Plattform keine Durchsetzungsgrundlage.
 """
+
 from __future__ import annotations
 
 import secrets

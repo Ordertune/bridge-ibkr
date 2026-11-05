@@ -8,6 +8,7 @@ Schritt „Sign EXE". Das passiert ueber einen Cloud-HSM-Dienst; ein
 `.pfx`-Datei-Zertifikat, wie es hier bis T1-182 stand, gibt es seit dem
 CA/Browser-Forum-Beschluss vom 01.06.2023 nicht mehr zu kaufen.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -105,9 +106,9 @@ def ico_frames(ico: Path) -> list[bytes]:
     frames = []
     for i in range(count):
         entry = 6 + i * 16
-        length = int.from_bytes(raw[entry + 8:entry + 12], "little")
-        offset = int.from_bytes(raw[entry + 12:entry + 16], "little")
-        frames.append(raw[offset:offset + length])
+        length = int.from_bytes(raw[entry + 8 : entry + 12], "little")
+        offset = int.from_bytes(raw[entry + 12 : entry + 16], "little")
+        frames.append(raw[offset : offset + length])
     return frames
 
 

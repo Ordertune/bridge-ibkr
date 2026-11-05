@@ -10,6 +10,7 @@ kommt, dass die eingebetteten Bilder gueltige Symbole sind und dass der
 Server die offenen Fenster zaehlt. Auf einem Windows-Laeufer steht das Symbol
 zusaetzlich einmal wirklich.
 """
+
 from __future__ import annotations
 
 import sys
@@ -194,9 +195,10 @@ def test_the_tray_uses_the_same_stop_as_the_button() -> None:
 
 def test_there_is_no_tray_outside_windows(monkeypatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
-    assert tray.start_tray(
-        read_state=lambda: _state(), open_window=lambda: None, on_stop=lambda: None
-    ) is None
+    assert (
+        tray.start_tray(read_state=lambda: _state(), open_window=lambda: None, on_stop=lambda: None)
+        is None
+    )
 
 
 def test_the_double_start_message_points_at_the_icon(monkeypatch) -> None:

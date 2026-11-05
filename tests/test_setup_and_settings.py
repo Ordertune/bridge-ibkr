@@ -10,6 +10,7 @@ Die Zusagen, die hier tragen:
   * Fremde Aenderungen an der Datei werden nicht stillschweigend ueberschrieben.
   * Nichts wird gespeichert, solange ein Auftrag unterwegs ist (C-5).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -100,15 +101,12 @@ def test_trading_mode_is_not_offered_for_editing() -> None:
 
 
 def _actions(env, *, in_flight: bool = False):
-    return SetupActions(
-        env, store=StateStore(), orders_in_flight=lambda: in_flight
-    )
+    return SetupActions(env, store=StateStore(), orders_in_flight=lambda: in_flight)
 
 
 def test_saving_reports_that_a_restart_applies_it(env) -> None:
     a = _actions(env)
-    r = a.save({"baseline": env_file.fingerprint(env),
-                "changes": {"IBKR_CLIENT_ID": "18"}})
+    r = a.save({"baseline": env_file.fingerprint(env), "changes": {"IBKR_CLIENT_ID": "18"}})
     assert r["ok"] is True
     assert "Restart" in r["message"]
     assert env_file.parse(env.read_text("utf-8"))["IBKR_CLIENT_ID"] == "18"
@@ -124,8 +122,9 @@ def test_saving_marks_the_restart_as_pending(env) -> None:
 def test_credentials_cannot_be_typed_through_the_settings(env) -> None:
     """D9 — auch nicht ueber den Umweg des Schreibwegs."""
     a = _actions(env)
-    r = a.save({"baseline": env_file.fingerprint(env),
-                "changes": {"ORDERTUNE_BRIDGE_TOKEN": "kurz"}})
+    r = a.save(
+        {"baseline": env_file.fingerprint(env), "changes": {"ORDERTUNE_BRIDGE_TOKEN": "kurz"}}
+    )
     assert r["ok"] is False
     assert "Not editable" in r["message"]
     assert "ot_bridge_" in env.read_text("utf-8"), "Die Datei wurde trotzdem angefasst."
@@ -245,23 +244,24 @@ def test_a_packed_exe_without_a_console_still_opens_the_assistant(monkeypatch) -
 
 def test_the_assistant_does_not_run_headless(monkeypatch) -> None:
     monkeypatch.setattr(console, "is_frozen", lambda: True)
-    from ordertune_bridge_ibkr.failures import Failure
-
     from pathlib import Path
 
-    assert m.run_setup_cockpit(
-        Failure(code="env_missing", headline="x"),
-        Path("bridge.env"),
-        ["--headless"],
-    ) is False
+    from ordertune_bridge_ibkr.failures import Failure
+
+    assert (
+        m.run_setup_cockpit(
+            Failure(code="env_missing", headline="x"),
+            Path("bridge.env"),
+            ["--headless"],
+        )
+        is False
+    )
 
 
 def test_the_port_check_names_the_answering_port_instead(monkeypatch) -> None:
     from ordertune_bridge_ibkr import port_probe
 
-    monkeypatch.setattr(
-        port_probe, "port_answers", lambda h, p, timeout=0.0: p == 4002
-    )
+    monkeypatch.setattr(port_probe, "port_answers", lambda h, p, timeout=0.0: p == 4002)
     r = setup_mod.check_socket("127.0.0.1", 7497)
     assert r["ok"] is False
     assert "4002" in r["message"]
@@ -338,9 +338,7 @@ class _MitschreibenderClient:
         return _Antwort()
 
     def get(self, url, headers=None):
-        type(self).letzte.update(
-            {"method": "GET", "url": url, "headers": headers or {}}
-        )
+        type(self).letzte.update({"method": "GET", "url": url, "headers": headers or {}})
         return _Antwort()
 
 

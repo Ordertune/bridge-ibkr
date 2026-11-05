@@ -20,6 +20,7 @@ die Auswahl — die Stelle, an der ein Fehler doppelten Bestand erzeugen wuerde:
      Unterscheidbar allein an der `execId` des Berichts.
   3. Die Richtung wird nie geraten.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -102,9 +103,7 @@ def test_everything_without_our_mark_is_foreign(ref: str) -> None:
 
 
 def test_the_measured_buy_becomes_a_complete_body() -> None:
-    bodies = ee.external_execution_bodies(
-        [make_fill()], {"1433603962": "MKT"}, set()
-    )
+    bodies = ee.external_execution_bodies([make_fill()], {"1433603962": "MKT"}, set())
 
     assert bodies == [
         {
@@ -159,9 +158,7 @@ def test_a_missing_commission_is_omitted_not_zero() -> None:
     meldet, behauptet, es sei keine Gebuehr angefallen. Die Plattform schreibt
     ohne das Feld NULL — unbekannt statt null.
     """
-    body = ee.external_execution_bodies(
-        [make_fill(commission=None)], {}, set()
-    )[0]
+    body = ee.external_execution_bodies([make_fill(commission=None)], {}, set())[0]
 
     assert "commissionUsd" not in body
 
@@ -171,9 +168,7 @@ def test_a_commission_of_zero_is_reported_when_it_is_real() -> None:
 
     Unterschieden wird an der `execId` des Berichts, nicht am Betrag.
     """
-    body = ee.external_execution_bodies(
-        [make_fill(commission=0.0)], {}, set()
-    )[0]
+    body = ee.external_execution_bodies([make_fill(commission=0.0)], {}, set())[0]
 
     assert body["commissionUsd"] == 0.0
 
@@ -183,9 +178,7 @@ def test_a_commission_of_zero_is_reported_when_it_is_real() -> None:
 
 def test_the_order_type_comes_from_the_order_via_perm_id() -> None:
     """Die Ausfuehrung traegt ihn nicht — IBKR fuehrt ihn am Auftrag."""
-    trades = [
-        SimpleNamespace(order=SimpleNamespace(permId=1433603962, orderType="LMT"))
-    ]
+    trades = [SimpleNamespace(order=SimpleNamespace(permId=1433603962, orderType="LMT"))]
     typen = ee.order_types_by_perm_id(trades)
     body = ee.external_execution_bodies([make_fill()], typen, set())[0]
 
@@ -216,9 +209,7 @@ def test_what_was_already_reported_is_not_sent_again() -> None:
 
 def test_an_unknown_side_is_not_guessed() -> None:
     """Die Richtung eines Handels zu raten ist das Einzige, was hier verboten ist."""
-    assert ee.external_execution_bodies(
-        [make_fill(side="XYZ")], {}, set()
-    ) == []
+    assert ee.external_execution_bodies([make_fill(side="XYZ")], {}, set()) == []
 
 
 @pytest.mark.parametrize(

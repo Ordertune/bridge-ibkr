@@ -22,6 +22,7 @@ sichtbar gewesen.
 **Fremde Aenderungen werden erkannt.** Wer die Datei nebenher im Editor
 bearbeitet, soll sie nicht stillschweigend ueberschrieben bekommen.
 """
+
 from __future__ import annotations
 
 import os

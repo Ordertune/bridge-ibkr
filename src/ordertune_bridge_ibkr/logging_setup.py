@@ -13,6 +13,7 @@ Die **Datei** wird in jedem Fall geschrieben. Sie ist seit T1-213 der Ort, an
 dem der Owner die Ausgabe der Sonde nachliest, wenn er die Bridge ohne
 `--console` gestartet hat.
 """
+
 from __future__ import annotations
 
 import logging

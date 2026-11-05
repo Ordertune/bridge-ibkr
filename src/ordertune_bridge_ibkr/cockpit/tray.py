@@ -34,6 +34,7 @@ IBKR-Verbindung noch den Server an.
 
 Das Symbol ist Beiwerk. Jeder Fehler kostet das Symbol, nie den Handel.
 """
+
 from __future__ import annotations
 
 import base64
@@ -41,8 +42,9 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -145,9 +147,9 @@ def ico_frames(data: bytes) -> list[tuple[int, bytes]]:
     for i in range(count):
         entry = 6 + i * 16
         size = data[entry] or 256
-        length = int.from_bytes(data[entry + 8:entry + 12], "little")
-        offset = int.from_bytes(data[entry + 12:entry + 16], "little")
-        frames.append((size, data[offset:offset + length]))
+        length = int.from_bytes(data[entry + 8 : entry + 12], "little")
+        offset = int.from_bytes(data[entry + 12 : entry + 16], "little")
+        frames.append((size, data[offset : offset + length]))
     return frames
 
 
@@ -263,38 +265,93 @@ def _win32() -> Any:
 
     # Eine Liste, kein dict: ctypes-Funktionszeiger sind nicht hashbar.
     sig = [
-        (user32.DefWindowProcW, LRESULT, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
+        (
+            user32.DefWindowProcW,
+            LRESULT,
+            [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM],
+        ),
         (user32.RegisterClassExW, wintypes.ATOM, [ctypes.POINTER(WNDCLASSEXW)]),
-        (user32.CreateWindowExW, wintypes.HWND, [
-            wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-            wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
-        ]),
+        (
+            user32.CreateWindowExW,
+            wintypes.HWND,
+            [
+                wintypes.DWORD,
+                wintypes.LPCWSTR,
+                wintypes.LPCWSTR,
+                wintypes.DWORD,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.HWND,
+                wintypes.HMENU,
+                wintypes.HINSTANCE,
+                wintypes.LPVOID,
+            ],
+        ),
         (user32.DestroyWindow, wintypes.BOOL, [wintypes.HWND]),
-        (user32.GetMessageW, wintypes.BOOL, [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]),
+        (
+            user32.GetMessageW,
+            wintypes.BOOL,
+            [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT],
+        ),
         (user32.TranslateMessage, wintypes.BOOL, [ctypes.POINTER(wintypes.MSG)]),
         (user32.DispatchMessageW, LRESULT, [ctypes.POINTER(wintypes.MSG)]),
-        (user32.PostMessageW, wintypes.BOOL, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
+        (
+            user32.PostMessageW,
+            wintypes.BOOL,
+            [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM],
+        ),
         (user32.PostQuitMessage, None, [ctypes.c_int]),
         (user32.RegisterWindowMessageW, wintypes.UINT, [wintypes.LPCWSTR]),
-        (user32.SetTimer, ctypes.c_size_t, [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID]),
+        (
+            user32.SetTimer,
+            ctypes.c_size_t,
+            [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID],
+        ),
         (user32.KillTimer, wintypes.BOOL, [wintypes.HWND, ctypes.c_size_t]),
         (user32.CreatePopupMenu, wintypes.HMENU, []),
-        (user32.AppendMenuW, wintypes.BOOL, [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]),
-        (user32.TrackPopupMenu, wintypes.BOOL, [
-            wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-            wintypes.HWND, wintypes.LPVOID,
-        ]),
+        (
+            user32.AppendMenuW,
+            wintypes.BOOL,
+            [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR],
+        ),
+        (
+            user32.TrackPopupMenu,
+            wintypes.BOOL,
+            [
+                wintypes.HMENU,
+                wintypes.UINT,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.HWND,
+                wintypes.LPVOID,
+            ],
+        ),
         (user32.DestroyMenu, wintypes.BOOL, [wintypes.HMENU]),
         (user32.GetCursorPos, wintypes.BOOL, [ctypes.POINTER(POINT)]),
         (user32.SetForegroundWindow, wintypes.BOOL, [wintypes.HWND]),
         (user32.GetSystemMetrics, ctypes.c_int, [ctypes.c_int]),
-        (user32.CreateIconFromResourceEx, wintypes.HICON, [
-            ctypes.c_char_p, wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
-            ctypes.c_int, ctypes.c_int, wintypes.UINT,
-        ]),
+        (
+            user32.CreateIconFromResourceEx,
+            wintypes.HICON,
+            [
+                ctypes.c_char_p,
+                wintypes.DWORD,
+                wintypes.BOOL,
+                wintypes.DWORD,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ],
+        ),
         (user32.DestroyIcon, wintypes.BOOL, [wintypes.HICON]),
-        (shell32.Shell_NotifyIconW, wintypes.BOOL, [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]),
+        (
+            shell32.Shell_NotifyIconW,
+            wintypes.BOOL,
+            [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)],
+        ),
         (kernel32.GetModuleHandleW, wintypes.HMODULE, [wintypes.LPCWSTR]),
     ]
     for fn, restype, argtypes in sig:
@@ -398,8 +455,18 @@ class TrayIcon:
             # echtes Fenster bekommt `TaskbarCreated` (Explorer-Neustart) und
             # kann ein Kontextmenue besitzen.
             self._hwnd = api.user32.CreateWindowExW(
-                0, _CLASS_NAME, "Ordertune Bridge", 0, 0, 0, 0, 0,
-                None, None, hinstance, None,
+                0,
+                _CLASS_NAME,
+                "Ordertune Bridge",
+                0,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                hinstance,
+                None,
             )
             if not self._hwnd:
                 raise OSError(f"CreateWindowExW failed ({api.ctypes.get_last_error()})")
@@ -475,8 +542,13 @@ class TrayIcon:
             # Ohne das schliesst das Menue nicht, wenn man daneben klickt.
             api.user32.SetForegroundWindow(self._hwnd)
             wahl = api.user32.TrackPopupMenu(
-                menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD | _TPM_NONOTIFY,
-                punkt.x, punkt.y, 0, self._hwnd, None,
+                menu,
+                _TPM_RIGHTBUTTON | _TPM_RETURNCMD | _TPM_NONOTIFY,
+                punkt.x,
+                punkt.y,
+                0,
+                self._hwnd,
+                None,
             )
             api.user32.PostMessageW(self._hwnd, _WM_NULL, 0, 0)
         finally:

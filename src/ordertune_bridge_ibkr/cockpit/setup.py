@@ -24,6 +24,7 @@ der Bridge wenige Sekunden spaeter ins Cockpit.
 Schritt 4 dagegen ist echt: der Handshake gegen die Plattform ist ein
 gewoehnlicher HTTPS-Aufruf und damit gefahrlos.
 """
+
 from __future__ import annotations
 
 import logging
@@ -146,9 +147,7 @@ def check_handshake(base_url: str, token: str, connection_id: str) -> dict[str, 
         }
 
 
-def save_settings(
-    path: Path, changes: dict[str, str], baseline: str
-) -> dict[str, Any]:
+def save_settings(path: Path, changes: dict[str, str], baseline: str) -> dict[str, Any]:
     """C-2/C-4/C-5 — schreiben, aber nur, wenn niemand dazwischengekommen ist.
 
     `baseline` ist der Abdruck der Datei, den die Flaeche beim Laden bekommen
@@ -194,9 +193,7 @@ def replace_credentials(path: Path, content: str) -> dict[str, Any]:
     """C-3 — eine frische `bridge.env` ablegen, statt Zugangsdaten zu tippen."""
     werte = env_file.parse(content)
     fehlend = [
-        k
-        for k in ("ORDERTUNE_BRIDGE_TOKEN", "ORDERTUNE_BRIDGE_CONNECTION_ID")
-        if not werte.get(k)
+        k for k in ("ORDERTUNE_BRIDGE_TOKEN", "ORDERTUNE_BRIDGE_CONNECTION_ID") if not werte.get(k)
     ]
     if fehlend:
         return {

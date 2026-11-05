@@ -25,6 +25,7 @@ Zwei Dinge, beide ohne TWS:
    ehrlichste Antwort wäre dann „weiß nicht", was für einen Nutzer mit
    Echtgeld unbrauchbar ist.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -74,7 +75,10 @@ class FakeIbkr:
 
 
 def test_the_order_ref_carries_the_dispatch_id() -> None:
-    assert m.dispatch_id_from_order_ref("ot-6351623c-8cef-46fe-8abf-a7da046fc619") == "6351623c-8cef-46fe-8abf-a7da046fc619"
+    assert (
+        m.dispatch_id_from_order_ref("ot-6351623c-8cef-46fe-8abf-a7da046fc619")
+        == "6351623c-8cef-46fe-8abf-a7da046fc619"
+    )
 
 
 @pytest.mark.parametrize("ref", [None, "", "abc-123", "ot-", "ot-   ", "xy-abc"])
@@ -98,12 +102,20 @@ def test_the_mapping_survives_a_restart() -> None:
     weder stornierbar noch meldbar.
     """
     dispatch_id_map: dict[int, str] = {}
-    ibkr = FakeIbkr([make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3), make_trade("edf40f88-85ec-4106-803d-71d67c07afa1", 4)])
+    ibkr = FakeIbkr(
+        [
+            make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3),
+            make_trade("edf40f88-85ec-4106-803d-71d67c07afa1", 4),
+        ]
+    )
 
     anzahl = m.rebuild_dispatch_map(ibkr, dispatch_id_map)
 
     assert anzahl == 2
-    assert dispatch_id_map == {3: "657be283-ed36-426e-8d9f-f0bf708f3881", 4: "edf40f88-85ec-4106-803d-71d67c07afa1"}
+    assert dispatch_id_map == {
+        3: "657be283-ed36-426e-8d9f-f0bf708f3881",
+        4: "edf40f88-85ec-4106-803d-71d67c07afa1",
+    }
     assert m.trade_for_dispatch("657be283-ed36-426e-8d9f-f0bf708f3881") is not None
     assert m.trade_for_dispatch("edf40f88-85ec-4106-803d-71d67c07afa1") is not None
 
@@ -156,7 +168,11 @@ def test_a_cancel_is_sent_only_once() -> None:
     Broker bestaetigt hat. Ohne diese Merkung ginge alle fuenf Sekunden ein
     weiterer raus."""
     dispatch_id_map: dict[int, str] = {}
-    m.register_trade(dispatch_id_map, "657be283-ed36-426e-8d9f-f0bf708f3881", make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3))
+    m.register_trade(
+        dispatch_id_map,
+        "657be283-ed36-426e-8d9f-f0bf708f3881",
+        make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3),
+    )
     ibkr = FakeIbkr()
 
     for _ in range(5):
@@ -169,7 +185,11 @@ def test_a_failed_cancel_is_retried() -> None:
     """Gescheitert ist nicht erledigt — sonst bliebe der Auftrag stehen und
     niemand versuchte es noch einmal."""
     dispatch_id_map: dict[int, str] = {}
-    m.register_trade(dispatch_id_map, "657be283-ed36-426e-8d9f-f0bf708f3881", make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3))
+    m.register_trade(
+        dispatch_id_map,
+        "657be283-ed36-426e-8d9f-f0bf708f3881",
+        make_trade("657be283-ed36-426e-8d9f-f0bf708f3881", 3),
+    )
 
     m._handle_cancel(FakeIbkr(fail=True), "657be283-ed36-426e-8d9f-f0bf708f3881")
     assert "657be283-ed36-426e-8d9f-f0bf708f3881" not in m._CANCEL_SENT
@@ -200,12 +220,8 @@ def test_a_broker_confirmed_cancellation_is_what_gets_reported() -> None:
     IBKR quittiert eine echte Stornierung mit Code 202. Erst die laeuft durch
     und wird gemeldet — dieselbe Pruefung, die den Phantom-Storno abfaengt.
     """
-    storniert = SimpleNamespace(
-        log=[SimpleNamespace(status="Cancelled", errorCode=202)]
-    )
+    storniert = SimpleNamespace(log=[SimpleNamespace(status="Cancelled", errorCode=202)])
     assert m.cancel_is_genuine(storniert) is True
 
-    phantom = SimpleNamespace(
-        log=[SimpleNamespace(status="Cancelled", errorCode=10349)]
-    )
+    phantom = SimpleNamespace(log=[SimpleNamespace(status="Cancelled", errorCode=10349)])
     assert m.cancel_is_genuine(phantom) is False

@@ -22,11 +22,13 @@ Gespeichert wird nicht, solange ein Auftrag unquittiert unterwegs ist. Eine
 geaenderte Client-ID oder ein geaenderter Port waehrend eines lebenden
 Auftrags heisst beim naechsten Start: die Verbindung findet ihn nicht mehr.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import setup as setup_mod
 
@@ -69,9 +71,7 @@ class SetupActions:
 
     def verify(self, _body: dict[str, Any]) -> dict[str, Any]:
         werte = setup_mod.env_file.parse(
-            self._env_path.read_text(encoding="utf-8")
-            if self._env_path.exists()
-            else ""
+            self._env_path.read_text(encoding="utf-8") if self._env_path.exists() else ""
         )
         token = werte.get("ORDERTUNE_BRIDGE_TOKEN", "")
         connection = werte.get("ORDERTUNE_BRIDGE_CONNECTION_ID", "")
@@ -152,11 +152,7 @@ class SetupActions:
             werte = env_file.parse(self._env_path.read_text(encoding="utf-8"))
         except OSError:
             werte = {}
-        return (
-            werte.get("ORDERTUNE_API_BASE")
-            or self._api_base
-            or "https://t1.ordertune.com"
-        )
+        return werte.get("ORDERTUNE_API_BASE") or self._api_base or "https://t1.ordertune.com"
 
     # ── Schreiben ────────────────────────────────────────────────────────
 
@@ -173,17 +169,13 @@ class SetupActions:
         changes = {str(k): str(v) for k, v in (body.get("changes") or {}).items()}
         if not changes:
             return {"ok": False, "message": "Nothing to change."}
-        ergebnis = setup_mod.save_settings(
-            self._env_path, changes, str(body.get("baseline") or "")
-        )
+        ergebnis = setup_mod.save_settings(self._env_path, changes, str(body.get("baseline") or ""))
         if ergebnis.get("ok"):
             self._mark_restart_pending()
         return ergebnis
 
     def replace(self, body: dict[str, Any]) -> dict[str, Any]:
-        ergebnis = setup_mod.replace_credentials(
-            self._env_path, str(body.get("content") or "")
-        )
+        ergebnis = setup_mod.replace_credentials(self._env_path, str(body.get("content") or ""))
         if ergebnis.get("ok"):
             self._mark_restart_pending()
         return ergebnis

@@ -10,6 +10,7 @@ Schalters, die Zuordnung eigener gegen fremde Auftraege, die Angaben, an denen
 T1-94 haengt, und die Zusage, dass ein ausgefallener Abruf die anderen nicht
 mitreisst.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,7 +21,6 @@ import pytest
 
 from ordertune_bridge_ibkr import main as m
 from ordertune_bridge_ibkr import probe
-
 
 # ── Der Schalter ─────────────────────────────────────────────────────────────
 
@@ -63,8 +63,15 @@ def _fremder_auftrag() -> SimpleNamespace:
     return SimpleNamespace(
         contract=SimpleNamespace(symbol="TXN"),
         order=SimpleNamespace(
-            action="BUY", orderType="MKT", totalQuantity=1.0, lmtPrice=0.0,
-            tif="DAY", orderId=61, clientId=0, permId=421610881, orderRef="",
+            action="BUY",
+            orderType="MKT",
+            totalQuantity=1.0,
+            lmtPrice=0.0,
+            tif="DAY",
+            orderId=61,
+            clientId=0,
+            permId=421610881,
+            orderRef="",
         ),
         orderStatus=SimpleNamespace(status="Cancelled", filled=0.0),
     )
@@ -90,10 +97,15 @@ def _fremde_ausfuehrung(commission: float = 1.9) -> SimpleNamespace:
     return SimpleNamespace(
         contract=SimpleNamespace(symbol="FTNT"),
         execution=SimpleNamespace(
-            side="BOT", shares=1.0, price=157.21,
+            side="BOT",
+            shares=1.0,
+            price=157.21,
             time="2026-08-17 13:49:53+00:00",
-            orderId=0, clientId=0, permId=1433603962,
-            execId="00015963.6a82ffde.01.01", orderRef="",
+            orderId=0,
+            clientId=0,
+            permId=1433603962,
+            execId="00015963.6a82ffde.01.01",
+            orderRef="",
         ),
         commissionReport=SimpleNamespace(commission=commission),
     )
@@ -228,9 +240,7 @@ def test_the_probe_never_sends_anything() -> None:
 def _fremder_trade_wie_gemessen() -> SimpleNamespace:
     return SimpleNamespace(
         order=SimpleNamespace(orderId=0, clientId=0, permId=1960849477, orderRef=""),
-        orderStatus=SimpleNamespace(
-            status="PendingCancel", filled=0.0, avgFillPrice=0.0
-        ),
+        orderStatus=SimpleNamespace(status="PendingCancel", filled=0.0, avgFillPrice=0.0),
         log=[SimpleNamespace(status="PendingCancel", message="", errorCode=0)],
         fills=[],
     )

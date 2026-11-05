@@ -34,6 +34,7 @@ Sie fasst die IBKR-Verbindung nicht an und wendet nichts an. Sie schreibt
 `bridge.env` und sagt, dass ein Neustart faellig ist — dieselbe Richtungsregel
 wie im ganzen Assistenten.
 """
+
 from __future__ import annotations
 
 import base64

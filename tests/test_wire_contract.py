@@ -14,6 +14,7 @@ stillschweigend verworfen, weil die Feldnamen auseinanderliefen und
 serverseitig alles optional war. Beides waere hier in der ersten Sekunde
 aufgefallen.
 """
+
 from __future__ import annotations
 
 import json
@@ -111,12 +112,16 @@ def _mirror_versions() -> list[str]:
     nachbar = _MIRROR.parents[2]
     zweige = subprocess.run(
         ["git", "branch", "--format=%(refname:short)"],
-        cwd=nachbar, capture_output=True, text=True,
+        cwd=nachbar,
+        capture_output=True,
+        text=True,
     ).stdout.split()
     for ref in zweige:
         gezeigt = subprocess.run(
             ["git", "show", f"{ref}:scripts/fixtures/bridge-wire-fixtures.json"],
-            cwd=nachbar, capture_output=True, text=True,
+            cwd=nachbar,
+            capture_output=True,
+            text=True,
         )
         if gezeigt.returncode == 0 and gezeigt.stdout.strip():
             fassungen.append(gezeigt.stdout)
@@ -408,9 +413,7 @@ def test_contract_currency_reaches_the_wire_uppercased() -> None:
     assert rec.body["accountSnapshot"]["positions"][0]["lastPriceCurrency"] == "USD"
 
 
-@pytest.mark.parametrize(
-    "key", ["heartbeatForeignCurrency", "heartbeatUnknownCurrency"]
-)
+@pytest.mark.parametrize("key", ["heartbeatForeignCurrency", "heartbeatUnknownCurrency"])
 def test_heartbeat_carries_the_account_currency(key: str) -> None:
     """T1-85 — Betrag und Einheit reisen zusammen.
 
@@ -760,7 +763,7 @@ def test_no_snake_case_keys_on_the_wire(key: str) -> None:
 # ─── T1-107: die Kontokennung auf der Leitung ────────────────────────────────
 
 
-def _heartbeat_snapshot(rec: "_Recorder") -> dict:
+def _heartbeat_snapshot(rec: _Recorder) -> dict:
     """Der `accountSnapshot` aus dem aufgezeichneten Heartbeat."""
     return rec.body["accountSnapshot"]
 
@@ -777,9 +780,7 @@ def test_account_id_travels_on_both_levels() -> None:
         cash=1.0,
         equity=2.0,
         currency="USD",
-        positions=[
-            {"symbol": "MU", "qty": 1.0, "avg_cost": 955.0, "account": "U23076419"}
-        ],
+        positions=[{"symbol": "MU", "qty": 1.0, "avg_cost": 955.0, "account": "U23076419"}],
         gateway_status="connected",
         account="U23076419",
     )

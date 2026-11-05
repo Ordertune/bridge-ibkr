@@ -15,6 +15,7 @@ will. Der Kern bleibt kopflos und autoritativ; dieses Paket liest nur.
 Ohne `--headless` startet es mit dem Kern. Ein Fehler hier haelt den Handel
 nie auf: das Cockpit ist Beiwerk, die Schleife ist es nicht.
 """
+
 from __future__ import annotations
 
 from .actions import SetupActions

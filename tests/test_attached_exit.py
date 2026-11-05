@@ -79,8 +79,14 @@ def test_parent_is_staged_and_child_transmits():
     uebertraegt TWS beide zusammen. Ginge der Parent sofort scharf hinaus und
     fuellte, bevor das Kind da ist, lehnte IBKR das Kind ab."""
     eltern = translate_intent(
-        {"symbol": "AMD", "side": "buy", "orderType": "day_limit",
-         "qty": 5, "lmtPrice": 438.6, "timeInForce": "GTD"}
+        {
+            "symbol": "AMD",
+            "side": "buy",
+            "orderType": "day_limit",
+            "qty": 5,
+            "lmtPrice": 438.6,
+            "timeInForce": "GTD",
+        }
     )
     kind = translate_intent({**_kind(), "symbol": "AMD"})
     apply_bracket_transmit_flags([eltern, kind])
@@ -98,9 +104,7 @@ def test_child_keeps_its_own_order_type_and_side():
 def test_child_of_a_short_strategy_is_a_buy():
     """Intraday Shield ist short: dort ist der Einstieg ein Verkauf und der
     Ausstieg ein Kauf. Die Bauform darf `SELL` nirgends voraussetzen."""
-    kind = translate_intent(
-        {**_kind(), "symbol": "AMD", "side": "buy", "orderType": "moc"}
-    )
+    kind = translate_intent({**_kind(), "symbol": "AMD", "side": "buy", "orderType": "moc"})
     assert kind.action == "BUY"
     assert kind.orderType == "MOC"
 
@@ -210,8 +214,7 @@ def test_the_deadline_survives_the_bracket_pairing():
     das Paaren einen bereits gesetzten Wert zerstoert.
     """
     eltern = translate_intent(
-        {"symbol": "MRVL", "side": "buy", "orderType": "day_limit",
-         "qty": 2, "lmtPrice": 196.0}
+        {"symbol": "MRVL", "side": "buy", "orderType": "day_limit", "qty": 2, "lmtPrice": 196.0}
     )
     kind = translate_intent(
         {

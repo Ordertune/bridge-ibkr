@@ -27,6 +27,7 @@ jedem Entwicklerrechner — und eine Zusicherung, die still uebersprungen wird,
 ist beim naechsten Mal wieder nicht da. Die zweite Pruefung braucht nichts und
 faengt genau die Fehlerklasse von oben.
 """
+
 from __future__ import annotations
 
 import re
@@ -38,13 +39,7 @@ import pytest
 
 from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
 
-QUELLE = (
-    Path(__file__).parent.parent
-    / "src"
-    / "ordertune_bridge_ibkr"
-    / "cockpit"
-    / "page.py"
-)
+QUELLE = Path(__file__).parent.parent / "src" / "ordertune_bridge_ibkr" / "cockpit" / "page.py"
 
 
 def _skript() -> str:
@@ -60,8 +55,7 @@ def test_ein_einzelnes_backslash_n_im_quelltext_ist_immer_ein_fehler() -> None:
     """
     quelltext = QUELLE.read_text(encoding="utf-8")
     treffer = [
-        quelltext[: m.start()].count("\n") + 1
-        for m in re.finditer(r"(?<!\\)\\n", quelltext)
+        quelltext[: m.start()].count("\n") + 1 for m in re.finditer(r"(?<!\\)\\n", quelltext)
     ]
     assert not treffer, (
         "In page.py steht ein einzelnes \\n statt \\\\n, in Zeile(n) "
@@ -80,11 +74,7 @@ def test_kein_string_bricht_ueber_die_zeile() -> None:
     verdaechtig = []
     for nummer, zeile in enumerate(_skript().split("\n"), 1):
         ohne_kommentar = zeile.split("//", 1)[0] if "://" not in zeile else zeile
-        sauber = (
-            ohne_kommentar.replace('\\"', "")
-            .replace("\\'", "")
-            .replace("\\\\", "")
-        )
+        sauber = ohne_kommentar.replace('\\"', "").replace("\\'", "").replace("\\\\", "")
         # Ein Zeichenklassen-Literal wie /[&<>"]/ traegt ein einzelnes
         # Anfuehrungszeichen voellig zu Recht.
         if "/[" in sauber or "':\"" in sauber:
@@ -104,9 +94,7 @@ def test_das_skript_parst(tmp_path: Path) -> None:
     datei = tmp_path / "cockpit.js"
     datei.write_text(_skript(), encoding="utf-8")
 
-    ergebnis = subprocess.run(
-        ["node", "--check", str(datei)], capture_output=True, text=True
-    )
+    ergebnis = subprocess.run(["node", "--check", str(datei)], capture_output=True, text=True)
     assert ergebnis.returncode == 0, (
         "Das Cockpit-Skript hat einen Syntaxfehler. Die Flaeche zeigt dann "
         "nichts an und reagiert auf keinen Klick:\n" + ergebnis.stderr
@@ -132,30 +120,28 @@ def _verdict(zustand: dict, tmp_path: Path) -> list:
 
     skript = _skript()
     teile = []
-    for name in ("HEARTBEAT_STALE_S", "heartbeatStale", "exportBroken",
-                 "gatewayInstead", "verdict"):
+    for name in (
+        "HEARTBEAT_STALE_S",
+        "heartbeatStale",
+        "exportBroken",
+        "gatewayInstead",
+        "verdict",
+    ):
         if name == "HEARTBEAT_STALE_S":
             treffer = re.search(r"const HEARTBEAT_STALE_S = \d+;", skript)
             assert treffer, "HEARTBEAT_STALE_S nicht gefunden"
             teile.append(treffer.group(0))
             continue
-        treffer = re.search(
-            r"^function " + name + r"\(.*?^\}", skript, re.S | re.M
-        )
+        treffer = re.search(r"^function " + name + r"\(.*?^\}", skript, re.S | re.M)
         assert treffer, f"{name}() nicht gefunden"
         teile.append(treffer.group(0))
 
     datei = tmp_path / "verdict.js"
     datei.write_text(
-        "\n".join(teile)
-        + "\nconsole.log(JSON.stringify(verdict("
-        + json.dumps(zustand)
-        + ")));\n",
+        "\n".join(teile) + "\nconsole.log(JSON.stringify(verdict(" + json.dumps(zustand) + ")));\n",
         encoding="utf-8",
     )
-    ergebnis = subprocess.run(
-        ["node", str(datei)], capture_output=True, text=True
-    )
+    ergebnis = subprocess.run(["node", str(datei)], capture_output=True, text=True)
     assert ergebnis.returncode == 0, ergebnis.stderr
     return json.loads(ergebnis.stdout)
 

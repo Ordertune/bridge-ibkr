@@ -31,6 +31,7 @@ ausschliesslich hier an der Grenze (`_wire_position`, `heartbeat`,
 Vertragstest prüft genau diese Grenze gegen die Fixtures unter
 tests/contract/.
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,7 +93,11 @@ def _request_with_retry(
             if r.status_code >= 500 or r.status_code == 429:
                 log.warning(
                     "http %s %s -> %d (attempt %d/%d, retrying)",
-                    method, url, r.status_code, attempt + 1, MAX_RETRIES,
+                    method,
+                    url,
+                    r.status_code,
+                    attempt + 1,
+                    MAX_RETRIES,
                 )
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(RETRY_BACKOFF_S[attempt])
@@ -105,7 +110,11 @@ def _request_with_retry(
             last_exc = exc
             log.warning(
                 "http %s %s network-error (attempt %d/%d): %s",
-                method, url, attempt + 1, MAX_RETRIES, exc,
+                method,
+                url,
+                attempt + 1,
+                MAX_RETRIES,
+                exc,
             )
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_BACKOFF_S[attempt])
@@ -281,7 +290,8 @@ class OrdertuneApiClient:
         if managed_accounts is not None:
             body["managedAccounts"] = list(managed_accounts)
         r = _request_with_retry(
-            "POST", self._client,
+            "POST",
+            self._client,
             f"{self._base}/api/bridge/v1/handshake",
             json=body,
         )
@@ -374,9 +384,7 @@ class OrdertuneApiClient:
         # Koerper wird dort `.strict()` geprueft und eine aeltere antwortet mit
         # 422. Deshalb geht die Plattform zuerst live.
         if account_metrics:
-            snapshot["accountMetrics"] = {
-                k: float(v) for k, v in account_metrics.items()
-            }
+            snapshot["accountMetrics"] = {k: float(v) for k, v in account_metrics.items()}
         if capabilities is not None:
             snapshot["capabilities"] = capabilities
 
@@ -421,14 +429,16 @@ class OrdertuneApiClient:
             body["openOrdersTruncated"] = gekuerzt
 
         _request_with_retry(
-            "PUT", self._client,
+            "PUT",
+            self._client,
             f"{self._base}/api/bridge/v1/heartbeat",
             json=body,
         )
 
     def get_pending(self) -> BridgePendingResponse:
         r = _request_with_retry(
-            "GET", self._client,
+            "GET",
+            self._client,
             f"{self._base}/api/bridge/v1/orders/pending",
         )
         data = r.json()
@@ -459,7 +469,8 @@ class OrdertuneApiClient:
         entscheidet dann nichts.
         """
         r = _request_with_retry(
-            "GET", self._client,
+            "GET",
+            self._client,
             f"{self._base}/api/bridge/v1/orders/unresolved",
         )
         data = r.json()
@@ -487,7 +498,8 @@ class OrdertuneApiClient:
         if picked_at is not None:
             body["pickedAtClient"] = _wire_timestamp(picked_at)
         _request_with_retry(
-            "PUT", self._client,
+            "PUT",
+            self._client,
             f"{self._base}/api/bridge/v1/orders/{dispatch_id}/ack",
             json=body,
         )
@@ -506,7 +518,8 @@ class OrdertuneApiClient:
         und dort ohne Netz pruefbar ist.
         """
         response = _request_with_retry(
-            "POST", self._client,
+            "POST",
+            self._client,
             f"{self._base}/api/bridge/v1/executions/external",
             json=body,
         )
@@ -574,7 +587,8 @@ class OrdertuneApiClient:
         if broker_confirmed_end is not None:
             body["brokerConfirmedEnd"] = bool(broker_confirmed_end)
         _request_with_retry(
-            "PUT", self._client,
+            "PUT",
+            self._client,
             f"{self._base}/api/bridge/v1/orders/{dispatch_id}/result",
             json=body,
         )

@@ -24,6 +24,7 @@ Die Kostenbasis aus T1-78 haette dauerhaft gefehlt.
 Diese Datei nagelt beide Haelften fest: die Registrierung haengt nur noch an
 `orderStatusEvent`, und die Meldereihenfolge liefert die Gebuehr.
 """
+
 from __future__ import annotations
 
 import logging
@@ -89,9 +90,7 @@ def test_a_fill_no_longer_writes_a_traceback(
     """
     client, fake = _client_with_fake_ib()
     api = FakeApi()
-    client.subscribe_order_status_callback(
-        m._make_on_order_status(api, {42: "d-1"})
-    )
+    client.subscribe_order_status_callback(m._make_on_order_status(api, {42: "d-1"}))
 
     trade = SimpleNamespace(
         order=SimpleNamespace(orderId=42, orderType="LMT", tif="DAY"),

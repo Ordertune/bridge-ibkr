@@ -28,6 +28,7 @@ Vier Eigenschaften, und die dritte ist die, die am leisesten kaputtgeht:
    20-Sekunden-Frist der Positionsabfrage, die groesser ist als die neue
    Vorgabe und deshalb nur solange gilt, wie sie an `_run()` vorbeigeht.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -95,8 +96,7 @@ class HaengendeAbfrage:
 
     def completed_trades(self, api_only: bool = False) -> list[Any]:
         raise AssertionError(
-            "Nach einer gescheiterten Auftragsabfrage darf nicht "
-            "weitergefragt werden."
+            "Nach einer gescheiterten Auftragsabfrage darf nicht weitergefragt werden."
         )
 
     def fills(self) -> list[Any]:

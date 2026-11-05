@@ -22,6 +22,7 @@ Aufruf (Pillow wird nur hier gebraucht, nicht im Build):
 Danach `git diff --stat assets/icon.ico` — aendert sich nichts, war nichts zu
 tun.
 """
+
 from __future__ import annotations
 
 import base64
@@ -94,7 +95,7 @@ def main() -> int:
         assert count == 1, f"{size}px: {count} Rahmen statt 1"
         length = int.from_bytes(raw[14:18], "little")
         offset = int.from_bytes(raw[18:22], "little")
-        return raw[offset:offset + length]
+        return raw[offset : offset + length]
 
     # Das Quell-PNG ist RGB ohne Alpha. Die Kachel ist absichtlich deckend
     # schwarz — das Design-System kennt das Glyph nur so. Der Alphakanal kommt
@@ -107,16 +108,17 @@ def main() -> int:
     # `thumbnail`t sich die fehlenden Groessen selbst aus dem Basisbild
     # zusammen, und bei 16 px ist der Unterschied zwischen einem sauber
     # gerechneten und einem nebenbei skalierten Ring deutlich sichtbar.
-    payloads = [(n, frame_payload(src.resize((n, n), Image.LANCZOS), n))
-                for n in SIZES]
+    payloads = [(n, frame_payload(src.resize((n, n), Image.LANCZOS), n)) for n in SIZES]
 
     out = ROOT / "assets" / "icon.ico"
     out.parent.mkdir(exist_ok=True)
     out.write_bytes(write_ico(payloads))
 
     kinds = ", ".join(f"{n}{'p' if n >= PNG_FROM else 'd'}" for n in SIZES)
-    print(f"{out.relative_to(ROOT)} — {out.stat().st_size} Bytes, "
-          f"{len(SIZES)} Rahmen ({kinds}; d=DIB, p=PNG)")
+    print(
+        f"{out.relative_to(ROOT)} — {out.stat().st_size} Bytes, "
+        f"{len(SIZES)} Rahmen ({kinds}; d=DIB, p=PNG)"
+    )
     return 0
 
 
@@ -127,13 +129,15 @@ def write_ico(payloads: list[tuple[int, bytes]]) -> bytes:
     offset = len(head) + count * 16
     directory, body = b"", b""
     for size, payload in payloads:
-        directory += bytes((
-            size if size < 256 else 0,   # bWidth — 0 bedeutet 256
-            size if size < 256 else 0,   # bHeight
-            0,                           # bColorCount — 0 bei Echtfarben
-            0,                           # bReserved
-        ))
-        directory += (1).to_bytes(2, "little")   # wPlanes
+        directory += bytes(
+            (
+                size if size < 256 else 0,  # bWidth — 0 bedeutet 256
+                size if size < 256 else 0,  # bHeight
+                0,  # bColorCount — 0 bei Echtfarben
+                0,  # bReserved
+            )
+        )
+        directory += (1).to_bytes(2, "little")  # wPlanes
         directory += (32).to_bytes(2, "little")  # wBitCount
         directory += len(payload).to_bytes(4, "little")
         directory += offset.to_bytes(4, "little")

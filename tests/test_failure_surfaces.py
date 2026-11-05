@@ -35,6 +35,7 @@ Paarung aus Code UND Flaeche.
   * **Karte im laufenden Cockpit** — kein Kopplungsknopf. `action`.
   * **Assistent** (`setup_mode`) — der Knopf steht darunter. `action_paired`.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -143,7 +144,10 @@ def test_stoerungen_ausserhalb_des_assistenten_bleiben_woertlich() -> None:
     nie erreicht.
     """
     unberuehrt = {
-        "ip_mismatch", "fingerprint_mismatch", "missing_fingerprint", "rate_limited",
+        "ip_mismatch",
+        "fingerprint_mismatch",
+        "missing_fingerprint",
+        "rate_limited",
     }
     assert not (unberuehrt & failures.RENEWABLE_AUTH_CODES), (
         "einer dieser Codes oeffnet jetzt den Assistenten — dann braucht er "

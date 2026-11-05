@@ -23,6 +23,7 @@ unmoeglich.
 **Ein Vorgabewert, den niemand sieht, ist ein Vorgabewert, den niemand
 berichtigen kann.** Das ist die Regel, die hier gepruefte wird.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,6 @@ from pathlib import Path
 from ordertune_bridge_ibkr import pairing, trade_reports
 from ordertune_bridge_ibkr.cockpit import setup as setup_mod
 from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
-
 
 # ── 1) Die Vorlage schreibt die Zeile ────────────────────────────────────────
 
@@ -58,9 +58,7 @@ def test_die_vorlage_erklaert_den_leeren_dateinamen(tmp_path: Path) -> None:
     verlangen. Wer die Zeile spaeter liest, soll beides zusammen sehen.
     """
     ziel = tmp_path / "bridge.env"
-    pairing.write_credentials(
-        ziel, api_base="https://x", token="t", connection_id="c"
-    )
+    pairing.write_credentials(ziel, api_base="https://x", token="t", connection_id="c")
 
     text = ziel.read_text(encoding="utf-8")
     assert "Export Reports" in text
@@ -76,9 +74,7 @@ def test_die_geschriebene_datei_laedt_sich_selbst(tmp_path: Path) -> None:
     from ordertune_bridge_ibkr import env_file
 
     ziel = tmp_path / "bridge.env"
-    pairing.write_credentials(
-        ziel, api_base="https://x", token="t", connection_id="c"
-    )
+    pairing.write_credentials(ziel, api_base="https://x", token="t", connection_id="c")
 
     werte = env_file.parse(ziel.read_text(encoding="utf-8"))
     assert werte["ORDERTUNE_BRIDGE_TOKEN"] == "t"
@@ -105,9 +101,7 @@ def test_eine_alte_datei_bekommt_die_zeile_nachgetragen(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    pairing.write_credentials(
-        ziel, api_base="https://neu", token="neu", connection_id="neu"
-    )
+    pairing.write_credentials(ziel, api_base="https://neu", token="neu", connection_id="neu")
 
     text = ziel.read_text(encoding="utf-8")
     assert f"TWS_EXPORT_DIR={trade_reports.standard_verzeichnis()}" in text
@@ -131,9 +125,7 @@ def test_ein_selbst_gesetzter_pfad_wird_nicht_ueberschrieben(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    pairing.write_credentials(
-        ziel, api_base="https://neu", token="neu", connection_id="neu"
-    )
+    pairing.write_credentials(ziel, api_base="https://neu", token="neu", connection_id="neu")
 
     text = ziel.read_text(encoding="utf-8")
     assert "TWS_EXPORT_DIR=D:\\eigener\\Ordner" in text
@@ -197,7 +189,7 @@ def test_die_einstellungen_tragen_die_auskunft(tmp_path: Path) -> None:
 
 
 def test_der_assistent_hat_einen_schritt_fuer_die_uebergabe() -> None:
-    assert 's5dir' in PAGE_HTML
+    assert "s5dir" in PAGE_HTML
     assert "Hand the folder to TWS" in PAGE_HTML
 
 

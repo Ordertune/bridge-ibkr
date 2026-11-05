@@ -10,6 +10,7 @@ Zwei Dinge stehen hier deshalb unter Zusicherung, und beide sind Fallen:
   * Erkannt wird am **Code**, nie am lokalisierten Text.
   * 321 allein reicht nicht — der Code ist allgemein.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,8 +31,7 @@ def test_the_measured_case_is_a_verdict() -> None:
     assert ergebnis.state == wa.CONFIRMED
     assert ergebnis.blocks_orders is True
     assert ergebnis.detail == GEMESSEN_DE, (
-        "IBKRs Wortlaut gehoert an die Anzeige — er beantwortet die Frage des "
-        "Nutzers vollstaendig."
+        "IBKRs Wortlaut gehoert an die Anzeige — er beantwortet die Frage des Nutzers vollstaendig."
     )
 
 
@@ -53,8 +53,9 @@ def test_a_lone_321_does_not_raise_the_alarm() -> None:
     Antwortet der Auftragskanal, ist Schreiben erlaubt — dann darf ein
     einzelnes 321 aus anderem Anlass keinen Alarm ausloesen.
     """
-    ergebnis = wa.classify(validation_errors=["irgendein anderer Validierungsfehler"],
-                           open_orders_answered=True)
+    ergebnis = wa.classify(
+        validation_errors=["irgendein anderer Validierungsfehler"], open_orders_answered=True
+    )
     assert ergebnis.state == wa.WRITABLE
     assert ergebnis.blocks_orders is False
 
@@ -72,9 +73,7 @@ def test_the_wording_never_decides_anything(text: str) -> None:
     """Der Text ist lokalisiert. Eine Pruefung darauf funktionierte nur auf
     deutschen Installationen — und der Fehler faellt niemandem auf, weil die
     Bridge in beiden Faellen gesund aussieht."""
-    assert wa.classify(validation_errors=[text], open_orders_answered=False).state == (
-        wa.CONFIRMED
-    )
+    assert wa.classify(validation_errors=[text], open_orders_answered=False).state == (wa.CONFIRMED)
 
 
 # ── Die Verdrahtung im Client ────────────────────────────────────────────────

@@ -22,6 +22,7 @@ Aufruf (Pillow wird nur hier gebraucht, nicht im Build):
     pip install Pillow
     python tools/make_tray_icons.py
 """
+
 from __future__ import annotations
 
 import base64
@@ -42,9 +43,9 @@ SIZES = (16, 20, 24, 32, 40, 48)
 
 # Zustand -> Farbe des Punkts. `None` heisst: kein Punkt.
 STATES = {
-    "running": (0x16, 0xA3, 0x4A),    # --success
+    "running": (0x16, 0xA3, 0x4A),  # --success
     "attention": (0xD9, 0x77, 0x06),  # --warn
-    "stopping": (0x9C, 0xA3, 0xAF),   # neutral grau: es endet, nichts ist kaputt
+    "stopping": (0x9C, 0xA3, 0xAF),  # neutral grau: es endet, nichts ist kaputt
 }
 
 # Geometrie auf der 512er-Vorlage: Punkt unten rechts, mit einem Ring in der
@@ -82,7 +83,7 @@ def _frame(img, size: int) -> bytes:
     raw = buf.getvalue()
     length = int.from_bytes(raw[14:18], "little")
     offset = int.from_bytes(raw[18:22], "little")
-    return raw[offset:offset + length]
+    return raw[offset : offset + length]
 
 
 def build(preview_dir: Path | None = None) -> dict[str, bytes]:
@@ -120,7 +121,7 @@ def main() -> int:
     ]
     for state, data in icons.items():
         b64 = base64.b64encode(data).decode("ascii")
-        chunks = [b64[i:i + 76] for i in range(0, len(b64), 76)]
+        chunks = [b64[i : i + 76] for i in range(0, len(b64), 76)]
         lines.append(f"{state.upper()} = (")
         lines.extend(f'    "{chunk}"' for chunk in chunks)
         lines.append(")")

@@ -28,6 +28,7 @@ Eine Richtung, vom Server zur Seite, ohne Bibliothek, und er ueberlebt ein
 geschlossenes und wieder geoeffnetes Fenster. Geschoben wird hoechstens einmal
 je Sekunde und nur, wenn der Kern etwas geaendert hat.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -280,7 +281,6 @@ class _Handler(BaseHTTPRequestHandler):
             if fenster is not None:
                 fenster.closed()
 
-
     def _peer_gone(self) -> bool:
         """Hat das Fenster die Verbindung geschlossen?
 
@@ -342,9 +342,7 @@ class _QuietServer(ThreadingHTTPServer):
     """
 
     def handle_error(self, request, client_address) -> None:
-        log.debug(
-            "cockpit: connection from %s dropped", client_address, exc_info=True
-        )
+        log.debug("cockpit: connection from %s dropped", client_address, exc_info=True)
 
 
 class CockpitServer:

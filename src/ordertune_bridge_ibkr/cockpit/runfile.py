@@ -10,6 +10,7 @@ Die Datei ist der Grund, aus dem der Fernzugriff Nicht-Ziel bleiben kann: wer
 sie lesen kann, ist auf der Maschine bereits angemeldet und kommt damit ohnehin
 an `bridge.env` und das Protokoll.
 """
+
 from __future__ import annotations
 
 import json

@@ -30,9 +30,9 @@ nach einem gemeldeten Storno muss eine **echte Ausführung** noch durchkommen.
 Ohne sie entstünde die Position im Depot, käme nie in die Bücher, und der
 Modell-Ausstieg würde sie nie anfassen.
 """
+
 from __future__ import annotations
 
-import threading
 from types import SimpleNamespace
 
 import pytest
@@ -71,8 +71,9 @@ class FakeApi:
         return [c["status"] for c in self.calls]
 
 
-def make_trade(status: str, *, error_code=None, filled=0.0, order_id=3,
-               order_type="LMT", history=()) -> SimpleNamespace:
+def make_trade(
+    status: str, *, error_code=None, filled=0.0, order_id=3, order_type="LMT", history=()
+) -> SimpleNamespace:
     """Ein Auftrag, wie ib_insync ihn durchreicht.
 
     `history` sind die Zustände, die der Auftrag vorher hatte — ib_insync
@@ -178,9 +179,7 @@ def test_a_still_cancelled_order_is_reported_after_the_wait() -> None:
 def test_the_wait_is_not_cut_short() -> None:
     """Vor Ablauf der Frist wird nichts aufgeloest."""
     api = FakeApi()
-    m._make_on_order_status(api, {3: "disp-1"})(
-        make_trade("Cancelled", error_code=10349)
-    )
+    m._make_on_order_status(api, {3: "disp-1"})(make_trade("Cancelled", error_code=10349))
     m.handle_deferred_cancels(api, monotonic=lambda: 0.0)
     assert api.calls == []
     assert "disp-1" in m._PENDING_CANCEL_CHECKS
@@ -249,7 +248,8 @@ def test_every_ib_insync_state_is_mapped() -> None:
     from ib_insync import OrderStatus
 
     bekannt = {
-        v for k, v in vars(OrderStatus).items()
+        v
+        for k, v in vars(OrderStatus).items()
         if isinstance(v, str) and k[0].isupper() and not k.startswith("_")
     }
     # Nur die Zustandsnamen, nicht die Mengen darunter.
@@ -288,14 +288,10 @@ def test_limit_not_reached_requires_the_order_to_have_been_live() -> None:
     vor Boersenoeffnung storniert wurde — an einem Limit, das nie eine Chance
     hatte."""
     nie_am_markt = make_trade("Cancelled", error_code=202)
-    assert m._derive_reason_code("cancelled", 0.0, "LMT", nie_am_markt) == (
-        "cancelled_by_user"
-    )
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", nie_am_markt) == ("cancelled_by_user")
 
     war_am_markt = make_trade("Cancelled", error_code=202, history=["Submitted"])
-    assert m._derive_reason_code("cancelled", 0.0, "LMT", war_am_markt) == (
-        "limit_not_reached"
-    )
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", war_am_markt) == ("limit_not_reached")
 
 
 def test_reason_code_without_a_trade_keeps_the_old_behaviour() -> None:
@@ -419,8 +415,13 @@ def test_a_dispatch_with_a_cancel_request_is_not_submitted(tmp_path) -> None:
                 pending=[
                     SimpleNamespace(
                         dispatch_id="disp-1",
-                        order_intent={"symbol": "WDAY", "side": "buy", "qty": 2,
-                                      "orderType": "day_limit", "lmtPrice": 166.38},
+                        order_intent={
+                            "symbol": "WDAY",
+                            "side": "buy",
+                            "qty": 2,
+                            "orderType": "day_limit",
+                            "lmtPrice": 166.38,
+                        },
                         expires_at=None,
                         cancel_requested=True,
                     )
@@ -480,9 +481,7 @@ def test_storno_mit_grund_bringt_den_grund_mit():
     """2026-10-16: AMD und LITE endeten vor der Auktion, der Grund fehlte auf t1."""
     api = FakeApi()
     trade = make_trade("Cancelled", error_code=0, history=("PreSubmitted",))
-    record_cancel_reason(
-        3, 202, "Order Canceled - reason:Order would cross related resting order."
-    )
+    record_cancel_reason(3, 202, "Order Canceled - reason:Order would cross related resting order.")
     m._report_status(api, "d-318", trade, "cancelled")
     (meldung,) = api.calls
     assert meldung["status"] == "cancelled"
@@ -511,12 +510,8 @@ def test_storno_mit_grund_heisst_rejected_by_broker() -> None:
     „Order would cross related resting order." Gemeldet wurde
     `limit_not_reached`."""
     trade = make_trade("Cancelled", error_code=0, history=("PreSubmitted",))
-    record_cancel_reason(
-        3, 202, "Order Canceled - reason:Order would cross related resting order."
-    )
-    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == (
-        "rejected_by_broker"
-    )
+    record_cancel_reason(3, 202, "Order Canceled - reason:Order would cross related resting order.")
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == ("rejected_by_broker")
 
 
 def test_presubmitted_ist_nicht_am_markt() -> None:
@@ -524,14 +519,10 @@ def test_presubmitted_ist_nicht_am_markt() -> None:
     Endet er dort ohne Grund, hat er kein Limit verfehlt."""
     clear_cancel_reasons()
     trade = make_trade("Cancelled", error_code=202, history=("PreSubmitted",))
-    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == (
-        "cancelled_by_user"
-    )
+    assert m._derive_reason_code("cancelled", 0.0, "LMT", trade) == ("cancelled_by_user")
 
 
 def test_moc_traegt_nie_limit_not_reached() -> None:
     clear_cancel_reasons()
     trade = make_trade("Cancelled", error_code=202, history=("Submitted",))
-    assert m._derive_reason_code("cancelled", 0.0, "MOC", trade) != (
-        "limit_not_reached"
-    )
+    assert m._derive_reason_code("cancelled", 0.0, "MOC", trade) != ("limit_not_reached")

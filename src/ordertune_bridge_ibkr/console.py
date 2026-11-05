@@ -37,6 +37,7 @@ hier geloest wird.
 Aus demselben Grund ist ein fehlender oder geschlossener Eingabekanal kein
 Fehler, sondern ein Grund, nicht zu warten.
 """
+
 from __future__ import annotations
 
 import sys

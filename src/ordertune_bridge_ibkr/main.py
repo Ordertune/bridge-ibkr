@@ -35,6 +35,7 @@ Der Preis ist bekannt und klein: die HTTP-Aufrufe halten die Schleife kurz an,
 in dieser Zeit werden Rueckmeldungen von IBKR nicht verarbeitet. Sie gehen
 nicht verloren — sie warten im Socket und kommen beim naechsten `sleep()`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,32 +44,37 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from collections.abc import Callable, Iterable
+from datetime import datetime, timezone
+from datetime import time as dt_time
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-from . import __version__, console, failures, order_vocabulary, port_probe
+from . import (
+    __version__,
+    console,
+    failures,
+    order_vocabulary,
+    paths,
+    port_probe,
+    trade_reports,
+    windows_ui,
+)
 from .api_client import OrdertuneApiClient
-from . import paths, trade_reports
 from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
-from .fingerprint import compute_fingerprint
-from .ibkr_client import IbkrClient
 from .external_executions import (
     external_execution_bodies,
     order_types_by_perm_id,
 )
+from .fingerprint import compute_fingerprint
+from .ibkr_client import IbkrClient
 from .logging_setup import setup_logging
-from . import windows_ui
-from .pair_console import pair_requested, run_pairing
-from .probe import probe_requested, run_probe
-from .submitted_store import SubmittedStore
-from .trade_report_store import TradeReportStore
 from .order_reconcile import (
+    UnresolvedDispatch,
     als_utc,
     fills_by_dispatch,
-    UnresolvedDispatch,
     reconcile_open_dispatches,
 )
 from .order_translator import (
@@ -88,20 +94,29 @@ from .order_vocabulary import (
     is_warning_code,
     rejection_reason_of,
 )
+from .pair_console import pair_requested, run_pairing
 from .position_sizing import (
     SizingConfig,
     recompute_qty,
     sizing_drift_exceeds_threshold,
 )
+from .probe import probe_requested, run_probe
+from .submitted_store import SubmittedStore
+from .trade_report_store import TradeReportStore
 from .update_check import emit_update_warning_if_any
+
+if TYPE_CHECKING:
+    # Nur fuer die Annotation von `kind_orders`; zur Laufzeit wird sie dank
+    # `from __future__ import annotations` nie ausgewertet.
+    from ib_insync import Order
 
 log = logging.getLogger(__name__)
 
 # ── NYSE-Marktzeiten in America/New_York (DST-aware). ─────────────────
 # 30-Min-Puffer vor Open (09:00 ET) + 30-Min-Puffer nach Close (16:30 ET)
 NYSE_TZ = ZoneInfo("America/New_York")
-NYSE_POLL_START = dt_time(9, 0)   # 30 Min vor Open
-NYSE_POLL_END = dt_time(16, 30)   # 30 Min nach Close
+NYSE_POLL_START = dt_time(9, 0)  # 30 Min vor Open
+NYSE_POLL_END = dt_time(16, 30)  # 30 Min nach Close
 
 
 HEARTBEAT_INTERVAL_S = 60.0
@@ -167,9 +182,7 @@ from .order_reference import (  # noqa: F401  (Weiterverwendung durch Importeure
 )
 
 
-def register_trade(
-    dispatch_id_map: dict[int, str], dispatch_id: str, trade: Any
-) -> None:
+def register_trade(dispatch_id_map: dict[int, str], dispatch_id: str, trade: Any) -> None:
     """Haelt einen Auftrag in beiden Richtungen fest."""
     order_id = int(getattr(trade.order, "orderId", 0) or 0)
     with _DISPATCH_MAP_LOCK:
@@ -226,6 +239,7 @@ def rebuild_dispatch_map(ibkr: Any, dispatch_id_map: dict[int, str]) -> int:
     else:
         log.info("No open orders of ours at IBKR.")
     return wiederhergestellt
+
 
 # T1-88b F3 — was zu einem Dispatch bereits als Endzustand gemeldet wurde.
 #
@@ -320,6 +334,7 @@ def should_report(dispatch_id: str, mapped: str) -> bool:
         _LAST_REPORTED[dispatch_id] = mapped
         return True
 
+
 # Was diese Bridge gegenüber IBKR kann. Die Feldnamen sind der Vertrag mit der
 # Plattform (capabilitiesSchema) — v0.1.0 schickte hier vier andere Schlüssel,
 # zwei davon existierten serverseitig überhaupt nicht.
@@ -329,9 +344,7 @@ def should_report(dispatch_id: str, mapped: str) -> bool:
 _REPORTED_LOCK = threading.Lock()
 
 
-def _dispatch_ist_abgelaufen(
-    expires_at: Any, *, jetzt: datetime | None = None
-) -> bool:
+def _dispatch_ist_abgelaufen(expires_at: Any, *, jetzt: datetime | None = None) -> bool:
     """Ist die Frist dieser Freigabe verstrichen?
 
     Ohne Angabe wird NICHT abgelaufen: eine Plattform vor T1-103 sendet das
@@ -482,9 +495,7 @@ def _handle_pending(
             ib_order = translate_intent(intent)
             # T1-109 — mit sprechendem Etikett, wenn die Plattform eines mitgibt.
             # Ohne Etikett entsteht exakt das Format von vorher.
-            ib_order.orderRef = build_order_ref(
-                order.dispatch_id, intent.get("orderRefLabel")
-            )
+            ib_order.orderRef = build_order_ref(order.dispatch_id, intent.get("orderRefLabel"))
 
             kind_orders: list[Order] = []
             for kind in kinder:
@@ -492,9 +503,7 @@ def _handle_pending(
                 # denselben Wert, und es mehrfach ueber die Leitung zu schicken
                 # hiesse, zwei Quellen fuer dieselbe Aussage zu haben.
                 ko = translate_intent({**kind, "symbol": intent["symbol"]})
-                ko.orderRef = build_order_ref(
-                    kind["dispatchId"], kind.get("orderRefLabel")
-                )
+                ko.orderRef = build_order_ref(kind["dispatchId"], kind.get("orderRefLabel"))
                 kind_orders.append(ko)
             if kind_orders:
                 # IBKRs Bracket-Muster: der Parent geht ungesendet hinaus, das
@@ -525,7 +534,7 @@ def _handle_pending(
             # `parentId` kommt erst jetzt: die Auftragsnummer des Elternteils
             # steht erst fest, wenn TWS ihn angenommen hat.
             gesetzte_kinder: list[Any] = []
-            for kind, kind_order in zip(kinder, kind_orders):
+            for kind, kind_order in zip(kinder, kind_orders, strict=True):
                 kind_order.parentId = int(getattr(trade.order, "orderId", 0))
                 try:
                     kind_trade = ibkr.place_order(contract, kind_order)
@@ -611,9 +620,7 @@ def _handle_pending(
             # den Roundtrip fuer dieses Lot dauerhaft zurueck.
             for kind in kinder:
                 submitted.vergessen(kind["dispatchId"])
-                _report_rejected(
-                    api, kind["dispatchId"], f"parent_submit_error: {exc}"
-                )
+                _report_rejected(api, kind["dispatchId"], f"parent_submit_error: {exc}")
             continue
 
         ib_order_id = int(getattr(trade.order, "orderId", 0))
@@ -680,9 +687,7 @@ def _attached_exits(intent: dict[str, Any]) -> list[dict[str, Any]]:
     return geprueft
 
 
-def _report_rejected(
-    api: OrdertuneApiClient, dispatch_id: str, error_message: str
-) -> None:
+def _report_rejected(api: OrdertuneApiClient, dispatch_id: str, error_message: str) -> None:
     """Meldet einen Auftrag als abgelehnt und ueberlebt das Scheitern dabei.
 
     Herausgezogen fuer T1-136: der Fall gibt es jetzt an drei Stellen (Parent
@@ -707,9 +712,7 @@ def _report_rejected(
         )
 
 
-def _acknowledge(
-    api: OrdertuneApiClient, dispatch_id: str, ib_order_id: int
-) -> None:
+def _acknowledge(api: OrdertuneApiClient, dispatch_id: str, ib_order_id: int) -> None:
     """T1-103 H — die Bestaetigung. Ihr Scheitern sagt nichts ueber den Auftrag.
 
     Der Auftrag liegt an dieser Stelle bereits bei IBKR. Geht die Bestaetigung
@@ -805,14 +808,12 @@ def _handle_cancel(ibkr: Any, dispatch_id: str) -> None:
         ibkr.cancel_order(trade.order)
         _CANCEL_SENT.add(dispatch_id)
         log.info(
-            "Cancel for dispatch %s sent to IBKR. It is reported only once the "
-            "broker confirms it.",
+            "Cancel for dispatch %s sent to IBKR. It is reported only once the broker confirms it.",
             dispatch_id,
         )
     except Exception as exc:
         log.error(
-            "Cancel for dispatch %s failed: %s. It will be retried on the next "
-            "poll.",
+            "Cancel for dispatch %s failed: %s. It will be retried on the next poll.",
             dispatch_id,
             exc,
         )
@@ -856,9 +857,7 @@ def _export_messung(
         # Die Z-Form, nicht `+00:00`: die Plattform weist den Offset mit 422
         # ab. Derselbe Fallstrick, den T1-78 an Ack und Ergebnis schon einmal
         # gefunden hat.
-        "readAt": datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z"),
+        "readAt": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "filesRead": gelesen,
         "ownFills": eigene,
         "foreignRows": fremde,
@@ -922,9 +921,7 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
             ibkr.all_open_trades() + ibkr.completed_trades(api_only=False)
         )
 
-        bodies = external_execution_bodies(
-            fills, order_types, _REPORTED_EXTERNAL
-        )
+        bodies = external_execution_bodies(fills, order_types, _REPORTED_EXTERNAL)
     except Exception as exc:
         log.warning("Could not collect external executions: %s", exc)
         return
@@ -1038,9 +1035,7 @@ def _pruefe_export(export_dir: str | None, cockpit: Any | None = None) -> Any:
         log.warning("%s", bereit.text)
     if cockpit is not None:
         try:
-            cockpit.store.update(
-                trade_export=bereit.zustand, trade_export_detail=bereit.text
-            )
+            cockpit.store.update(trade_export=bereit.zustand, trade_export_detail=bereit.text)
         except Exception as exc:  # pragma: no cover - Beiwerk
             log.debug("Could not update the cockpit state: %s", exc)
     return bereit
@@ -1179,8 +1174,7 @@ def _archiv_fuellungen(
     # Eine Null ist hier die wichtigere Zahl als jede andere: sie heisst, dass
     # in diesem Archiv nichts liegt, was der Bridge gehoert.
     log.info(
-        "TWS trade reports: %s of our execution(s) in %s file(s), read from "
-        "day %s onward.",
+        "TWS trade reports: %s of our execution(s) in %s file(s), read from day %s onward.",
         len(lesung.fuellungen),
         lesung.gelesene_dateien,
         seit,
@@ -1319,9 +1313,7 @@ def _handle_order_reconcile(
     completed_by_ref: dict[str, Any] = {}
     if not open_query_failed:
         try:
-            completed_by_ref = _by_dispatch_ref(
-                ibkr.completed_trades(api_only=False)
-            )
+            completed_by_ref = _by_dispatch_ref(ibkr.completed_trades(api_only=False))
         except Exception as exc:
             # Der Grund fehlt dann, der Abgleich laeuft trotzdem: ohne die
             # abgeschlossenen Auftraege wird ein verschollener Auftrag als
@@ -1421,11 +1413,7 @@ def _handle_order_reconcile(
                 filled_at=(
                     action.filled_at.isoformat()
                     if action.filled_at is not None
-                    else (
-                        datetime.now(timezone.utc).isoformat()
-                        if action.fill_qty
-                        else None
-                    )
+                    else (datetime.now(timezone.utc).isoformat() if action.fill_qty else None)
                 ),
                 reason_code=action.reason_code,
                 error_message=action.error_message,
@@ -1992,8 +1980,7 @@ def handle_deferred_cancels(
         mapped = _STATUS_MAP.get(raw)
         if mapped is None:
             log.warning(
-                "Re-check for dispatch %s: unknown status %r, nothing "
-                "reported.",
+                "Re-check for dispatch %s: unknown status %r, nothing reported.",
                 dispatch_id,
                 raw,
             )
@@ -2001,8 +1988,7 @@ def handle_deferred_cancels(
 
         if mapped == "cancelled":
             log.info(
-                "Re-check for dispatch %s: the order is still cancelled. "
-                "Reporting it now.",
+                "Re-check for dispatch %s: the order is still cancelled. Reporting it now.",
                 dispatch_id,
             )
         else:
@@ -2043,9 +2029,7 @@ def rejection_outranks_cancel(trade: Any, mapped: str) -> str:
     return "rejected" if rejection_reason(trade) is not None else mapped
 
 
-def _report_status(
-    api: OrdertuneApiClient, dispatch_id: str, trade: Any, mapped: str
-) -> None:
+def _report_status(api: OrdertuneApiClient, dispatch_id: str, trade: Any, mapped: str) -> None:
     """Meldet einen Zustand an die Plattform, wenn er eine neue Aussage ist."""
     # T1-137: die Umdeutung steht VOR der Rangfrage. Danach waere sie wirkungs-
     # los — `cancelled` gilt dann bereits als gemeldet, und die Rangfolge laesst
@@ -2176,9 +2160,7 @@ def run_loop(
         if monotonic() >= next_pending:
             pending()
             next_pending = monotonic() + (
-                PENDING_INTERVAL_MARKET_S
-                if market_hours()
-                else PENDING_INTERVAL_OFF_S
+                PENDING_INTERVAL_MARKET_S if market_hours() else PENDING_INTERVAL_OFF_S
             )
 
         # Pumpt die ib_insync-Schleife. Ein blosses time.sleep() wuerde hier
@@ -2315,9 +2297,7 @@ def run_supervised(
     """
     while True:
         try:
-            loop(
-                ibkr, heartbeat=heartbeat, pending=pending, stop=stop, on_tick=on_tick
-            )
+            loop(ibkr, heartbeat=heartbeat, pending=pending, stop=stop, on_tick=on_tick)
         except BaseException as exc:  # noqa: BLE001 - siehe Begruendung
             # T1-251 — der zweite Riegel, und er faengt bewusst ALLES.
             #
@@ -2336,8 +2316,7 @@ def run_supervised(
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             log.warning(
-                "The session ended with %s: %s. Treating it as a lost "
-                "connection and reconnecting.",
+                "The session ended with %s: %s. Treating it as a lost connection and reconnecting.",
                 type(exc).__name__,
                 exc,
             )
@@ -2392,8 +2371,7 @@ def start_cockpit(
     if console.headless_requested(argv):
         return None
     try:
-        from .cockpit import CockpitServer, CockpitState, StateStore
-        from .cockpit import runfile
+        from .cockpit import CockpitServer, CockpitState, StateStore, runfile
 
         store = StateStore(
             CockpitState(
@@ -2551,9 +2529,7 @@ def orders_in_flight() -> bool:
     """
     with _DISPATCH_MAP_LOCK:
         trades = list(_TRADES_BY_DISPATCH.values())
-    return any(
-        _STATUS_MAP.get(_status_of_trade(t) or "", "") in _LIVE_STATES for t in trades
-    )
+    return any(_STATUS_MAP.get(_status_of_trade(t) or "", "") in _LIVE_STATES for t in trades)
 
 
 # Wie oft der Assistent nachsieht, ob `bridge.env` inzwischen ladbar ist.
@@ -2592,18 +2568,19 @@ def run_setup_cockpit(
     zurueck — die Vorgabe waere schon beim ersten Durchgang erfuellt.
     """
     if fertig is None:
+
         def fertig() -> bool:
             try:
                 load_config()
             except Exception:  # noqa: BLE001 - jede Ursache heisst hier dasselbe
                 return False
             return True
+
     if not console.setup_wanted(argv):
         return False
 
     try:
-        from .cockpit import CockpitServer, CockpitState, SetupActions, StateStore
-        from .cockpit import runfile
+        from .cockpit import CockpitServer, CockpitState, SetupActions, StateStore, runfile
         from .cockpit import window as window_mod
 
         store = StateStore(
@@ -2629,9 +2606,7 @@ def run_setup_cockpit(
                 failure_action=list(failure.action_paired or failure.action),
             )
         )
-        server = CockpitServer(
-            store, setup=SetupActions(env_path, store=store)
-        )
+        server = CockpitServer(store, setup=SetupActions(env_path, store=store))
         url = server.start()
         runfile.write(0, url)
         window_mod.open_window(url)
@@ -2729,9 +2704,7 @@ def report_poll(cockpit: Any | None) -> None:
     if cockpit is None:
         return
     try:
-        cockpit.store.update(
-            last_pending_poll_at=datetime.now(timezone.utc).isoformat()
-        )
+        cockpit.store.update(last_pending_poll_at=datetime.now(timezone.utc).isoformat())
     except Exception as exc:  # pragma: no cover - defensiv
         log.debug("Cockpit state update failed: %s", exc)
 
@@ -2993,8 +2966,11 @@ def _unerwartetes_ende(exc: BaseException) -> int:
         "If this keeps happening, send the log file to Ordertune."
     )
     try:
-        print(f"\nOrdertune Bridge stopped on an unexpected error.\n{text}",
-              file=sys.stderr, flush=True)
+        print(
+            f"\nOrdertune Bridge stopped on an unexpected error.\n{text}",
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception:  # pragma: no cover - fensterlos gebaut, kein stderr
         pass
     try:
@@ -3044,9 +3020,7 @@ def _main() -> int:
     try:
         config = load_config()
     except Exception as exc:
-        failure = failures.classify_config_error(
-            exc, str(env_path), env_path.exists()
-        )
+        failure = failures.classify_config_error(exc, str(env_path), env_path.exists())
         # T1-101 C-1 / D3: erst der Assistent, dann der Abbruch. Der gerahmte
         # Block steht trotzdem in der Konsole — wer ohne Fenster arbeitet, soll
         # dieselbe Auskunft bekommen.
@@ -3065,9 +3039,7 @@ def _main() -> int:
             config = load_config()
         except Exception as zweiter:
             return _abort(
-                failures.classify_config_error(
-                    zweiter, str(env_path), env_path.exists()
-                ),
+                failures.classify_config_error(zweiter, str(env_path), env_path.exists()),
                 None,
                 argv,
             )
@@ -3149,9 +3121,7 @@ def _main() -> int:
 
             window_mod.open_window(laeuft_bereits)
             if console.dialog_wanted(argv):
-                windows_ui.message_box(
-                    _meldungstext(stoerung, log_file), error=False
-                )
+                windows_ui.message_box(_meldungstext(stoerung, log_file), error=False)
         # Ausgangscode 0, und das ist eine Entscheidung: der gewuenschte
         # Zustand — „eine Bridge laeuft" — ist hergestellt. Eine 1 braechte
         # eine geplante Aufgabe oder IBC dazu, es sofort wieder zu versuchen,
@@ -3253,9 +3223,7 @@ def _main() -> int:
         api, fingerprint, managed_accounts=ibkr.managed_accounts()
     )
     if handshake_fehler is not None:
-        erneuerbar = failures.renewable_failure(
-            handshake_fehler, str(config.ordertune_api_base)
-        )
+        erneuerbar = failures.renewable_failure(handshake_fehler, str(config.ordertune_api_base))
         neu_gekoppelt = False
         if erneuerbar is not None:
             alter_token = config.ordertune_bridge_token
@@ -3271,9 +3239,7 @@ def _main() -> int:
         if not neu_gekoppelt:
             ibkr.disconnect()
             return _abort(
-                failures.classify_handshake_error(
-                    handshake_fehler, str(config.ordertune_api_base)
-                ),
+                failures.classify_handshake_error(handshake_fehler, str(config.ordertune_api_base)),
                 log_file,
                 argv,
             )
@@ -3293,9 +3259,7 @@ def _main() -> int:
             # Kopplung, liegt es an etwas, das der Assistent nicht loest.
             ibkr.disconnect()
             return _abort(
-                failures.classify_handshake_error(
-                    handshake_fehler, str(config.ordertune_api_base)
-                ),
+                failures.classify_handshake_error(handshake_fehler, str(config.ordertune_api_base)),
                 log_file,
                 argv,
             )
@@ -3375,6 +3339,7 @@ def _main() -> int:
     widerruf: failures.Failure | None = None
 
     try:
+
         def _beat() -> None:
             nonlocal widerruf
             # Zuerst das Lebenszeichen, dann die Fremdsicht. Umgekehrt haette
@@ -3407,9 +3372,7 @@ def _main() -> int:
             # Minute und spricht immer mit der Plattform. Ein Widerruf faellt
             # hier also spaetestens nach einem Takt auf.
             if beat_error is not None and widerruf is None:
-                widerruf = failures.revocation_failure(
-                    beat_error, str(config.ordertune_api_base)
-                )
+                widerruf = failures.revocation_failure(beat_error, str(config.ordertune_api_base))
                 if widerruf is not None:
                     log.warning(
                         "Ordertune has revoked this bridge's access. Stopping "

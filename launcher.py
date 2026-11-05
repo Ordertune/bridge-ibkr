@@ -23,6 +23,7 @@ Keeping the launcher separate also means `python -m ordertune_bridge_ibkr.main`
 and the `ordertune-bridge-ibkr` console script from `pyproject.toml` still
 behave identically. There is one implementation of `main()`, and three ways in.
 """
+
 from __future__ import annotations
 
 import sys

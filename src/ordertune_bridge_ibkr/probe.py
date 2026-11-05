@@ -35,6 +35,7 @@ blind, und der Weg ueber die Master-Client-ID traegt nicht.
 **Es geht kein Auftrag hinaus und keiner wird veraendert.** Die Sonde verbindet
 sich, liest, schreibt auf und beendet sich.
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,8 +64,6 @@ def probe_requested(argv: list[str]) -> bool:
     Als reine Funktion, damit die Zusicherung sie ohne Prozess pruefen kann.
     """
     return PROBE_FLAG in argv
-
-
 
 
 def describe_trade(trade: Any) -> str:
@@ -137,8 +136,10 @@ def run_probe(ibkr: Any) -> None:
     fuer diese Verbindung verweigert —, sollen die anderen trotzdem antworten.
     Genau diese Verweigerung waere ja ein Ergebnis.
     """
-    log.info("T1-94-PROBE: frage ab, was diese Verbindung von fremden "
-             "Auftraegen sieht. Es geht nichts hinaus.")
+    log.info(
+        "T1-94-PROBE: frage ab, was diese Verbindung von fremden "
+        "Auftraegen sieht. Es geht nichts hinaus."
+    )
 
     try:
         offen = ibkr.all_open_trades()

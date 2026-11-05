@@ -16,6 +16,7 @@ verboten. Wo die Marke sichtbar sein soll, steht das Icon.
 
 Erzeugt aus dem Design-System-Verzeichnis. Nicht von Hand bearbeiten.
 """
+
 from __future__ import annotations
 
 INTER_400 = (

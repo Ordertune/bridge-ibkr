@@ -3,6 +3,7 @@
 Unterstützt 4 Kern-Order-Types aus router-interface.ts (day_limit, loc, moc,
 market). Bracket + OCA-Handling gemäß IBKR-Semantik.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -197,9 +198,7 @@ def _oca_type(intent: dict[str, Any]) -> int:
     return roh if isinstance(roh, int) and roh in (1, 2, 3) else DEFAULT_OCA_TYPE
 
 
-def _build_order(
-    intent: dict[str, Any], order_type: str, action: str, qty: float
-) -> Order:
+def _build_order(intent: dict[str, Any], order_type: str, action: str, qty: float) -> Order:
     """Der ordertyp-spezifische Teil. Alles Gemeinsame steht beim Aufrufer."""
     if order_type == "market":
         return MarketOrder(action, qty)

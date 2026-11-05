@@ -5,6 +5,7 @@ Dauerbetrieb, der auf eine Eingabe wartet, die nie kommt, meldet keinen
 Herzschlag und ist fuer die Plattform nicht von einem Absturz zu unterscheiden.
 Deshalb steht hier jede Bedingung einzeln unter Zusicherung.
 """
+
 from __future__ import annotations
 
 import builtins
@@ -50,18 +51,14 @@ def test_holding_needs_a_packed_exe_and_no_headless_flag(
 def test_running_from_source_never_waits(monkeypatch) -> None:
     """Aus der Entwicklungsumgebung heraus schliesst sich kein Fenster."""
     monkeypatch.setattr(console, "is_frozen", lambda: False)
-    monkeypatch.setattr(
-        builtins, "input", lambda *_: pytest.fail("Es wurde gewartet.")
-    )
+    monkeypatch.setattr(builtins, "input", lambda *_: pytest.fail("Es wurde gewartet."))
     console.hold([])
 
 
 def test_headless_never_waits(monkeypatch) -> None:
     """Unter IBC oder in einer geplanten Aufgabe gibt es niemanden, der tippt."""
     monkeypatch.setattr(console, "is_frozen", lambda: True)
-    monkeypatch.setattr(
-        builtins, "input", lambda *_: pytest.fail("Es wurde gewartet.")
-    )
+    monkeypatch.setattr(builtins, "input", lambda *_: pytest.fail("Es wurde gewartet."))
     console.hold(["--headless"])
 
 
@@ -90,9 +87,7 @@ def test_without_a_console_not_even_the_prompt_is_printed(monkeypatch, capsys) -
     """
     monkeypatch.setattr(console, "is_frozen", lambda: True)
     monkeypatch.setattr(console, "is_interactive", lambda: False)
-    monkeypatch.setattr(
-        builtins, "input", lambda *_: pytest.fail("Es wurde gewartet.")
-    )
+    monkeypatch.setattr(builtins, "input", lambda *_: pytest.fail("Es wurde gewartet."))
 
     console.hold([])
 

@@ -32,7 +32,9 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pyinstaller>=6.0.0",
-    "ruff>=0.4.0",
+    # Exakt gepinnt: CI und lokale Pruefung muessen dieselben Regeln sehen.
+    # Neue ruff-Versionen bringen neue Befunde; Anheben ist ein eigener PR.
+    "ruff==0.16.9",
     # Nur fuer `tools/make_icon.py` und den Abgleich des Symbols gegen das
     # Design-System. Der Build selbst braucht es nicht — `assets/icon.ico`
     # liegt fertig im Repo.
@@ -52,6 +54,18 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Ausdruecklich gewaehlt statt ruffs Voreinstellung, die sich zwischen
+# Versionen aendert. Fehlerklassen, die zur Laufzeit beissen (F: undefinierte
+# Namen, ungenutzte Importe; E4/E7/E9: Syntax und Importe; W: ungueltige
+# Escapes; B: typische Fallen wie zip ohne strict), dazu sortierte Importe (I)
+# und zeitgemaesse Schreibweisen fuer Python 3.10 (UP).
+select = ["E4", "E7", "E9", "F", "W", "I", "B", "UP"]
+# E402: Importe mitten in der Datei sind hier Absicht. Sie stehen direkt unter
+# der Begruendung, warum der Name weiter aus diesem Modul kommt
+# (Weiterverwendung durch Importeure, siehe main.py, order_reconcile.py).
+ignore = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

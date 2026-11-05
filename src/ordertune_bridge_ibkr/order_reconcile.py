@@ -28,18 +28,22 @@ ohne TWS pruefbar sein. Ein falsch positiver Befund macht eine lebende Order
 endgueltig und damit wieder freigebbar, und aus einem Anzeigefehler wuerde ein
 zweiter Echtauftrag.
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from .order_vocabulary import (
     IBKR_TO_WIRE_STATUS,
-    LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
     LIVE_WIRE_STATES,
     rejection_reason_of,
     unmask_wire_escapes,
+)
+from .order_vocabulary import (
+    LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
 )
 
 
@@ -321,8 +325,7 @@ def _from_open(
             reason_code=None,
             error_message=None,
             fill_qty=menge,
-            fill_price=_avg_fill_price(trade)
-            or (fill.price if fill is not None else None),
+            fill_price=_avg_fill_price(trade) or (fill.price if fill is not None else None),
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),
@@ -455,8 +458,7 @@ def _from_completed(
             # Auch hier faellt jedes einzelne Feld auf den Ausfuehrungsbericht
             # zurueck. Eine Menge ohne Kurs ist eine unbewertete Position; sie
             # zu vermeiden kostet nichts, wenn die Zahl ohnehin vorliegt.
-            fill_price=_avg_fill_price(trade)
-            or (fill.price if fill is not None else None),
+            fill_price=_avg_fill_price(trade) or (fill.price if fill is not None else None),
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),

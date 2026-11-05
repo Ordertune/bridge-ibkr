@@ -46,6 +46,7 @@ Echtgeldkonto ist kein Messgeraet.
 Es braucht nichts ausser `ib_insync` — dieselbe Bibliothek, die die Bridge
 ohnehin benutzt. Damit misst die Sonde mit demselben Client wie der Ernstfall.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,8 +68,8 @@ import time
 #
 # Gemessen am 2026-09-25 auf einem Windows-VPS mit Python 3.14.
 if sys.version_info >= (3, 12):
-# Dieselbe Begruendung wie in `currency_rate_probe.py`: `get_running_loop()`
-# statt `get_event_loop()`, weil Letzteres ab 3.12 warnt und erst ab 3.14 wirft.
+    # Dieselbe Begruendung wie in `currency_rate_probe.py`: `get_running_loop()`
+    # statt `get_event_loop()`, weil Letzteres ab 3.12 warnt und erst ab 3.14 wirft.
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -159,9 +160,7 @@ def ibkrs_sicht(leser: IB, order_ids: set[int]) -> dict[int, Order]:
     return gesehen
 
 
-def durchgang(
-    ib: IB, leser: IB, symbol: str, qty: int, oca: str, warten: float
-) -> dict:
+def durchgang(ib: IB, leser: IB, symbol: str, qty: int, oca: str, warten: float) -> dict:
     """Stellt eine Klammer, liest sie mit dem ZWEITEN Client zurueck, raeumt auf."""
     c = kontrakt(symbol)
     eltern = order("BUY", "LMT", qty, lmt=ENTRY_LIMIT, transmit=False)
@@ -281,9 +280,7 @@ def main() -> None:
         # AUSSCHLIESSLICH aus IBKRs Sicht. Unsere eigene Eingabe zu lesen waere
         # zirkulaer — daran ist der erste Wurf dieser Sonde gescheitert.
         a_ibkr = a["laut_ibkr"]
-        stop_a = (
-            getattr(a_ibkr.get(a["stop"].order.orderId), "ocaGroup", "") or ""
-        )
+        stop_a = getattr(a_ibkr.get(a["stop"].order.orderId), "ocaGroup", "") or ""
         moc_a = getattr(a_ibkr.get(a["moc"].order.orderId), "ocaGroup", "") or ""
 
         print("\n--- Die Antwort ---")
@@ -319,9 +316,7 @@ def main() -> None:
                 "     T1-233 Entscheidung 8 bleibt wie gebaut."
             )
         b_ibkr = b["laut_ibkr"]
-        stop_b = (
-            getattr(b_ibkr.get(b["stop"].order.orderId), "ocaGroup", "") or ""
-        )
+        stop_b = getattr(b_ibkr.get(b["stop"].order.orderId), "ocaGroup", "") or ""
         print(
             "\n  Gegenprobe (Durchgang B): eine GESETZTE Gruppe kommt bei IBKR "
             f"{'an' if stop_b else 'NICHT an'} — "

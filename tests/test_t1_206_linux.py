@@ -13,6 +13,7 @@ einer Meinung:
   * das Release trug kein Linux-Artefakt,
   * und die `.sh` darf kein selbstentpackendes Archiv sein.
 """
+
 from __future__ import annotations
 
 import re
@@ -70,9 +71,7 @@ def test_without_a_machine_id_the_old_way_still_answers(monkeypatch, tmp_path) -
     Antwort. Ein Abbruch waere hier schlechter: der Hash wuerde dadurch nicht
     falsch, nur schwaecher.
     """
-    monkeypatch.setattr(
-        fingerprint, "_MACHINE_ID_PFADE", (str(tmp_path / "gibt-es-nicht"),)
-    )
+    monkeypatch.setattr(fingerprint, "_MACHINE_ID_PFADE", (str(tmp_path / "gibt-es-nicht"),))
     # Faellt durch auf `/proc/cpuinfo`, das es hier geben kann oder nicht.
     # Beide Ausgaenge sind zulaessig — was NICHT passieren darf, ist ein Wurf.
     assert isinstance(fingerprint._read_cpu_id_unix(), str)
@@ -231,9 +230,7 @@ def test_an_expired_code_writes_nothing(monkeypatch, tmp_path) -> None:
     assert not env_path.exists()
 
 
-def test_existing_credentials_are_not_replaced_without_a_human(
-    monkeypatch, tmp_path
-) -> None:
+def test_existing_credentials_are_not_replaced_without_a_human(monkeypatch, tmp_path) -> None:
     """Ohne Eingabekanal heisst es nein.
 
     Ein stilles Ueberschreiben kappte eine laufende Verbindung: der alte Token
@@ -242,8 +239,7 @@ def test_existing_credentials_are_not_replaced_without_a_human(
     """
     env_path = tmp_path / "bridge.env"
     env_path.write_text(
-        "ORDERTUNE_BRIDGE_TOKEN=ot_bridge_alt\n"
-        "ORDERTUNE_BRIDGE_CONNECTION_ID=alt\n",
+        "ORDERTUNE_BRIDGE_TOKEN=ot_bridge_alt\nORDERTUNE_BRIDGE_CONNECTION_ID=alt\n",
         encoding="utf-8",
     )
 
@@ -342,9 +338,7 @@ def test_the_check_shows_what_it_found_when_it_is_fine(tmp_path) -> None:
     # druckte den Konfigurations-Zweig, und der Test war rot — ohne dass jemand
     # die Datei angefasst hatte. Sie war ab ihrem Schreibtag genau so lange
     # gueltig wie ihr eigenes Fenster.
-    text = "\n".join(
-        trade_reports.check_bericht(tmp_path, heute="20260924")
-    )
+    text = "\n".join(trade_reports.check_bericht(tmp_path, heute="20260924"))
     assert "trades.20260924.csv" in text
     assert "report file(s) found" in text
 
@@ -359,9 +353,7 @@ def test_the_check_says_stale_when_the_newest_file_is_old(tmp_path) -> None:
     (tmp_path / "trades.20260924.csv").write_text(
         "Account;Order Ref.;ID;Quantity;Price;Date;Time\n", encoding="utf-8"
     )
-    text = "\n".join(
-        trade_reports.check_bericht(tmp_path, heute="20260929")
-    )
+    text = "\n".join(trade_reports.check_bericht(tmp_path, heute="20260929"))
     assert "stale" in text
     # Das Datum gehoert in die Meldung: „veraltet" ohne Tag laesst den Leser
     # raten, wie weit es her ist.
@@ -393,9 +385,9 @@ def test_the_installer_hands_the_path_over_at_the_right_moment() -> None:
     Verzeichnisses an die TWS. Ein Tippfehler faellt dabei nicht auf: die TWS
     legt den Ordner an, den sie bekommt, und alles sieht richtig aus.
     """
-    skript = (
-        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
-    ).read_text(encoding="utf-8")
+    skript = (WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "EXPORT_DIR=" in skript
     assert "--check-reports" in skript
@@ -419,9 +411,9 @@ def test_the_installer_does_not_walk_into_a_desktop() -> None:
     Geprueft wird am Systemziel, nicht an `$XDG_CURRENT_DESKTOP`: das ueberlebt
     `sudo` nicht.
     """
-    skript = (
-        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
-    ).read_text(encoding="utf-8")
+    skript = (WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "systemctl get-default" in skript
     assert "graphical.target" in skript
@@ -438,14 +430,11 @@ def test_the_report_folder_survives_an_update() -> None:
     dort, waere es nach jeder Aktualisierung weg — und es ist genau die Quelle,
     mit der eine Fuellung nach einer Auszeit der Bridge noch nachtragbar ist.
     """
-    skript = (
-        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
-    ).read_text(encoding="utf-8")
-
-    zeile = next(
-        z for z in skript.splitlines()
-        if z.strip().startswith("EXPORT_DIR=")
+    skript = (WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh").read_text(
+        encoding="utf-8"
     )
+
+    zeile = next(z for z in skript.splitlines() if z.strip().startswith("EXPORT_DIR="))
     assert "/opt/ordertune-bridge" not in zeile, (
         "Das Berichtsarchiv liegt im Ordner, den eine Aktualisierung loescht."
     )
@@ -584,10 +573,7 @@ def test_the_release_job_pipes_nothing_into_grep_q() -> None:
     """
     yml = (WURZEL / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    befehle = [
-        z for z in yml.splitlines()
-        if z.strip() and not z.strip().startswith("#")
-    ]
+    befehle = [z for z in yml.splitlines() if z.strip() and not z.strip().startswith("#")]
     treffer = [z.strip() for z in befehle if re.search(r"\|\s*grep\s+-[a-zA-Z]*q", z)]
 
     assert not treffer, (
@@ -631,10 +617,7 @@ def test_the_installer_is_a_script_and_not_an_archive() -> None:
     # `/tmp` mehrfach — sie erklaeren ja gerade, warum es hier nicht vorkommt —
     # und eine Suche ueber die ganze Datei wuerde an der eigenen Begruendung
     # scheitern.
-    befehle = [
-        z for z in text.splitlines()
-        if z.strip() and not z.strip().startswith("#")
-    ]
+    befehle = [z for z in text.splitlines() if z.strip() and not z.strip().startswith("#")]
     assert not [z for z in befehle if "/tmp" in z], (
         "Der Installer fasst /tmp an. Genau das soll Entscheidung 8 vermeiden."
     )
@@ -646,12 +629,10 @@ def test_the_installer_and_the_unit_agree_on_where_things_live() -> None:
     Zwei Dateien, die einen Pfad je fuer sich fuehren, laufen beim naechsten
     Umbenennen auseinander — und das faellt erst auf dem Kundenserver auf.
     """
-    skript = (
-        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
-    ).read_text(encoding="utf-8")
-    einheit = (WURZEL / "packaging/linux/ordertune-bridge.service").read_text(
+    skript = (WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh").read_text(
         encoding="utf-8"
     )
+    einheit = (WURZEL / "packaging/linux/ordertune-bridge.service").read_text(encoding="utf-8")
 
     assert "/opt/ordertune-bridge" in skript
     assert "WorkingDirectory=/opt/ordertune-bridge" in einheit
@@ -668,9 +649,7 @@ def test_the_unit_does_not_lock_the_data_folder() -> None:
     Eine Haertung, die den teuersten Zustand des Systems wahrscheinlicher
     macht, ist keine.
     """
-    einheit = (WURZEL / "packaging/linux/ordertune-bridge.service").read_text(
-        encoding="utf-8"
-    )
+    einheit = (WURZEL / "packaging/linux/ordertune-bridge.service").read_text(encoding="utf-8")
     zeilen = [z.strip() for z in einheit.splitlines() if not z.strip().startswith("#")]
     assert not any(z.startswith("ProtectHome=") for z in zeilen)
 
@@ -683,9 +662,9 @@ def test_pairing_runs_as_the_service_user_from_the_program_folder() -> None:
     falschen Ort; ohne `HOME` zeigen Ablage und Berichtsverzeichnis auf das
     Heimverzeichnis von root.
     """
-    skript = (
-        WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh"
-    ).read_text(encoding="utf-8")
+    skript = (WURZEL / "packaging/linux/ordertune-bridge-ibkr-linux-installer.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "runuser -u" in skript
     assert "HOME=" in skript
@@ -734,9 +713,7 @@ def test_the_cockpit_does_not_call_an_empty_folder_a_failure() -> None:
     „TWS is not writing trade reports" ueber einem Ordner, der nur noch nichts
     zu berichten hatte, ist dieselbe Behauptung eine Ebene hoeher.
     """
-    seite = (
-        WURZEL / "src/ordertune_bridge_ibkr/cockpit/page.py"
-    ).read_text(encoding="utf-8")
+    seite = (WURZEL / "src/ordertune_bridge_ibkr/cockpit/page.py").read_text(encoding="utf-8")
 
     assert 's.trade_export === "no_file"' in seite, (
         "Der leere Ordner teilt sich die Flaeche wieder mit jedem anderen Befund."

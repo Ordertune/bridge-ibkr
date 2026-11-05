@@ -6,6 +6,7 @@ Verknuepfung mit gesetztem „Ausfuehren in", Konsole an anderer Stelle — fand
 deshalb einen leeren Riegel gegen den Doppelauftrag. Ohne dass jemand etwas
 geloescht hat.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -45,9 +46,7 @@ def test_the_packed_exe_writes_to_the_profile(gepackt, monkeypatch) -> None:
     assert paths.log_dir().name == "logs"
 
 
-def test_the_place_does_not_move_with_the_working_directory(
-    gepackt, monkeypatch, tmp_path
-) -> None:
+def test_the_place_does_not_move_with_the_working_directory(gepackt, monkeypatch, tmp_path) -> None:
     """**Der Kern dieses Specs.**
 
     Zweimal gestartet, zweimal aus einem anderen Verzeichnis, zweimal derselbe
@@ -106,9 +105,7 @@ def test_the_old_place_is_carried_over_once(gepackt, monkeypatch, tmp_path) -> N
     assert not (alt / "run").exists()
 
 
-def test_two_populated_places_are_never_merged(
-    gepackt, monkeypatch, tmp_path
-) -> None:
+def test_two_populated_places_are_never_merged(gepackt, monkeypatch, tmp_path) -> None:
     """Zaghaft mit Absicht.
 
     Ein Riegel gegen Doppelauftraege ist nichts, was ein Aufraeumvorgang
@@ -130,9 +127,7 @@ def test_two_populated_places_are_never_merged(
 
     assert any(stufe == "warning" for stufe, _ in meldungen)
     assert (alt / "run" / "submitted-dispatches.json").read_text(encoding="utf-8") == "alt"
-    assert (
-        paths.run_dir() / "submitted-dispatches.json"
-    ).read_text(encoding="utf-8") == "neu"
+    assert (paths.run_dir() / "submitted-dispatches.json").read_text(encoding="utf-8") == "neu"
 
 
 def test_nothing_moves_out_of_the_source_tree(monkeypatch, tmp_path) -> None:

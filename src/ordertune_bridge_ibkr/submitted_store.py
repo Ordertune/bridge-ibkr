@@ -39,6 +39,7 @@ Dann faellt die Bridge auf das Verhalten von vorher zurueck und protokolliert
 das laut. Ein schreibgeschuetztes Verzeichnis darf den Handel nicht anhalten —
 aber der Nutzer soll wissen, dass ein Riegel fehlt.
 """
+
 from __future__ import annotations
 
 import json
@@ -139,9 +140,7 @@ class SubmittedStore:
             daten = json.loads(roh)
             if isinstance(daten, dict):
                 self._eintraege = {
-                    str(k): float(v)
-                    for k, v in daten.items()
-                    if isinstance(v, (int, float))
+                    str(k): float(v) for k, v in daten.items() if isinstance(v, (int, float))
                 }
         except (ValueError, TypeError) as exc:
             # Eine kaputte Datei ist kein Grund, den Handel anzuhalten — aber

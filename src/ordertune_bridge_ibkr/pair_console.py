@@ -32,6 +32,7 @@ Geschrieben wird **erst**, wenn die Gegenseite den Code als eingeloest meldet.
 Bricht die SSH-Sitzung ab oder laeuft die Frist aus, bleibt keine halbe
 `bridge.env` zurueck und ein zweiter Versuch faengt sauber von vorn an.
 """
+
 from __future__ import annotations
 
 import sys

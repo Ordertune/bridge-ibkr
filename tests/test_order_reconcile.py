@@ -14,6 +14,7 @@ zweite: ein falsch positiver Befund macht eine LEBENDE Order endgueltig und
 damit wieder freigebbar, und aus einem Anzeigefehler wuerde ein zweiter
 Echtauftrag.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -49,9 +50,7 @@ class FakeTrade:
 
 
 def d(dispatch_id: str, *, submitted_at: datetime | None = VORHER):
-    return UnresolvedDispatch(
-        dispatch_id=dispatch_id, symbol="SHOP", submitted_at=submitted_at
-    )
+    return UnresolvedDispatch(dispatch_id=dispatch_id, symbol="SHOP", submitted_at=submitted_at)
 
 
 def _run(**over: Any):
@@ -93,9 +92,7 @@ def test_a_live_order_is_reported_as_live() -> None:
     schwieg bei jedem Durchgang erneut.
     """
     aktionen = _run(
-        open_by_ref={
-            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))
-        }
+        open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))}
     )
     assert len(aktionen) == 1
     assert aktionen[0].status == "working"
@@ -126,9 +123,7 @@ def test_an_open_order_that_claims_a_final_state_says_nothing() -> None:
     """
     assert (
         _run(
-            open_by_ref={
-                "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Filled"))
-            }
+            open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Filled"))}
         )
         == []
     )
@@ -142,7 +137,9 @@ def test_an_order_submitted_after_connecting_is_never_declared_missing() -> None
     daraus ein Endzustand, aus dem Endzustand eine wieder freigebbare Zeile,
     und aus der ein zweiter Echtauftrag.
     """
-    assert _run(unresolved=[d("ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b", submitted_at=NACHHER)]) == []
+    assert (
+        _run(unresolved=[d("ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b", submitted_at=NACHHER)]) == []
+    )
 
 
 def test_without_a_submit_time_nothing_is_decided() -> None:
@@ -159,7 +156,11 @@ def test_a_failed_open_query_stops_everything() -> None:
     assert _run(open_query_failed=True) == []
     assert (
         _run(
-            unresolved=[d("ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b"), d("ot-c81e728d-9d4c-4f63-8f06-7f89cc14862c"), d("ot-eccbc87e-4b5c-42fe-8830-8fd9f2a7baf3")],
+            unresolved=[
+                d("ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b"),
+                d("ot-c81e728d-9d4c-4f63-8f06-7f89cc14862c"),
+                d("ot-eccbc87e-4b5c-42fe-8830-8fd9f2a7baf3"),
+            ],
             open_query_failed=True,
         )
         == []
@@ -196,9 +197,7 @@ def test_a_rejected_order_carries_the_brokers_words() -> None:
         FakeStatus("Inactive2"),
         log=[
             FakeLogEntry(errorCode=0, message="ignoriert"),
-            FakeLogEntry(
-                errorCode=201, message="Order rejected - insufficient funds"
-            ),
+            FakeLogEntry(errorCode=201, message="Order rejected - insufficient funds"),
         ],
     )
     actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": trade})
@@ -213,7 +212,11 @@ def test_no_reason_is_invented() -> None:
     Dieselbe Grenze wie beim Storno: ein Verfall zum Boersenschluss und ein
     Storno in TWS sind im Protokoll ununterscheidbar.
     """
-    actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))})
+    actions = _run(
+        completed_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))
+        }
+    )
     assert actions[0].status == "cancelled"
     assert actions[0].error_message is None
 
@@ -275,7 +278,9 @@ def test_without_a_log_the_reconcile_path_claims_nothing() -> None:
 def test_a_completed_order_that_still_looks_alive_is_not_interpreted() -> None:
     """Ein Widerspruch wird zugegeben, nicht aufgeloest."""
     actions = _run(
-        completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("PreSubmitted"))}
+        completed_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("PreSubmitted"))
+        }
     )
     assert actions[0].status == "unknown"
 
@@ -287,7 +292,11 @@ def test_a_fill_is_never_reported_from_here() -> None:
     vollstaendigen Bericht ueberschreiben, den der Ereignispfad vielleicht
     noch liefert.
     """
-    actions = _run(completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Filled"))})
+    actions = _run(
+        completed_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Filled"))
+        }
+    )
     assert actions[0].status == "unknown"
     assert "filled" in (actions[0].error_message or "").lower()
 
@@ -299,7 +308,9 @@ def test_open_wins_over_completed() -> None:
     """
     aktionen = _run(
         open_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Submitted"))},
-        completed_by_ref={"ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))},
+        completed_by_ref={
+            "ot-c4ca4238-a0b9-4382-8dcc-509a6f75849b": FakeTrade(FakeStatus("Cancelled"))
+        },
     )
     # T1-120: die Regel ist dieselbe geblieben, ihre Antwort ist staerker
     # geworden. Vorher schwieg der Abgleich und ueberliess der Plattform ihren
@@ -317,7 +328,12 @@ def test_the_measured_batch_finds_the_missing_one() -> None:
     """
     lebend = {
         ref: FakeTrade(FakeStatus("Submitted"))
-        for ref in ("ot-2d8fb88c-fc1e-4ab6-8dc7-0f522dc82fe4", "ot-2b923591-22a2-4225-89f3-10ca847829ad", "ot-1e9f1d12-d00f-4aea-8f10-588f8387e5a1", "ot-16b48de9-a2e5-4ef7-86ca-751d23107568")
+        for ref in (
+            "ot-2d8fb88c-fc1e-4ab6-8dc7-0f522dc82fe4",
+            "ot-2b923591-22a2-4225-89f3-10ca847829ad",
+            "ot-1e9f1d12-d00f-4aea-8f10-588f8387e5a1",
+            "ot-16b48de9-a2e5-4ef7-86ca-751d23107568",
+        )
     }
     actions = _run(
         unresolved=[
@@ -414,9 +430,7 @@ def test_fremdes_depot_schlaegt_den_beleg_aus_dem_buch() -> None:
     actions = _run(
         unresolved=[_mit_konto("ot-kollision", LIVE)],
         connected_account=PAPIER,
-        completed_by_ref={
-            "ot-kollision": FakeTrade(orderStatus=FakeStatus(status="Cancelled"))
-        },
+        completed_by_ref={"ot-kollision": FakeTrade(orderStatus=FakeStatus(status="Cancelled"))},
     )
     assert actions == []
 
@@ -445,9 +459,7 @@ def test_der_gemeldete_fall_vom_2026_08_24() -> None:
 
     Nach T1-120 melden alle sechs: fuenf leben, einer ist weg.
     """
-    lebend = {
-        f"ot-live-{i}": FakeTrade(FakeStatus("Submitted")) for i in range(5)
-    }
+    lebend = {f"ot-live-{i}": FakeTrade(FakeStatus("Submitted")) for i in range(5)}
     aktionen = _run(
         unresolved=[d(f"ot-live-{i}") for i in range(5)] + [d("ot-6e68f237")],
         open_by_ref=lebend,

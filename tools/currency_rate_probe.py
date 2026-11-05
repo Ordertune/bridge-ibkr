@@ -71,6 +71,7 @@ gegen ein Echtgeldkonto gefahrlos — es liest, was die TWS ohnehin anzeigt.
 Es braucht nichts ausser `ib_insync` — dieselbe Bibliothek, die die Bridge
 benutzt. Damit misst die Sonde, was der Ernstfall saehe.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -86,12 +87,12 @@ from dataclasses import dataclass
 # eine Schleife anzulegen. `ib_insync` wird seit 2023 nicht gepflegt und kennt
 # das nicht.
 if sys.version_info >= (3, 12):
-# Gefragt wird nach dem LAUFENDEN Loop, nicht nach `get_event_loop()`. Der
-# Unterschied ist nicht Geschmack: `get_event_loop()` wirft erst ab 3.14, warnt
-# aber schon ab 3.12 — auf dem Debian-VPS des Owners (Python 3.13) stand
-# deshalb vor jedem Lauf eine DeprecationWarning. Der Riegel fing die Ausnahme
-# und liess die Warnung durch. `get_running_loop()` wirft in einem Skript immer
-# (es laeuft ja noch nichts), sagt dabei aber nichts.
+    # Gefragt wird nach dem LAUFENDEN Loop, nicht nach `get_event_loop()`. Der
+    # Unterschied ist nicht Geschmack: `get_event_loop()` wirft erst ab 3.14, warnt
+    # aber schon ab 3.12 — auf dem Debian-VPS des Owners (Python 3.13) stand
+    # deshalb vor jedem Lauf eine DeprecationWarning. Der Riegel fing die Ausnahme
+    # und liess die Warnung durch. `get_running_loop()` wirft in einem Skript immer
+    # (es laeuft ja noch nichts), sagt dabei aber nichts.
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -169,9 +170,7 @@ def segmente(werte: list[Kontowert], tag: str) -> dict[str, float]:
     return {
         w.waehrung.upper(): w.wert
         for w in werte
-        if normalisiere_tag(w.tag) == tag
-        and w.waehrung
-        and w.waehrung.upper() not in SAMMELZEILEN
+        if normalisiere_tag(w.tag) == tag and w.waehrung and w.waehrung.upper() not in SAMMELZEILEN
     }
 
 
@@ -203,9 +202,7 @@ def netliq_tag(werte: list[Kontowert]) -> str:
     return "NetLiquidation"
 
 
-def vereinige(
-    primaer: list[Kontowert], sekundaer: list[Kontowert]
-) -> list[Kontowert]:
+def vereinige(primaer: list[Kontowert], sekundaer: list[Kontowert]) -> list[Kontowert]:
     """Beide Quellen zu einer Sicht — bei Gleichstand gewinnt die primaere.
 
     `accountSummary()` (Ledger) und `accountValues()` (reqAccountUpdates)
@@ -221,9 +218,7 @@ def vereinige(
     return list(sicht.values())
 
 
-def pruefe_richtung(
-    werte: list[Kontowert], *, toleranz: float = 0.0005
-) -> Richtungsurteil:
+def pruefe_richtung(werte: list[Kontowert], *, toleranz: float = 0.0005) -> Richtungsurteil:
     """In welche Richtung rechnet `ExchangeRate`?
 
     Die Sammelzeile `BASE` von `NetLiquidation` ist die einzige Zeile, deren
@@ -250,26 +245,33 @@ def pruefe_richtung(
 
     if not kurse:
         return Richtungsurteil(
-            "unentscheidbar", None, None, basis,
+            "unentscheidbar",
+            None,
+            None,
+            basis,
             "IBKR liefert keine ExchangeRate-Zeile — die Annahme von T1-252 trifft nicht zu.",
         )
     if basis is None:
         return Richtungsurteil(
-            "unentscheidbar", None, None, None,
+            "unentscheidbar",
+            None,
+            None,
+            None,
             f"Keine Sammelzeile BASE zu {tag} — ohne sie gibt es keine Probe.",
         )
 
     gemeinsam = sorted(set(kurse) & set(betraege))
     if not gemeinsam:
         return Richtungsurteil(
-            "unentscheidbar", None, None, basis,
+            "unentscheidbar",
+            None,
+            None,
+            basis,
             "Kein Waehrungssegment traegt Betrag UND Kurs — nichts zu rechnen.",
         )
 
     summe_mal = sum(betraege[c] * kurse[c] for c in gemeinsam)
-    summe_geteilt = sum(
-        betraege[c] / kurse[c] for c in gemeinsam if kurse[c] != 0.0
-    )
+    summe_geteilt = sum(betraege[c] / kurse[c] for c in gemeinsam if kurse[c] != 0.0)
 
     # Nicht „liegt innerhalb einer Grenze", sondern „trifft, waehrend die andere
     # danebenliegt". Der Unterschied ist an den echten Zahlen vom 2026-09-28
@@ -289,22 +291,34 @@ def pruefe_richtung(
 
     if passt_mal and not passt_geteilt:
         return Richtungsurteil(
-            "segment_zu_basis", summe_mal, summe_geteilt, basis,
+            "segment_zu_basis",
+            summe_mal,
+            summe_geteilt,
+            basis,
             "Summe(Wert x Kurs) trifft die Sammelzeile, Summe(Wert : Kurs) nicht.",
         )
     if passt_geteilt and not passt_mal:
         return Richtungsurteil(
-            "basis_zu_segment", summe_mal, summe_geteilt, basis,
+            "basis_zu_segment",
+            summe_mal,
+            summe_geteilt,
+            basis,
             "Summe(Wert : Kurs) trifft die Sammelzeile, Summe(Wert x Kurs) nicht.",
         )
     if min(rel_mal, rel_geteilt) > TRIFFT:
         return Richtungsurteil(
-            "unentscheidbar", summe_mal, summe_geteilt, basis,
+            "unentscheidbar",
+            summe_mal,
+            summe_geteilt,
+            basis,
             "Keine der beiden Rechnungen trifft die Sammelzeile. IBKR bildet BASE anders, "
             "als dieser Entwurf annimmt — das gehoert in den Spec, bevor gebaut wird.",
         )
     return Richtungsurteil(
-        "unentscheidbar", summe_mal, summe_geteilt, basis,
+        "unentscheidbar",
+        summe_mal,
+        summe_geteilt,
+        basis,
         "Die beiden Rechnungen liegen zu nah beieinander. Das heisst nicht, dass beide "
         "stimmen, sondern dass dieses Konto sie nicht auseinanderhaelt — ein einziges "
         "Segment, lauter Kurse von 1,0, oder ein Fremdsegment, das zu klein gegen das "
@@ -383,7 +397,9 @@ def selftest() -> int:
         Kontowert("ExchangeRate", "USD", 50_000.0 / 46_000.0),
     ]
     ub = pruefe_richtung(b)
-    check("B  Basis->Segment wird erkannt (Gegentest)", ub.richtung == "basis_zu_segment", ub.richtung)
+    check(
+        "B  Basis->Segment wird erkannt (Gegentest)", ub.richtung == "basis_zu_segment", ub.richtung
+    )
     check("B  ist NICHT dasselbe Urteil wie A", ua.richtung != ub.richtung)
 
     # Fehlt die Kurszeile, ist die Annahme von T1-252 widerlegt — und das muss
@@ -425,8 +441,10 @@ def selftest() -> int:
 
     # Die Sammelzeile darf nie als Segment durchgehen.
     check("F  BASE zaehlt nicht als Waehrungssegment", "BASE" not in segmente(a, "NetLiquidation"))
-    check("F  leere Waehrung zaehlt auch nicht",
-          segmente([Kontowert("NetLiquidation", "", 1.0)], "NetLiquidation") == {})
+    check(
+        "F  leere Waehrung zaehlt auch nicht",
+        segmente([Kontowert("NetLiquidation", "", 1.0)], "NetLiquidation") == {},
+    )
 
     # G — die Toleranz muss Rundung ueberleben. Waere sie zu eng, meldete die
     # Sonde an echten Zahlen "passt nichts" und waere unbrauchbar.
@@ -456,8 +474,10 @@ def selftest() -> int:
     check("H  und die Begruendung nennt den Grund", "zu klein" in uh.begruendung, uh.begruendung)
     # Und der Beleg, dass die Manipulation ueberhaupt gegriffen hat: mit einem
     # spuerbaren Segment entscheidet dieselbe Regel sehr wohl.
-    check("H  Gegenprobe: dieselbe Regel entscheidet bei grossem Segment",
-          pruefe_richtung(a).richtung == "segment_zu_basis")
+    check(
+        "H  Gegenprobe: dieselbe Regel entscheidet bei grossem Segment",
+        pruefe_richtung(a).richtung == "segment_zu_basis",
+    )
 
     # I — die Vereinigung beider Quellen. Ohne sie zaehlt die Richtungsprobe
     # ein Segment doppelt, sobald beide Quellen denselben Tag melden.
@@ -470,16 +490,19 @@ def selftest() -> int:
         Kontowert("TotalCashValue", "EUR", 685_151.94),  # nur hier
     ]
     v = vereinige(ledger, updates)
-    check("I  Ledger gewinnt bei Gleichstand",
-          segmente(v, "NetLiquidation") == {"EUR": 996_914.07},
-          str(segmente(v, "NetLiquidation")))
-    check("I  Zeilen nur aus der zweiten Quelle bleiben",
-          segmente(v, "TotalCashValue") == {"EUR": 685_151.94})
+    check(
+        "I  Ledger gewinnt bei Gleichstand",
+        segmente(v, "NetLiquidation") == {"EUR": 996_914.07},
+        str(segmente(v, "NetLiquidation")),
+    )
+    check(
+        "I  Zeilen nur aus der zweiten Quelle bleiben",
+        segmente(v, "TotalCashValue") == {"EUR": 685_151.94},
+    )
     check("I  keine Dublette", len(v) == 3, str(len(v)))
     # GEGENTEST: ohne Vereinigung waere die Summe eine andere. Der Beleg, dass
     # die Manipulation ueberhaupt greift.
-    check("I  Gegentest: unvereinigt zaehlt doppelt",
-          len(ledger + updates) == 4 and len(v) == 3)
+    check("I  Gegentest: unvereinigt zaehlt doppelt", len(ledger + updates) == 4 and len(v) == 3)
 
     # J — DIE ECHTEN ZAHLEN. Gemessen am 2026-09-28 auf DUT106306, mit den
     # Tag-Namen, wie IBKR sie wirklich schickt. Das ist der Rueckfall-Riegel
@@ -500,29 +523,48 @@ def selftest() -> int:
         Kontowert("NetLiquidation-P", "EUR", 0.00),
         Kontowert("NetLiquidation-S", "EUR", 0.00),
     ]
-    check("J  Der Kurs wird im Ledger gefunden",
-          segmente(echt, "ExchangeRate") == {"EUR": 1.00, "USD": 0.8797124},
-          str(segmente(echt, "ExchangeRate")))
-    check("J  Der Depotwert je Waehrung kommt aus dem Ledger",
-          netliq_tag(echt) == "NetLiquidationByCurrency", netliq_tag(echt))
-    check("J  Die Kontozeile faelscht die Summe nicht",
-          segmente(echt, "NetLiquidationByCurrency") == {"EUR": 1_000_775.19, "USD": -3_930.049},
-          str(segmente(echt, "NetLiquidationByCurrency")))
+    check(
+        "J  Der Kurs wird im Ledger gefunden",
+        segmente(echt, "ExchangeRate") == {"EUR": 1.00, "USD": 0.8797124},
+        str(segmente(echt, "ExchangeRate")),
+    )
+    check(
+        "J  Der Depotwert je Waehrung kommt aus dem Ledger",
+        netliq_tag(echt) == "NetLiquidationByCurrency",
+        netliq_tag(echt),
+    )
+    check(
+        "J  Die Kontozeile faelscht die Summe nicht",
+        segmente(echt, "NetLiquidationByCurrency") == {"EUR": 1_000_775.19, "USD": -3_930.049},
+        str(segmente(echt, "NetLiquidationByCurrency")),
+    )
     uj = pruefe_richtung(echt)
     check("J  Richtung: Segment -> Basis", uj.richtung == "segment_zu_basis", uj.begruendung)
     usd_j, _ = in_plattformwaehrung(echt, uj)
-    check("J  Depotwert 1.133.686,27 USD",
-          usd_j is not None and abs(usd_j - 1_133_686.27) < 1.0, f"{usd_j}")
+    check(
+        "J  Depotwert 1.133.686,27 USD",
+        usd_j is not None and abs(usd_j - 1_133_686.27) < 1.0,
+        f"{usd_j}",
+    )
     # GEGENTEST auf die Entscheidungsregel: an diesen Zahlen lag die falsche
     # Hypothese nur 0,1013 % daneben. Mit einer schlichten 0,1-%-Grenze haette
     # die Probe an der dritten Nachkommastelle gehangen — hier wird belegt,
     # dass sie das nicht mehr tut.
-    rel_falsch = abs(sum(
-        v / {"EUR": 1.00, "USD": 0.8797124}[c]
-        for c, v in {"EUR": 1_000_775.19, "USD": -3_930.049}.items()
-    ) - 997_317.877) / 997_317.877
-    check("J  Gegentest: die falsche Hypothese liegt nur 0,1 % daneben",
-          0.0009 < rel_falsch < 0.0011, f"{rel_falsch:.6f}")
+    rel_falsch = (
+        abs(
+            sum(
+                v / {"EUR": 1.00, "USD": 0.8797124}[c]
+                for c, v in {"EUR": 1_000_775.19, "USD": -3_930.049}.items()
+            )
+            - 997_317.877
+        )
+        / 997_317.877
+    )
+    check(
+        "J  Gegentest: die falsche Hypothese liegt nur 0,1 % daneben",
+        0.0009 < rel_falsch < 0.0011,
+        f"{rel_falsch:.6f}",
+    )
     check("J  und wird trotzdem sicher verworfen", uj.richtung == "segment_zu_basis")
 
     print(f"\n  {bestanden} bestanden, {fehlgeschlagen} fehlgeschlagen")
@@ -589,15 +631,23 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
 
         netliq = segmente(werte, "NetLiquidation")
         basis = sammelzeile(werte, "NetLiquidation")
-        zeile("NetLiquidation BASE", f"{basis:,.2f}" if basis is not None else "(keine Sammelzeile)")
+        zeile(
+            "NetLiquidation BASE", f"{basis:,.2f}" if basis is not None else "(keine Sammelzeile)"
+        )
         for w, v in sorted(netliq.items()):
             zeile(f"NetLiquidation {w}", f"{v:,.2f}")
 
         print("\n════ Frage 1 — liefert IBKR einen Kurs? ════")
         kurse_u = segmente(w_updates, "ExchangeRate")
         kurse_s = segmente(w_summary, "ExchangeRate")
-        zeile("aus accountValues()", ", ".join(f"{k}={v}" for k, v in sorted(kurse_u.items())) or "keine")
-        zeile("aus accountSummary()", ", ".join(f"{k}={v}" for k, v in sorted(kurse_s.items())) or "keine")
+        zeile(
+            "aus accountValues()",
+            ", ".join(f"{k}={v}" for k, v in sorted(kurse_u.items())) or "keine",
+        )
+        zeile(
+            "aus accountSummary()",
+            ", ".join(f"{k}={v}" for k, v in sorted(kurse_s.items())) or "keine",
+        )
         kurse = segmente(werte, "ExchangeRate")
         if kurse:
             quelle = "accountSummary() / $LEDGER:ALL" if kurse_s else "accountValues()"
@@ -637,8 +687,10 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
             print("  Keine Kaufkraft-Zeile in der Antwort — Variante B entfaellt damit.")
 
         if alle_tags:
-            for name, quelle in (("accountValues()", roh_updates),
-                                 ("accountSummary() / $LEDGER:ALL", roh_summary)):
+            for name, quelle in (
+                ("accountValues()", roh_updates),
+                ("accountSummary() / $LEDGER:ALL", roh_summary),
+            ):
                 print(f"\n════ Alle Zeilen aus {name} ════")
                 for v in sorted(quelle, key=lambda x: (x.tag, x.currency or "")):
                     print(f"  {v.tag:<32} {(v.currency or '-'):<6} {v.value}")
@@ -652,8 +704,12 @@ def messe(host: str, port: int, client_id: int, alle_tags: bool) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=7497,
-                   help="7497 Papier-TWS, 7496 Echt-TWS, 4002 Papier-Gateway, 4001 Echt-Gateway")
+    p.add_argument(
+        "--port",
+        type=int,
+        default=7497,
+        help="7497 Papier-TWS, 7496 Echt-TWS, 4002 Papier-Gateway, 4001 Echt-Gateway",
+    )
     p.add_argument("--client-id", type=int, default=CLIENT_ID)
     p.add_argument("--all-tags", action="store_true", help="jede Zeile ausgeben, die ankommt")
     p.add_argument("--selftest", action="store_true", help="die Rechnung pruefen, ohne TWS")

@@ -27,6 +27,7 @@ verdecken — dieselbe Regel, unter der `console.hold()` schon einmal
 stillgeschwiegen hat. Jede Funktion hier meldet ihr Ergebnis als Wahrheitswert
 und laesst nichts nach oben durch.
 """
+
 from __future__ import annotations
 
 import logging
@@ -80,9 +81,7 @@ def message_box(text: str, title: str = "Ordertune Bridge", *, error: bool = Tru
             None,
             text,
             title,
-            _MB_OK
-            | (_MB_ICONERROR if error else _MB_ICONINFORMATION)
-            | _MB_SETFOREGROUND,
+            _MB_OK | (_MB_ICONERROR if error else _MB_ICONINFORMATION) | _MB_SETFOREGROUND,
         )
         return True
     except Exception as exc:  # noqa: BLE001 - ein Fehler beim Melden bleibt stumm

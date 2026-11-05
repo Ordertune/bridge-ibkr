@@ -20,6 +20,7 @@ nichts".
 Diese Zusicherungen nageln beide Haelften fest: die Quelle, und den
 Unterschied zwischen „leer" und „unbekannt".
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -209,9 +210,7 @@ def test_positions_are_scoped_to_the_single_trading_account() -> None:
     ib = FakeIB(
         _positions=[
             FakePosition(contract=MU, position=1.0, avgCost=955.0),
-            FakePosition(
-                contract=MU, position=4.0, avgCost=900.0, account="U99999999"
-            ),
+            FakePosition(contract=MU, position=4.0, avgCost=900.0, account="U99999999"),
         ],
         _accounts=["U23076419"],
     )
@@ -233,9 +232,7 @@ def test_several_managed_accounts_are_not_guessed() -> None:
     ib = FakeIB(
         _positions=[
             FakePosition(contract=MU, position=1.0, avgCost=955.0),
-            FakePosition(
-                contract=CSCO, position=2.0, avgCost=110.0, account="U99999999"
-            ),
+            FakePosition(contract=CSCO, position=2.0, avgCost=110.0, account="U99999999"),
         ],
         _accounts=["U23076419", "U99999999"],
     )
@@ -266,9 +263,7 @@ def test_every_position_row_carries_its_account() -> None:
     Listen, die der Empfaenger nicht auseinanderhalten kann.
     """
     ib = FakeIB(
-        _positions=[
-            FakePosition(contract=MU, position=1.0, avgCost=955.0, account="U11111111")
-        ],
+        _positions=[FakePosition(contract=MU, position=1.0, avgCost=955.0, account="U11111111")],
         _accounts=["U11111111"],
     )
     snap = _client(ib).account_snapshot()

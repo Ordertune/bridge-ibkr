@@ -41,6 +41,7 @@ Woertlich die Zeile, die in T1-82 als die gefaehrliche markiert ist. Die
 Plattform kann das strukturell nicht sehen; die Bridge hat den Beleg auf der
 Platte liegen.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

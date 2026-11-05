@@ -35,6 +35,7 @@ Verzeichnis namens `run` mit einer JSON-Datei sieht nach Abfall aus.
 `bridge.env` bleibt, wo sie ist: neben der EXE. Sie ist die Datei, die der
 Nutzer anfassen soll — die anderen sind es nicht.
 """
+
 from __future__ import annotations
 
 import os
@@ -182,20 +183,20 @@ def migrate_legacy(*, ziel: Path | None = None) -> list[tuple[str, str]]:
             if not _hat_inhalt(alt):
                 continue
             if _hat_inhalt(neu):
-                meldungen.append((
-                    "warning",
-                    f"Both {alt} and {neu} hold files. Nothing was moved - "
-                    f"the Bridge reads {neu}. Please merge them by hand.",
-                ))
+                meldungen.append(
+                    (
+                        "warning",
+                        f"Both {alt} and {neu} hold files. Nothing was moved - "
+                        f"the Bridge reads {neu}. Please merge them by hand.",
+                    )
+                )
                 break
             try:
                 neu.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(alt), str(neu))
                 meldungen.append(("info", f"Moved {alt} to {neu}."))
             except OSError as exc:
-                meldungen.append((
-                    "warning", f"Could not move {alt} to {neu}: {exc}"
-                ))
+                meldungen.append(("warning", f"Could not move {alt} to {neu}: {exc}"))
             break
 
     return meldungen

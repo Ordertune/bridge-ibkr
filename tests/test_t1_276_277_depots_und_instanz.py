@@ -9,6 +9,7 @@ Zugesichert wird vor allem, was NICHT passieren darf:
   4. Sie leitet sich NICHT aus der Maschine ab — sonst waere sie eine zweite
      Kopie des Fingerprints und trennte genau das nicht, wozu sie da ist.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,9 +46,7 @@ class _Recorder:
         koerper: Any = None
         if request.content:
             koerper = json.loads(request.content)
-        self.calls.append(
-            (request.method, str(request.url), dict(request.headers), koerper)
-        )
+        self.calls.append((request.method, str(request.url), dict(request.headers), koerper))
         return httpx.Response(200, json={"ok": True, "status": "ready"})
 
 
@@ -81,9 +80,7 @@ def test_die_kennung_steht_auf_jeder_anfrage() -> None:
     api = _client(rec)
 
     api.handshake(capabilities=None)
-    api.heartbeat(
-        cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok"
-    )
+    api.heartbeat(cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok")
     api.get_pending()
     api.ack_order("d-1", broker_order_id="42", submitted_at="2026-10-02T10:00:00Z")
 
@@ -103,12 +100,8 @@ def test_die_kennung_ist_im_prozess_stabil() -> None:
     """Zwei Anfragen, eine Kennung. Sonst saehe jeder Schlag wie ein neuer Prozess aus."""
     rec = _Recorder()
     api = _client(rec)
-    api.heartbeat(
-        cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok"
-    )
-    api.heartbeat(
-        cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok"
-    )
+    api.heartbeat(cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok")
+    api.heartbeat(cash=1.0, equity=2.0, currency="USD", positions=None, gateway_status="ok")
     erste = rec.calls[0][2]["x-bridge-instance"]
     zweite = rec.calls[1][2]["x-bridge-instance"]
     assert erste == zweite

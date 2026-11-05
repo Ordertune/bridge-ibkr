@@ -8,9 +8,9 @@ Geprueft wird ohne Windows und ohne Fenster — jede Entscheidung dieses Vorgang
 ist eine reine Funktion ueber `argv` und den Zustand, wie `headless_requested`
 es seit T1-101 vormacht.
 """
+
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from ordertune_bridge_ibkr import console, logging_setup, windows_ui
@@ -209,9 +209,7 @@ def test_logging_skips_the_screen_when_there_is_none(monkeypatch, tmp_path) -> N
 
     monkeypatch.setattr(logging_setup.windows_ui, "has_console_stream", lambda: False)
     logging_setup.setup_logging(log_dir=tmp_path / "a")
-    assert gerufen == [], (
-        "Ein Handler auf `None` ist kein Handler, sondern eine Fehlerquelle."
-    )
+    assert gerufen == [], "Ein Handler auf `None` ist kein Handler, sondern eine Fehlerquelle."
 
     monkeypatch.setattr(logging_setup.windows_ui, "has_console_stream", lambda: True)
     logging_setup.setup_logging(log_dir=tmp_path / "b")

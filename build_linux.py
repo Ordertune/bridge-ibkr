@@ -32,6 +32,7 @@ Linux gibt es keine eingebettete Symbolressource und keinen Explorer, der sie
 zeigte — ein Dienst hat kein Symbol. Die Pruefung hier wegzulassen ist deshalb
 kein uebersprungener Schritt, sondern die Abwesenheit eines Schrittes.
 """
+
 from __future__ import annotations
 
 import base64

@@ -3,6 +3,7 @@
 Server sendet pre-computed qty + sizing_config. Bridge recomputet mit
 frischer Live-Equity aus IBKR und rejected wenn Drift > 5%.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
