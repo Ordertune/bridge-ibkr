@@ -16,9 +16,15 @@ from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
 from .order_vocabulary import record_cancel_reason
 from .write_access import (
     CONFIRMED as READ_ONLY_CONFIRMED,
+)
+from .write_access import (
     SUSPECTED as READ_ONLY_SUSPECTED,
+)
+from .write_access import (
     VALIDATION_ERROR_CODE,
     WriteAccess,
+)
+from .write_access import (
     classify as classify_write_access,
 )
 

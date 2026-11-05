@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import socket
 import threading
 import urllib.error
 import urllib.request

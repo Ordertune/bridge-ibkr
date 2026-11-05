@@ -30,16 +30,19 @@ zweiter Echtauftrag.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from .order_vocabulary import (
     IBKR_TO_WIRE_STATUS,
-    LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
     LIVE_WIRE_STATES,
     rejection_reason_of,
     unmask_wire_escapes,
+)
+from .order_vocabulary import (
+    LIVE_IBKR_STATES as _LIVE_IBKR_STATES,
 )
 
 

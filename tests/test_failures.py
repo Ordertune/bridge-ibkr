@@ -343,7 +343,7 @@ def test_no_token_failure_tells_the_customer_to_download_a_bridge_env() -> None:
     """
     from ordertune_bridge_ibkr.failures import _HANDSHAKE_BY_CODE
 
-    for schluessel, (code, headline, detail, _) in _HANDSHAKE_BY_CODE.items():
+    for schluessel, (code, _headline, detail, _) in _HANDSHAKE_BY_CODE.items():
         if code == "fingerprint_missing":
             continue
         text = " ".join(detail).lower()

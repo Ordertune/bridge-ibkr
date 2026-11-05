@@ -17,8 +17,7 @@ from pathlib import Path
 import pytest
 
 from ordertune_bridge_ibkr import env_file, failures
-from ordertune_bridge_ibkr.cockpit import CockpitServer, StateStore
-from ordertune_bridge_ibkr.cockpit import runfile
+from ordertune_bridge_ibkr.cockpit import CockpitServer, StateStore, runfile
 from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
 
 ROOT = Path(__file__).resolve().parents[1]

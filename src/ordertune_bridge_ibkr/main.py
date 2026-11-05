@@ -43,32 +43,37 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from collections.abc import Callable, Iterable
+from datetime import datetime, timezone
+from datetime import time as dt_time
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-from . import __version__, console, failures, order_vocabulary, port_probe
+from . import (
+    __version__,
+    console,
+    failures,
+    order_vocabulary,
+    paths,
+    port_probe,
+    trade_reports,
+    windows_ui,
+)
 from .api_client import OrdertuneApiClient
-from . import paths, trade_reports
 from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
-from .fingerprint import compute_fingerprint
-from .ibkr_client import IbkrClient
 from .external_executions import (
     external_execution_bodies,
     order_types_by_perm_id,
 )
+from .fingerprint import compute_fingerprint
+from .ibkr_client import IbkrClient
 from .logging_setup import setup_logging
-from . import windows_ui
-from .pair_console import pair_requested, run_pairing
-from .probe import probe_requested, run_probe
-from .submitted_store import SubmittedStore
-from .trade_report_store import TradeReportStore
 from .order_reconcile import (
+    UnresolvedDispatch,
     als_utc,
     fills_by_dispatch,
-    UnresolvedDispatch,
     reconcile_open_dispatches,
 )
 from .order_translator import (
@@ -88,12 +93,21 @@ from .order_vocabulary import (
     is_warning_code,
     rejection_reason_of,
 )
+from .pair_console import pair_requested, run_pairing
 from .position_sizing import (
     SizingConfig,
     recompute_qty,
     sizing_drift_exceeds_threshold,
 )
+from .probe import probe_requested, run_probe
+from .submitted_store import SubmittedStore
+from .trade_report_store import TradeReportStore
 from .update_check import emit_update_warning_if_any
+
+if TYPE_CHECKING:
+    # Nur fuer die Annotation von `kind_orders`; zur Laufzeit wird sie dank
+    # `from __future__ import annotations` nie ausgewertet.
+    from ib_insync import Order
 
 log = logging.getLogger(__name__)
 
@@ -525,7 +539,7 @@ def _handle_pending(
             # `parentId` kommt erst jetzt: die Auftragsnummer des Elternteils
             # steht erst fest, wenn TWS ihn angenommen hat.
             gesetzte_kinder: list[Any] = []
-            for kind, kind_order in zip(kinder, kind_orders):
+            for kind, kind_order in zip(kinder, kind_orders, strict=True):
                 kind_order.parentId = int(getattr(trade.order, "orderId", 0))
                 try:
                     kind_trade = ibkr.place_order(contract, kind_order)
@@ -2392,8 +2406,7 @@ def start_cockpit(
     if console.headless_requested(argv):
         return None
     try:
-        from .cockpit import CockpitServer, CockpitState, StateStore
-        from .cockpit import runfile
+        from .cockpit import CockpitServer, CockpitState, StateStore, runfile
 
         store = StateStore(
             CockpitState(
@@ -2602,8 +2615,7 @@ def run_setup_cockpit(
         return False
 
     try:
-        from .cockpit import CockpitServer, CockpitState, SetupActions, StateStore
-        from .cockpit import runfile
+        from .cockpit import CockpitServer, CockpitState, SetupActions, StateStore, runfile
         from .cockpit import window as window_mod
 
         store = StateStore(

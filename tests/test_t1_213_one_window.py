@@ -10,7 +10,6 @@ es seit T1-101 vormacht.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from ordertune_bridge_ibkr import console, logging_setup, windows_ui

@@ -245,9 +245,9 @@ def test_a_packed_exe_without_a_console_still_opens_the_assistant(monkeypatch) -
 
 def test_the_assistant_does_not_run_headless(monkeypatch) -> None:
     monkeypatch.setattr(console, "is_frozen", lambda: True)
-    from ordertune_bridge_ibkr.failures import Failure
-
     from pathlib import Path
+
+    from ordertune_bridge_ibkr.failures import Failure
 
     assert m.run_setup_cockpit(
         Failure(code="env_missing", headline="x"),

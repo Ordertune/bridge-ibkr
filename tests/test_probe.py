@@ -21,7 +21,6 @@ import pytest
 from ordertune_bridge_ibkr import main as m
 from ordertune_bridge_ibkr import probe
 
-
 # ── Der Schalter ─────────────────────────────────────────────────────────────
 
 

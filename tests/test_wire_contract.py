@@ -760,7 +760,7 @@ def test_no_snake_case_keys_on_the_wire(key: str) -> None:
 # ─── T1-107: die Kontokennung auf der Leitung ────────────────────────────────
 
 
-def _heartbeat_snapshot(rec: "_Recorder") -> dict:
+def _heartbeat_snapshot(rec: _Recorder) -> dict:
     """Der `accountSnapshot` aus dem aufgezeichneten Heartbeat."""
     return rec.body["accountSnapshot"]
 

@@ -25,8 +25,9 @@ Auftrags heisst beim naechsten Start: die Verbindung findet ihn nicht mehr.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import setup as setup_mod
 

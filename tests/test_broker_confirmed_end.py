@@ -162,7 +162,6 @@ def test_the_deferred_path_re_reads_the_proof() -> None:
 
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from ordertune_bridge_ibkr.main import rejection_reason
 

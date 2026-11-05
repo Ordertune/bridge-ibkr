@@ -39,7 +39,6 @@ import pytest
 
 from ordertune_bridge_ibkr import main
 
-
 KOPF = (
     "Drill Down;Security Type;Last Trading Day;Strike;Put/Call;Currency;"
     "Fin Instrument;Action;Action Sub-Type;Quantity;Comb.;Symbol;Price;Time;"

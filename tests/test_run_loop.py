@@ -67,7 +67,7 @@ class TickingIbkr(FakeIbkr):
     60 Sekunden Schleife in wenigen Millisekunden.
     """
 
-    def __init__(self, clock: "Clock", ticks: int) -> None:
+    def __init__(self, clock: Clock, ticks: int) -> None:
         super().__init__(ticks)
         self._clock = clock
 

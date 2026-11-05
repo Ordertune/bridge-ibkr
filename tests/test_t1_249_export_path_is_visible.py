@@ -31,7 +31,6 @@ from ordertune_bridge_ibkr import pairing, trade_reports
 from ordertune_bridge_ibkr.cockpit import setup as setup_mod
 from ordertune_bridge_ibkr.cockpit.page import PAGE_HTML
 
-
 # ── 1) Die Vorlage schreibt die Zeile ────────────────────────────────────────
 
 

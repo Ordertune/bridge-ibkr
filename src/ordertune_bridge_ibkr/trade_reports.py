@@ -162,7 +162,7 @@ _TAG_IM_NAMEN = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
 
 
 def ist_berichtsdatei(p: Path) -> bool:
-    """Ist das eine Handelsbericht-Datei der TWS?
+    r"""Ist das eine Handelsbericht-Datei der TWS?
 
     ## Der Befund vom 2026-09-28
 
