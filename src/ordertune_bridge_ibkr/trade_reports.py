@@ -55,6 +55,7 @@ Strategie stand es als `Momentum_Power`, `Momentum_Powerho` und
 Nummer verschieden, damit der Vermerk in 64 Zeichen passt. Nur die UUID am
 Ende zaehlt, und die liest `dispatch_id_from_order_ref`.
 """
+
 from __future__ import annotations
 
 import csv
@@ -408,9 +409,7 @@ def lies_datei(pfad: Path, konto: str, *, lesung: Lesung) -> None:
     if fehlend:
         # Nicht halb lesen. Eine Datei ohne `Order Ref.` erzeugte lauter
         # fremde Zeilen und saehe aus wie ein Konto ohne Modellhandel.
-        lesung.abgelehnt.append(
-            f"{pfad.name}: missing column(s) {', '.join(fehlend)}"
-        )
+        lesung.abgelehnt.append(f"{pfad.name}: missing column(s) {', '.join(fehlend)}")
         return
 
     breite = len(kopf)
@@ -449,9 +448,7 @@ def lies_datei(pfad: Path, konto: str, *, lesung: Lesung) -> None:
         menge = _zahl(werte.get(SPALTE_MENGE, ""))
         wann = _zeitpunkt(werte.get(SPALTE_TAG, ""), werte.get(SPALTE_ZEIT, ""))
         if not kennung or menge is None or menge <= 0 or wann is None:
-            lesung.quarantaene.append(
-                f"{pfad.name}:{nummer}: unusable id/quantity/timestamp"
-            )
+            lesung.quarantaene.append(f"{pfad.name}:{nummer}: unusable id/quantity/timestamp")
             continue
 
         gebuehr = _zahl(werte.get(SPALTE_GEBUEHR, ""))
@@ -620,9 +617,7 @@ def check_requested(argv: list[str]) -> bool:
     return CHECK_FLAG in argv
 
 
-def check_bericht(
-    verzeichnis: Path | str, *, heute: str | None = None
-) -> list[str]:
+def check_bericht(verzeichnis: Path | str, *, heute: str | None = None) -> list[str]:
     r"""Der Block, den `--check-reports` ausgibt. Zeile fuer Zeile.
 
     ## Woher das kommt
@@ -681,10 +676,7 @@ def check_bericht(
 
     if bereit.ok:
         try:
-            dateien_hier = sorted(
-                p.name for p in Path(basis).iterdir()
-                if ist_berichtsdatei(p)
-            )
+            dateien_hier = sorted(p.name for p in Path(basis).iterdir() if ist_berichtsdatei(p))
         except OSError:
             dateien_hier = []
         zeilen.append("")
@@ -696,16 +688,18 @@ def check_bericht(
         # Dialogs. Zwei davon sind Fallen, die sich nicht von selbst zeigen:
         # ein eingetragener Dateiname laesst die TWS dieselbe Datei ueberschreiben,
         # und ein Komma als Trennzeichen zerbricht Zeilen, weil IBKR nicht quotet.
-        zeilen.extend([
-            "",
-            "  In TWS: Global Configuration - Export Reports",
-            f"    Directory        {basis or '(set TWS_EXPORT_DIR in bridge.env)'}",
-            "    Export filename  leave EMPTY",
-            "    Field separator  semicolon",
-            "    Export trade reports periodically: on",
-            "",
-            "  TWS and the Bridge must run under the same user.",
-        ])
+        zeilen.extend(
+            [
+                "",
+                "  In TWS: Global Configuration - Export Reports",
+                f"    Directory        {basis or '(set TWS_EXPORT_DIR in bridge.env)'}",
+                "    Export filename  leave EMPTY",
+                "    Field separator  semicolon",
+                "    Export trade reports periodically: on",
+                "",
+                "  TWS and the Bridge must run under the same user.",
+            ]
+        )
 
     zeilen.append("")
     return zeilen

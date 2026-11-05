@@ -26,6 +26,7 @@ Drei Stufen, jede fuer sich ausreichend. **Keine davon darf den Handel
 aufhalten**: schlaegt alles fehl, steht die Adresse da und der Kern laeuft
 weiter. Das Fenster ist die Huelle, der lokale Server ist das Fundament.
 """
+
 from __future__ import annotations
 
 import logging

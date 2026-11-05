@@ -8,6 +8,7 @@ Drei Zusagen, die hier belegt werden:
     Konsole und Flaeche sagen ueber dieselbe Sache dasselbe.
   * Die Diagnose enthaelt kein Geheimnis. Sie ist zum Weiterschicken gedacht.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,9 @@ from ordertune_bridge_ibkr.cockpit import journal as journal_mod
 # ── B-3: die Auftragsliste ───────────────────────────────────────────────────
 
 
-def _trade(symbol: str, status: str, action: str = "BUY", qty: float = 2,
-           log_entries=()) -> SimpleNamespace:
+def _trade(
+    symbol: str, status: str, action: str = "BUY", qty: float = 2, log_entries=()
+) -> SimpleNamespace:
     return SimpleNamespace(
         order=SimpleNamespace(action=action, totalQuantity=qty, orderId=1, orderRef=""),
         contract=SimpleNamespace(symbol=symbol),
@@ -63,7 +65,8 @@ def test_a_rejection_carries_ibkrs_own_words() -> None:
         "USD Barmittel fuer diese und weitere offene Orders benoetigt: 1418.40 USD"
     )
     m._TRADES_BY_DISPATCH["9948c645-c094-4477-84f4-c7acdbeb2bb6"] = _trade(
-        "CRWD", "Inactive",
+        "CRWD",
+        "Inactive",
         log_entries=[SimpleNamespace(errorCode=201, message=grund)],
     )
 
@@ -91,7 +94,8 @@ def test_without_a_connection_the_list_is_absent_not_empty() -> None:
 def test_with_a_connection_and_no_orders_the_list_is_empty() -> None:
     store = StateStore()
     m.report_heartbeat(
-        SimpleNamespace(store=store), True,
+        SimpleNamespace(store=store),
+        True,
         SimpleNamespace(cash=1.0, equity=2.0, currency="USD", positions=[]),
     )
     assert store.get()[0].orders == []
@@ -113,10 +117,10 @@ def test_a_revoked_token_at_runtime_is_told_apart_from_a_dead_network() -> None:
     verlangen Verschiedenes."""
     store_a, store_b = StateStore(), StateStore()
 
-    m.report_heartbeat(SimpleNamespace(store=store_a), True, None,
-                       _http_error(401, "connection_revoked"))
-    m.report_heartbeat(SimpleNamespace(store=store_b), True, None,
-                       httpx.ConnectError("no route"))
+    m.report_heartbeat(
+        SimpleNamespace(store=store_a), True, None, _http_error(401, "connection_revoked")
+    )
+    m.report_heartbeat(SimpleNamespace(store=store_b), True, None, httpx.ConnectError("no route"))
 
     assert store_a.get()[0].failure_code == "connection_revoked"
     assert store_b.get()[0].failure_code == "platform_unreachable"
@@ -124,8 +128,9 @@ def test_a_revoked_token_at_runtime_is_told_apart_from_a_dead_network() -> None:
 
 def test_the_card_carries_a_sentence_and_an_action() -> None:
     store = StateStore()
-    m.report_heartbeat(SimpleNamespace(store=store), True, None,
-                       _http_error(403, "fingerprint_mismatch"))
+    m.report_heartbeat(
+        SimpleNamespace(store=store), True, None, _http_error(403, "fingerprint_mismatch")
+    )
 
     state, _ = store.get()
     assert "different hardware" in state.failure_headline
@@ -134,10 +139,10 @@ def test_the_card_carries_a_sentence_and_an_action() -> None:
 
 def test_a_recovered_heartbeat_clears_the_card() -> None:
     """Sonst bleibt eine Stoerung stehen, die es nicht mehr gibt."""
-    store = StateStore(CockpitState(failure_code="platform_unreachable",
-                                    failure_headline="alt"))
+    store = StateStore(CockpitState(failure_code="platform_unreachable", failure_headline="alt"))
     m.report_heartbeat(
-        SimpleNamespace(store=store), True,
+        SimpleNamespace(store=store),
+        True,
         SimpleNamespace(cash=1.0, equity=2.0, currency="USD", positions=[]),
     )
     assert store.get()[0].failure_code is None
@@ -175,6 +180,7 @@ def test_the_log_and_diagnostics_are_served_without_secrets() -> None:
     )
     srv.start()
     try:
+
         def hole(pfad: str) -> dict:
             url = f"http://127.0.0.1:{srv.port}{pfad}?t={srv.token}"
             with urllib.request.urlopen(url, timeout=5) as r:

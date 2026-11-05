@@ -60,6 +60,7 @@ einer Betriebsflaeche, und t1 haelt es genauso.
 
 Nutzertexte englisch.
 """
+
 from __future__ import annotations
 
 from .assets import ICON_PNG, INTER_400, INTER_500, INTER_600, INTER_700
@@ -75,20 +76,23 @@ def _schrift(gewicht: int, daten: str) -> str:
 
 FONT_FACES = "".join(
     _schrift(g, d)
-    for g, d in (
-        (400, INTER_400), (500, INTER_500), (600, INTER_600), (700, INTER_700)
-    )
+    for g, d in ((400, INTER_400), (500, INTER_500), (600, INTER_600), (700, INTER_700))
 )
 
-PAGE_HTML = """<!doctype html>
+PAGE_HTML = (
+    """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ordertune Bridge</title>
-<link rel="icon" href="data:image/png;base64,""" + ICON_PNG + """">
+<link rel="icon" href="data:image/png;base64,"""
+    + ICON_PNG
+    + """">
 <style>
-""" + FONT_FACES + """
+"""
+    + FONT_FACES
+    + """
 :root {
   /* Kopie der t1-Tokens aus t1.ordertune.com/src/app/globals.css.
      Gegenstueck: docs.ordertune.com/styles/globals.css, das dieselben Werte
@@ -333,7 +337,9 @@ summary:hover { color: var(--fg-1); }
 <body>
 <div class="shell">
   <header>
-    <img src="data:image/png;base64,""" + ICON_PNG + """" alt="">
+    <img src="data:image/png;base64,"""
+    + ICON_PNG
+    + """" alt="">
     <span class="name">Ordertune Bridge</span>
     <span class="ver" id="ver"></span>
   </header>
@@ -1197,3 +1203,4 @@ setInterval(render, 1000);
 </body>
 </html>
 """
+)

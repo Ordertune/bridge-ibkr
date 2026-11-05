@@ -10,6 +10,7 @@ T1-206 D die Maschinenkennung des Systems. Die **Form** des Hashs ist auf
 beiden Seiten dieselbe geblieben; die Plattform sieht keinen Unterschied und
 braucht keinen.
 """
+
 from __future__ import annotations
 
 import hashlib

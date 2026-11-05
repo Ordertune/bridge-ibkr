@@ -4,6 +4,7 @@ Gegen einen echten, selbst geoeffneten Socket geprueft, nicht gegen eine
 Attrappe: die Zusage „ein reiner Verbindungsversuch, danach sofort zu" ist
 sonst nicht belegt.
 """
+
 from __future__ import annotations
 
 import socket
@@ -93,12 +94,10 @@ def test_the_gateway_is_still_recognised() -> None:
     assert tuple(p for p, _ in port_probe.GATEWAY_PORTS) == (4002, 4001)
     assert port_probe.nur_gateway(((4001, "IB Gateway live"),)) is True
     assert port_probe.nur_gateway(((7497, "TWS paper"),)) is False
-    assert (
-        port_probe.nur_gateway(((7497, "TWS paper"), (4001, "IB Gateway live"))) is False
-    ), "Laeuft beides, ist die TWS da — dann gibt es nichts zu erklaeren."
-    assert port_probe.nur_gateway(()) is False, (
-        "Ohne Antwort gibt es nichts zu erklaeren."
+    assert port_probe.nur_gateway(((7497, "TWS paper"), (4001, "IB Gateway live"))) is False, (
+        "Laeuft beides, ist die TWS da — dann gibt es nichts zu erklaeren."
     )
+    assert port_probe.nur_gateway(()) is False, "Ohne Antwort gibt es nichts zu erklaeren."
 
 
 def test_every_port_carries_the_label_the_user_sees_in_tws() -> None:
@@ -122,7 +121,5 @@ def test_the_scan_reports_only_what_answered(monkeypatch) -> None:
 
 
 def test_a_silent_machine_yields_an_empty_result(monkeypatch) -> None:
-    monkeypatch.setattr(
-        port_probe, "port_answers", lambda host, port, timeout=0.0: False
-    )
+    monkeypatch.setattr(port_probe, "port_answers", lambda host, port, timeout=0.0: False)
     assert port_probe.scan("127.0.0.1") == ()

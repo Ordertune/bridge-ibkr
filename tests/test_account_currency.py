@@ -15,6 +15,7 @@ in USD; jede Stueckzahl waere dann um den Wechselkurs daneben gewesen — bei
 Deshalb pruefen diese Zusicherungen vor allem eines: dass hier nicht geraten
 wird. Eine falsche Waehrung ist ein stiller Faktor auf jede einzelne Order.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

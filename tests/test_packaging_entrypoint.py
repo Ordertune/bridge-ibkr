@@ -20,6 +20,7 @@ test that starts it a different way.
 These tests therefore reproduce PyInstaller's execution model directly: run a
 file as a script, in a subprocess, and look at what comes out.
 """
+
 from __future__ import annotations
 
 import os
@@ -88,16 +89,14 @@ def test_launcher_starts_and_reaches_configuration(tmp_path) -> None:
 
     combined = result.stdout + result.stderr
     assert "ImportError" not in combined, (
-        "the launcher died during import — the executable would not start:\n"
-        f"{combined}"
+        f"the launcher died during import — the executable would not start:\n{combined}"
     )
     assert "attempted relative import" not in combined
     # T1-101 A-1/A-2: the wording changed from `bridge.env invalid: <exception>`
     # to a framed block with a stable reference code. The code is what this
     # test anchors on -- it is the part meant to survive rewording.
     assert "Reference: env_missing" in combined, (
-        "expected the configuration check to run and complain; got:\n"
-        f"{combined}"
+        f"expected the configuration check to run and complain; got:\n{combined}"
     )
     assert result.returncode == 1
 
@@ -150,5 +149,5 @@ def test_build_targets_the_launcher() -> None:
     )
     assert (
         '"ordertune_bridge_ibkr" / "main.py"' not in build_source
-        and "ordertune_bridge_ibkr\" / \"main.py\"" not in build_source
+        and 'ordertune_bridge_ibkr" / "main.py"' not in build_source
     ), "build.py points at a module inside the package again"

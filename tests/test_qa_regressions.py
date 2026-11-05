@@ -4,6 +4,7 @@ Jede Zusicherung hier steht fuer einen Fehler, der im fertigen Code lag und
 beim Durchgehen gefunden wurde. Sie sind billig und verhindern genau die
 Rueckfaelle, die niemand bemerkt haette.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,9 +37,7 @@ def test_nothing_carrying_the_token_can_be_committed(name: str) -> None:
     echte `bridge.env` im Repo-Wurzelverzeichnis liegt, haette ein `git add .`
     einen lebenden Token in ein **oeffentliches** Repo gestellt.
     """
-    ergebnis = subprocess.run(
-        ["git", "check-ignore", "-q", name], cwd=ROOT, capture_output=True
-    )
+    ergebnis = subprocess.run(["git", "check-ignore", "-q", name], cwd=ROOT, capture_output=True)
     assert ergebnis.returncode == 0, (
         f"{name} wird von .gitignore nicht erfasst und landet in `git status`."
     )
@@ -79,8 +78,7 @@ def test_the_run_file_is_owner_only(tmp_path) -> None:
     assert p is not None
     assert "geheim" in json.loads(p.read_text("utf-8"))["url"]
     assert stat.S_IMODE(p.stat().st_mode) == 0o600, (
-        "Wer diese Datei liest, darf danach ueber das Cockpit auch bridge.env "
-        "schreiben."
+        "Wer diese Datei liest, darf danach ueber das Cockpit auch bridge.env schreiben."
     )
 
 
@@ -251,8 +249,9 @@ def test_the_wordmark_is_never_typeset() -> None:
     Wo die Marke sichtbar sein soll, steht das App-Icon — laut System das
     einzige erlaubte Glyph.
     """
-    assert "ORDERTUNE" not in PAGE_HTML.replace("ORDERTUNE_API_BASE", "")\
-        .replace("ORDERTUNE_BRIDGE_TOKEN", "").replace("ORDERTUNE_BRIDGE_CONNECTION_ID", "")
+    assert "ORDERTUNE" not in PAGE_HTML.replace("ORDERTUNE_API_BASE", "").replace(
+        "ORDERTUNE_BRIDGE_TOKEN", ""
+    ).replace("ORDERTUNE_BRIDGE_CONNECTION_ID", "")
     assert PAGE_HTML.count("data:image/png;base64,") == 2, (
         "Erwartet: Favicon und Kopf-Glyph, beide eingebettet."
     )

@@ -3,6 +3,7 @@
 Async-first, aber gewrappt in sync-Interface für den Scheduler-basierten
 Poll-Loop. ib_insync erlaubt beides via internem util.run().
 """
+
 from __future__ import annotations
 
 import logging
@@ -64,9 +65,9 @@ class ClientIdInUse(ConnectionError):
         self.tws_text = tws_text
         super().__init__(
             f"TWS error {CLIENT_ID_IN_USE_CODE}: client id {client_id} is "
-            f"already in use ({tws_text})" if tws_text else
-            f"TWS error {CLIENT_ID_IN_USE_CODE}: client id {client_id} is "
-            "already in use"
+            f"already in use ({tws_text})"
+            if tws_text
+            else f"TWS error {CLIENT_ID_IN_USE_CODE}: client id {client_id} is already in use"
         )
 
 
@@ -313,8 +314,12 @@ class IbkrClient:
         `connect()` ruft, beginnt eine neue Sitzung, und was die vorige gesehen
         hat, ist kein Befund ueber die neue.
         """
-        log.info("Connecting to IBKR TWS at %s:%d (client-id=%d)",
-                 self._host, self._port, self._client_id)
+        log.info(
+            "Connecting to IBKR TWS at %s:%d (client-id=%d)",
+            self._host,
+            self._port,
+            self._client_id,
+        )
         # VOR dem Verbinden angehaengt: der 321er kommt rund eine Zehntel-
         # sekunde nach den Positionen, also mitten im Verbindungsvorgang.
         # Danach angehaengt waere er schon durch.
@@ -375,9 +380,7 @@ class IbkrClient:
         """
         beantwortet = True
         try:
-            self._ib.run(
-                self._ib.reqOpenOrdersAsync(), timeout=WRITE_ACCESS_TIMEOUT_S
-            )
+            self._ib.run(self._ib.reqOpenOrdersAsync(), timeout=WRITE_ACCESS_TIMEOUT_S)
         except Exception:
             beantwortet = False
 
@@ -427,9 +430,7 @@ class IbkrClient:
         unterscheiden.
         """
         try:
-            self._ib.run(
-                self._ib.reqPositionsAsync(), timeout=POSITIONS_TIMEOUT_S
-            )
+            self._ib.run(self._ib.reqPositionsAsync(), timeout=POSITIONS_TIMEOUT_S)
         except Exception as exc:
             self._positions_known = False
             log.warning(
@@ -672,7 +673,6 @@ class IbkrClient:
         else:
             log.info("Account currency %s. %s", currency, fx.grund)
 
-
     def _positions(self) -> list[dict[str, Any]] | None:
         """T1-99 — der Depotbestand, aus der Quelle, die nicht schweigt.
 
@@ -767,9 +767,7 @@ class IbkrClient:
                     "currency": getattr(p.contract, "currency", None) or None,
                     "market_price": _opt(extra.marketPrice) if extra else None,
                     "market_value": _opt(extra.marketValue) if extra else None,
-                    "unrealized_pnl": (
-                        _opt(extra.unrealizedPNL) if extra else None
-                    ),
+                    "unrealized_pnl": (_opt(extra.unrealizedPNL) if extra else None),
                 }
             )
         return rows

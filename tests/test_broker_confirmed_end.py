@@ -36,6 +36,7 @@ Frage: IBKR hat den Zustand gesetzt, nicht ib_insync. Die Beschriftung Storno
 gegen Verfall faellt seit T1-96 B-1 auf der Plattform, ueber den Zeitpunkt
 gegen den Sitzungsschluss.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -250,9 +251,7 @@ def test_die_maskierung_wird_aufgeloest() -> None:
 
 def test_ein_text_ohne_maskierung_bleibt_unveraendert() -> None:
     """Kein Umschreiben auf Verdacht."""
-    assert unmask_wire_escapes("insufficient buying power") == (
-        "insufficient buying power"
-    )
+    assert unmask_wire_escapes("insufficient buying power") == ("insufficient buying power")
     # Ein einzelner Backslash ist keine Maskierung.
     assert unmask_wire_escapes(r"C:\temp\log") == r"C:\temp\log"
 

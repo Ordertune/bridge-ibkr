@@ -75,7 +75,10 @@ def test_hin_und_zurueck_fuer_beide_formen():
 
 def test_leerraum_um_den_vermerk_stoert_nicht():
     assert dispatch_id_from_order_ref(f"  ot-{UUID}  ") == UUID
-    assert dispatch_id_from_order_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ") == "e99a18c4-28cb-48d5-8260-853678922e03"
+    assert (
+        dispatch_id_from_order_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ")
+        == "e99a18c4-28cb-48d5-8260-853678922e03"
+    )
 
 
 def test_fremde_auftraege_werden_uebergangen():
@@ -90,7 +93,10 @@ def test_praefix_allein_ist_keine_kennung():
 
 def test_ein_etikett_ohne_uuid_faellt_auf_die_alte_regel_zurueck():
     # Was nicht wie eine UUID endet, wird wie frueher als Ganzes gelesen.
-    assert dispatch_id_from_order_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03") == "e99a18c4-28cb-48d5-8260-853678922e03"
+    assert (
+        dispatch_id_from_order_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03")
+        == "e99a18c4-28cb-48d5-8260-853678922e03"
+    )
 
 
 def test_eine_uuid_mitten_im_etikett_wird_nicht_verwechselt():

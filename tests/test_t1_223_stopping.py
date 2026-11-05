@@ -7,6 +7,7 @@ Browserfenster, und der Herzschlag lief weiter.
 
 Ohne Netzwerk, ohne Fenster.
 """
+
 from __future__ import annotations
 
 import threading
@@ -40,9 +41,7 @@ def test_the_page_has_a_stop_button_where_actions_live() -> None:
     # ihrer Reihe. Wer beides verwechselt, klickt aus Versehen.
     kopf = seite.split('<div class="statusline">', 1)[1].split("</div>\n\n", 1)[0]
     assert 'id="stop"' in kopf, "Der Knopf gehoert in den Kopfbereich."
-    assert 'class="stopbox"' in kopf, (
-        "Und in eine eigene Gruppe — nicht als fuenfte Statuspille."
-    )
+    assert 'class="stopbox"' in kopf, "Und in eine eigene Gruppe — nicht als fuenfte Statuspille."
     assert "chips" in kopf, "Auf derselben Zeile wie die Pillen."
     for reiter in ('<div id="pane-details"', '<div id="pane-settings"'):
         rest = seite.split(reiter, 1)[1]
@@ -84,9 +83,7 @@ def test_the_server_only_sets_a_flag() -> None:
     # `ibkr.disconnect()`" — und sie waere an genau dem Satz gescheitert, der
     # die Regel beschreibt. Dieselbe Falle wie in T1-187 am selben Tag.
     ohne_doku = rumpf.split('"""')[-1]
-    code = "\n".join(
-        z for z in ohne_doku.split("\n") if not z.lstrip().startswith("#")
-    )
+    code = "\n".join(z for z in ohne_doku.split("\n") if not z.lstrip().startswith("#"))
 
     assert "stop_event.set()" in code
     for verboten in ("ibkr.disconnect", "api.close", "sys.exit", "os._exit"):

@@ -22,7 +22,13 @@ def test_translate_market_order():
 
 
 def test_translate_limit_order():
-    intent = {"symbol": "AAPL", "side": "sell", "orderType": "day_limit", "qty": 5, "lmtPrice": 200.0}
+    intent = {
+        "symbol": "AAPL",
+        "side": "sell",
+        "orderType": "day_limit",
+        "qty": 5,
+        "lmtPrice": 200.0,
+    }
     o = translate_intent(intent)
     assert o.orderType == "LMT"
     assert o.action == "SELL"
@@ -46,6 +52,7 @@ def test_translate_moc_order():
 
 def test_bracket_transmit_flags_last_only():
     from ib_insync import MarketOrder
+
     orders = [MarketOrder("BUY", 1), MarketOrder("SELL", 1), MarketOrder("SELL", 1)]
     apply_bracket_transmit_flags(orders)
     assert orders[0].transmit is False
@@ -55,6 +62,7 @@ def test_bracket_transmit_flags_last_only():
 
 def test_oca_group_applied_to_all():
     from ib_insync import MarketOrder
+
     orders = [MarketOrder("SELL", 1), MarketOrder("SELL", 1)]
     apply_oca_group(orders, "oca-1")
     assert orders[0].ocaGroup == "oca-1"
@@ -263,14 +271,22 @@ def test_das_sequenzielle_paar_wie_es_wirklich_aussieht():
     gruppe = "OCA_ALAB_2026-08-20_Peak_Reload"
     untertags = translate_intent(
         {
-            "symbol": "ALAB", "side": "sell", "orderType": "day_limit",
-            "qty": 1, "lmtPrice": 304.18, "ocaGroup": gruppe,
+            "symbol": "ALAB",
+            "side": "sell",
+            "orderType": "day_limit",
+            "qty": 1,
+            "lmtPrice": 304.18,
+            "ocaGroup": gruppe,
         }
     )
     schluss = translate_intent(
         {
-            "symbol": "ALAB", "side": "sell", "orderType": "day_limit",
-            "qty": 1, "lmtPrice": 303.44, "ocaGroup": gruppe,
+            "symbol": "ALAB",
+            "side": "sell",
+            "orderType": "day_limit",
+            "qty": 1,
+            "lmtPrice": 303.44,
+            "ocaGroup": gruppe,
             "goodAfterTime": "20260820 15:59:00 US/Eastern",
         }
     )
@@ -286,8 +302,12 @@ def test_das_sequenzielle_paar_wie_es_wirklich_aussieht():
 def test_tif_from_intent_wins_over_default():
     """OPG darf nicht mehr still zu DAY werden — das war der ganze Befund."""
     intent = {
-        "symbol": "PANW", "side": "buy", "orderType": "day_limit",
-        "qty": 2, "lmtPrice": 400.0, "timeInForce": "OPG",
+        "symbol": "PANW",
+        "side": "buy",
+        "orderType": "day_limit",
+        "qty": 2,
+        "lmtPrice": 400.0,
+        "timeInForce": "OPG",
     }
     o = translate_intent(intent)
     assert o.orderType == "LMT"
@@ -302,16 +322,24 @@ def test_tif_absent_falls_back_to_day():
 
 def test_tif_empty_string_falls_back_to_day():
     intent = {
-        "symbol": "AAPL", "side": "buy", "orderType": "market",
-        "qty": 1, "lmtPrice": None, "timeInForce": "   ",
+        "symbol": "AAPL",
+        "side": "buy",
+        "orderType": "market",
+        "qty": 1,
+        "lmtPrice": None,
+        "timeInForce": "   ",
     }
     assert translate_intent(intent).tif == "DAY"
 
 
 def test_tif_is_normalised_to_upper_case():
     intent = {
-        "symbol": "AAPL", "side": "buy", "orderType": "market",
-        "qty": 1, "lmtPrice": None, "timeInForce": "opg",
+        "symbol": "AAPL",
+        "side": "buy",
+        "orderType": "market",
+        "qty": 1,
+        "lmtPrice": None,
+        "timeInForce": "opg",
     }
     assert translate_intent(intent).tif == "OPG"
 
@@ -319,8 +347,12 @@ def test_tif_is_normalised_to_upper_case():
 def test_good_till_date_still_outranks_the_intent_tif():
     """AC-6: eine Frist ohne GTD wird von IBKR still ignoriert."""
     intent = {
-        "symbol": "AMD", "side": "buy", "orderType": "day_limit",
-        "qty": 1, "lmtPrice": 438.6, "timeInForce": "DAY",
+        "symbol": "AMD",
+        "side": "buy",
+        "orderType": "day_limit",
+        "qty": 1,
+        "lmtPrice": 438.6,
+        "timeInForce": "DAY",
         "goodTillDate": "20260825 15:00:00 US/Eastern",
     }
     o = translate_intent(intent)

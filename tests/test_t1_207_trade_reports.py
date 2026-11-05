@@ -14,6 +14,7 @@ bestimmt haben — das Etikett im Vermerk ist unterschiedlich gekuerzt, die
 Zahlen tragen einen Punkt als Dezimaltrenner, und in der ganzen Datei steht
 kein einziges Anfuehrungszeichen.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -449,9 +450,7 @@ def test_archiv_fuellungen_zieht_die_marke_nach(tmp_path: Path) -> None:
     # am Schreibtag gruen und verfiel danach lautlos. Genau das ist passiert:
     # ab dem 2026-10-02 lag `trades.20260918.csv` ausserhalb des Fensters, und
     # die CI war seit dem 28.09. rot.
-    fuellungen = _archiv_fuellungen(
-        str(ordner), store, KONTO, heute=datetime(2026, 9, 18)
-    )
+    fuellungen = _archiv_fuellungen(str(ordner), store, KONTO, heute=datetime(2026, 9, 18))
 
     assert len(fuellungen) == 5
     assert not store.erstlauf
@@ -582,10 +581,7 @@ def test_kontoabweichung_wird_laut(tmp_path: Path, caplog) -> None:
         # Archiv und ist dann aus dem FALSCHEN Grund gruen — sie belegt nicht
         # mehr die Kontoabweichung, sondern nur noch das Altersfenster.
         assert (
-            _archiv_fuellungen(
-                str(ordner), store, "DU1234567", heute=datetime(2026, 9, 18)
-            )
-            == []
+            _archiv_fuellungen(str(ordner), store, "DU1234567", heute=datetime(2026, 9, 18)) == []
         )
 
     meldungen = [r.getMessage() for r in caplog.records]
@@ -677,7 +673,10 @@ def test_ohne_gemeinsame_ausfuehrung_wird_nichts_behauptet(tmp_path: Path) -> No
     archiv = trade_reports.lies_archiv(tmp_path, KONTO).fuellungen
 
     assert _pruefe_zeitzone([], archiv) is None
-    assert _pruefe_zeitzone([_live("fremde.kennung.01.01", datetime.now(timezone.utc))], archiv) is None
+    assert (
+        _pruefe_zeitzone([_live("fremde.kennung.01.01", datetime.now(timezone.utc))], archiv)
+        is None
+    )
 
 
 def test_keine_zusicherung_haengt_wieder_an_der_wanduhr() -> None:
@@ -712,17 +711,13 @@ def test_keine_zusicherung_haengt_wieder_an_der_wanduhr() -> None:
     quelle = _P(__file__).read_text("utf-8")
     # Kommentarzeilen und Docstring dieser Regel heraus, damit die Erwaehnung
     # von `_archiv_fuellungen` im Text oben nicht als Aufruf zaehlt.
-    ohne_kommentar = "\n".join(
-        z for z in quelle.split("\n") if not z.lstrip().startswith("#")
-    )
+    ohne_kommentar = "\n".join(z for z in quelle.split("\n") if not z.lstrip().startswith("#"))
     ohne_kommentar = ohne_kommentar.split(
         "def test_keine_zusicherung_haengt_wieder_an_der_wanduhr"
     )[0]
 
     # Jeder Aufruf samt seiner Argumentliste, auch ueber Zeilen gebrochen.
-    aufrufe = re.findall(
-        r"_archiv_fuellungen\((.*?)\)\s*(?:==|\n|$)", ohne_kommentar, re.S
-    )
+    aufrufe = re.findall(r"_archiv_fuellungen\((.*?)\)\s*(?:==|\n|$)", ohne_kommentar, re.S)
     assert aufrufe, "Kein Aufruf gefunden — diese Regel misst dann nichts."
 
     ohne_tag = [

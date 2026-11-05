@@ -29,6 +29,7 @@ Nicht der Inhalt der Messung — den pruefen `test_t1_249_export_status.py` und
 `test_t1_249_report_file_without_suffix.py`. Hier steht die **Unabhaengigkeit**:
 gemessen wird je Takt, ohne Auftrag, ohne Fuellung, ohne alles.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -99,9 +100,7 @@ def test_die_messung_braucht_keinen_ungeklaerten_auftrag(archiv: Path) -> None:
     `api`. Genau das ist die Eigenschaft: die Messung kann nicht daran
     scheitern, dass gerade nichts zu klaeren ist.
     """
-    main.miss_den_export(
-        _Ibkr(), export_dir=str(archiv), report_store=_Ablage()
-    )
+    main.miss_den_export(_Ibkr(), export_dir=str(archiv), report_store=_Ablage())
 
     messung = main.export_messung()
     assert messung is not None, (
@@ -115,9 +114,7 @@ def test_die_messung_braucht_keinen_ungeklaerten_auftrag(archiv: Path) -> None:
 
 def test_die_messung_meldet_auch_ein_leeres_verzeichnis(tmp_path: Path) -> None:
     """Ein ruhiger Tag ist eine Aussage, kein Schweigen."""
-    main.miss_den_export(
-        _Ibkr(), export_dir=str(tmp_path), report_store=_Ablage()
-    )
+    main.miss_den_export(_Ibkr(), export_dir=str(tmp_path), report_store=_Ablage())
 
     messung = main.export_messung()
     assert messung is not None
@@ -135,9 +132,7 @@ def test_ohne_verzeichnis_wird_das_nichtwissen_gemeldet() -> None:
 
 def test_ohne_scharfes_konto_wird_das_ebenfalls_gemeldet(archiv: Path) -> None:
     """Mehrere verwaltete Konten: bewusst nicht gelesen — aber gemeldet."""
-    main.miss_den_export(
-        _Ibkr(konto=None), export_dir=str(archiv), report_store=_Ablage()
-    )
+    main.miss_den_export(_Ibkr(konto=None), export_dir=str(archiv), report_store=_Ablage())
 
     messung = main.export_messung()
     assert messung is not None
@@ -151,9 +146,7 @@ def test_ein_kaputter_kontoabruf_verhindert_die_messung_nicht(archiv: Path) -> N
         def trading_account(self) -> str:
             raise RuntimeError("TWS antwortet nicht")
 
-    main.miss_den_export(
-        _Kaputt(), export_dir=str(archiv), report_store=_Ablage()
-    )
+    main.miss_den_export(_Kaputt(), export_dir=str(archiv), report_store=_Ablage())
 
     messung = main.export_messung()
     assert messung is not None
@@ -169,16 +162,11 @@ def test_die_fuellungen_kommen_weiterhin_zurueck(tmp_path: Path) -> None:
     # verlangt sie, und ohne sie gilt die Zeile als fremder Handel.
     eigene = ZEILE.replace(
         "DUN950877;;0000e0d5",
-        "DUN950877;ot-ABNB-33-Tech_Compounder-"
-        "bc0bb7e5-a974-4638-ad56-09e443e17427;0000e0d5",
+        "DUN950877;ot-ABNB-33-Tech_Compounder-bc0bb7e5-a974-4638-ad56-09e443e17427;0000e0d5",
     )
-    (tmp_path / "trades.20260925").write_text(
-        f"{KOPF}\n{eigene}\n", encoding="utf-8"
-    )
+    (tmp_path / "trades.20260925").write_text(f"{KOPF}\n{eigene}\n", encoding="utf-8")
 
-    fuellungen = main.miss_den_export(
-        _Ibkr(), export_dir=str(tmp_path), report_store=_Ablage()
-    )
+    fuellungen = main.miss_den_export(_Ibkr(), export_dir=str(tmp_path), report_store=_Ablage())
 
     assert len(fuellungen) == 1
     assert main.export_messung()["ownFills"] == 1

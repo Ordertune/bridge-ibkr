@@ -24,6 +24,7 @@ zwei Takten heben sich im Bestand auf, und beide Zeilen waeren verloren.
 `orderId` ist wertlos: fremde Auftraege tragen dort 0, gemessen. Jede fremde
 Zeile truege dieselbe Zahl.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,8 +43,6 @@ _SIDE_MAP = {"BOT": "buy", "SLD": "sell"}
 # das nie — der Wert ist damit eindeutig als "wir wussten es nicht" lesbar und
 # nicht als Messung. Die Plattform bildet ihn auf `market` ab.
 UNKNOWN_ORDER_TYPE = "UNKNOWN"
-
-
 
 
 def order_types_by_perm_id(trades: list[Any]) -> dict[str, str]:
@@ -170,9 +169,7 @@ def external_execution_bodies(
         # eine Behauptung ueber geflossenes Geld.
         if has_commission_report(fill):
             try:
-                body["commissionUsd"] = float(
-                    getattr(fill.commissionReport, "commission", 0.0)
-                )
+                body["commissionUsd"] = float(getattr(fill.commissionReport, "commission", 0.0))
             except (TypeError, ValueError):
                 pass
 

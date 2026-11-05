@@ -19,6 +19,7 @@ Next-Anwendung und einer Python-EXE ist elf Woerter nicht wert.
 Gegenstueck: `t1.ordertune.com/src/components/order-management/
 order-execution-status-pill.tsx`
 """
+
 from __future__ import annotations
 
 import re
@@ -220,9 +221,7 @@ def rejection_reason_of(trade: object) -> str | None:
     for entry in reversed(entries):
         if getattr(entry, "errorCode", 0) in REJECTION_CODES:
             # T1-151: entmaskiert, damit unten lesbarer Text weitergeht.
-            message = unmask_wire_escapes(
-                (getattr(entry, "message", "") or "").strip()
-            )
+            message = unmask_wire_escapes((getattr(entry, "message", "") or "").strip())
             return message or "Rejected by IBKR."
 
     if not entries:

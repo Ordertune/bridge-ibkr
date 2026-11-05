@@ -10,6 +10,7 @@ TWS nennt den Grund also selbst. Gelesen hat ihn bis hierher niemand.
 
 Ohne Netzwerk, ohne TWS.
 """
+
 from __future__ import annotations
 
 import pytest

@@ -25,6 +25,7 @@ weil dort nur das eine Repo ausgecheckt ist. Jede Seite sichert ihren eigenen
 Code zu. Das Gegenstueck heisst
 `scripts/verify-t1-306-die-signale-gelten-fuer-den-kunden-selbst.ts`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

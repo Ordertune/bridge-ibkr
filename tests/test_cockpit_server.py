@@ -12,6 +12,7 @@ sich nur so belegen.
 Dazu die Richtungsregel: der Server liest den Zustandsblock und schreibt nie
 hinein.
 """
+
 from __future__ import annotations
 
 import json
@@ -116,14 +117,16 @@ def test_the_page_pulls_nothing_from_the_network(server) -> None:
 
     # Ein Ladevorgang braucht eines dieser Schluesselwoerter vor der Adresse.
     for muster in (
-        'src="http', "src='http",
-        'href="http', "href='http",
-        "url(http", "@import",
-        'fetch("http', "fetch('http",
+        'src="http',
+        "src='http",
+        'href="http',
+        "href='http",
+        "url(http",
+        "@import",
+        'fetch("http',
+        "fetch('http",
     ):
-        assert muster not in body, (
-            f"Die Seite laedt eine externe Quelle: {muster}"
-        )
+        assert muster not in body, f"Die Seite laedt eine externe Quelle: {muster}"
 
     # Schrift: `@font-face` ist nicht mehr verboten, sondern der richtige Weg.
     # Das Design-System verlangt Inter **selbst gehostet** ("do not link Google
@@ -134,7 +137,9 @@ def test_the_page_pulls_nothing_from_the_network(server) -> None:
     # Geprueft wird deshalb das, worauf es ankommt: JEDE Quelle in einem
     # `@font-face` ist eine `data:`-Adresse.
     quellen = re.findall(r"@font-face\{[^}]*?src:\s*url\(([^)]{1,12})", body)
-    assert quellen, "Keine eingebettete Schrift gefunden — faellt die Seite auf System-Sans zurueck?"
+    assert quellen, (
+        "Keine eingebettete Schrift gefunden — faellt die Seite auf System-Sans zurueck?"
+    )
     for quelle in quellen:
         assert quelle.startswith("data:"), (
             f"Eine Schrift wird nachgeladen statt eingebettet: {quelle}"
@@ -201,6 +206,5 @@ def test_the_server_never_writes_to_the_state(server) -> None:
         _get(server.url)
     _, nachher = server.store.get()
     assert vorher == nachher, (
-        "Der Zaehler hat sich durch blosses Lesen bewegt — dann schreibt der "
-        "Server doch."
+        "Der Zaehler hat sich durch blosses Lesen bewegt — dann schreibt der Server doch."
     )

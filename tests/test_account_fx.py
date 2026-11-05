@@ -19,6 +19,7 @@ deshalb rechnet die Bridge die Richtung an der Sammelzeile `BASE` nach, statt
 sie anzunehmen — und deshalb steht hier ein Gegentest fuer jede Zusicherung,
 die eine Richtung behauptet.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -295,19 +296,13 @@ def test_die_drift_verschwindet_durch_die_umrechnung() -> None:
         sizing_drift_exceeds_threshold,
     )
 
-    cfg = SizingConfig(
-        equity_mode="full_equity", position_size_pct=2.0, base_equity_amount=None
-    )
+    cfg = SizingConfig(equity_mode="full_equity", position_size_pct=2.0, base_equity_amount=None)
     server_qty = round(1_133_686.28 * 0.02 / 100.0)
 
     equity = _client([*ECHT, _w("NetLiquidation", "EUR", "997317.88")]).get_live_equity()
-    assert not sizing_drift_exceeds_threshold(
-        server_qty, recompute_qty(cfg, 100.0, equity)
-    )
+    assert not sizing_drift_exceeds_threshold(server_qty, recompute_qty(cfg, 100.0, equity))
     # GEGENTEST: mit dem alten Verhalten (EUR ungerechnet) haette es gedriftet.
-    assert sizing_drift_exceeds_threshold(
-        server_qty, recompute_qty(cfg, 100.0, 997_317.88)
-    )
+    assert sizing_drift_exceeds_threshold(server_qty, recompute_qty(cfg, 100.0, 997_317.88))
 
 
 def test_der_grund_ist_englisch() -> None:

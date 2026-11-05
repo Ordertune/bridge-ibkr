@@ -20,6 +20,7 @@ Auf der Plattformseite reist der Ausloeser im Feld `lmtPrice` des Intents —
 der Draht fuehrt EINEN Preis je Auftrag, und welches IBKR-Feld daraus wird,
 entscheidet der Ordertyp. Genau diese Uebersetzung steht hier.
 """
+
 from __future__ import annotations
 
 import pytest

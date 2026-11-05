@@ -15,6 +15,7 @@ Das Bittere: die Datei heisst so, **weil unsere eigene Anleitung es verlangt.**
 `config.py` sagt woertlich „leave 'Export filename' EMPTY there so TWS writes
 one dated file per trading day" — und dann vergibt die TWS keinen Suffix.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -59,9 +60,7 @@ def test_eine_csv_ohne_tag_bleibt_zulaessig(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("name", ["notizen.txt", "bridge.log", "readme"])
-def test_was_weder_tag_noch_endung_traegt_bleibt_draussen(
-    tmp_path: Path, name: str
-) -> None:
+def test_was_weder_tag_noch_endung_traegt_bleibt_draussen(tmp_path: Path, name: str) -> None:
     datei = tmp_path / name
     datei.write_text("irgendwas\n", encoding="utf-8")
 
@@ -76,9 +75,7 @@ def test_ein_verzeichnis_ist_keine_datei(tmp_path: Path) -> None:
 
 def test_die_bereitschaft_sieht_die_datei_jetzt(tmp_path: Path) -> None:
     """Vorher: „noch kein Bericht", obwohl 9 KB danebenlagen."""
-    (tmp_path / "trades.20260925").write_text(
-        f"{KOPF}\n{ZEILE}\n", encoding="utf-8"
-    )
+    (tmp_path / "trades.20260925").write_text(f"{KOPF}\n{ZEILE}\n", encoding="utf-8")
 
     bereit = tr.pruefe(tmp_path, heute="20260928")
 
@@ -87,9 +84,7 @@ def test_die_bereitschaft_sieht_die_datei_jetzt(tmp_path: Path) -> None:
 
 def test_das_archiv_wird_gelesen(tmp_path: Path) -> None:
     """Der eigentliche Zweck: die Zeile kommt an."""
-    (tmp_path / "trades.20260925").write_text(
-        f"{KOPF}\n{ZEILE}\n", encoding="utf-8"
-    )
+    (tmp_path / "trades.20260925").write_text(f"{KOPF}\n{ZEILE}\n", encoding="utf-8")
 
     lesung = tr.lies_archiv(str(tmp_path), "DUN950877", seit_tag=None)
 

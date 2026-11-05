@@ -4,6 +4,7 @@ T1-100 hat auf der Plattform `Working` gestrichen: IBKR-Jargon, und zu nah an
 `Submitting`. Ein Cockpit, das denselben Auftrag anders nennt als t1, stellt
 genau den Zustand wieder her, den T1-100 beseitigt hat.
 """
+
 from __future__ import annotations
 
 import pytest

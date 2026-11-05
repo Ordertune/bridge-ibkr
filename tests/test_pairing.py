@@ -6,6 +6,7 @@ Geheimnisses sehen. Waere das anders, waere der ganze Entwurf sinnlos — dann
 genuegte wieder der Code allein, und wer ihn mitliest, koppelt seine eigene
 Maschine.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -206,9 +207,7 @@ def test_polling_without_a_running_pairing_is_not_a_crash(tmp_path: Path) -> Non
     assert antwort["status"] == "error"
 
 
-def test_a_finished_pairing_writes_the_file_and_forgets_the_secret(
-    leitung, tmp_path: Path
-) -> None:
+def test_a_finished_pairing_writes_the_file_and_forgets_the_secret(leitung, tmp_path: Path) -> None:
     p = tmp_path / "bridge.env"
     actions = SetupActions(p)
 
@@ -219,9 +218,7 @@ def test_a_finished_pairing_writes_the_file_and_forgets_the_secret(
     antwort = actions.pair_poll({})
 
     assert antwort["status"] == "ready"
-    assert env_file.parse(p.read_text(encoding="utf-8"))["ORDERTUNE_BRIDGE_TOKEN"] == (
-        "geheim-tok"
-    )
+    assert env_file.parse(p.read_text(encoding="utf-8"))["ORDERTUNE_BRIDGE_TOKEN"] == ("geheim-tok")
     # Zweiter Abruf: es gibt nichts mehr abzuholen, die Zeile ist auf der
     # Plattform geloescht.
     assert actions.pair_poll({})["ok"] is False

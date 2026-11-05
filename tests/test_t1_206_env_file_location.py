@@ -10,6 +10,7 @@ Auf einem Linux-Desktop faellt es auseinander, und zwar auf die teure Art: die
 Kopplung meldet Erfolg, die Datei landet irgendwo, und der naechste Start sagt
 `env_missing`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -115,8 +116,7 @@ def test_main_no_longer_resolves_against_the_working_directory():
     Sie darf in `main` nicht wieder auftauchen.
     """
     quelle = (
-        Path(__file__).resolve().parent.parent
-        / "src" / "ordertune_bridge_ibkr" / "main.py"
+        Path(__file__).resolve().parent.parent / "src" / "ordertune_bridge_ibkr" / "main.py"
     ).read_text(encoding="utf-8")
 
     assert "Path(ENV_FILE).resolve()" not in quelle, (

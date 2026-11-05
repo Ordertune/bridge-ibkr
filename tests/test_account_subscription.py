@@ -13,6 +13,7 @@ account currency", und `full_equity` konnte keine Stueckzahl bilden. ib_insync
 fragt das Konto-Abo nur in `connect()` an; laeuft es dort ins Leere, bleibt es
 leer bis zur naechsten Wiederverbindung.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

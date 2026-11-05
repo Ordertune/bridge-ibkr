@@ -5,6 +5,7 @@ haeufigsten Verwechslungen auseinandergehalten werden, dass kein Geheimnis in
 der Ausgabe landet, dass eine Formulierung nicht mehr behauptet als sie weiss,
 und dass der Block auf jeder Windows-Codepage ausgebbar bleibt.
 """
+
 from __future__ import annotations
 
 import json
@@ -79,8 +80,7 @@ def _fehler_aus_datei(tmp_path, zeilen: str) -> ValidationError:
     """
     f = tmp_path / "bridge.env"
     f.write_text(
-        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
-        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n" + zeilen,
+        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\nORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n" + zeilen,
         encoding="utf-8",
     )
     with pytest.raises(ValidationError) as caught:
@@ -117,10 +117,7 @@ def test_both_spellings_of_the_port_are_accepted(tmp_path) -> None:
     Umbenennung stehenzulassen waere ein schlechterer Ausgang als ein Feldname,
     der an eine alte Entscheidung erinnert.
     """
-    kopf = (
-        "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\n"
-        "ORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n"
-    )
+    kopf = "ORDERTUNE_BRIDGE_TOKEN=" + "x" * 40 + "\nORDERTUNE_BRIDGE_CONNECTION_ID=c0ffee\n"
 
     def lade(zeilen: str) -> BridgeConfig:
         f = tmp_path / "b.env"
@@ -161,9 +158,7 @@ def test_a_different_answering_port_names_both_numbers() -> None:
 def test_an_open_port_is_not_claimed_to_be_tws() -> None:
     """Auf 7496 koennte irgendein Dienst lauschen. Der Text darf das offenlassen."""
     rendered = failures.render(
-        failures.classify_connect_error(
-            "127.0.0.1", 7497, _BOOM, answering=((7496, "TWS live"),)
-        )
+        failures.classify_connect_error("127.0.0.1", 7497, _BOOM, answering=((7496, "TWS live"),))
     )
     assert "TWS runs on" not in rendered
     assert "not proof" in rendered
@@ -296,9 +291,7 @@ def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path
     uebersehen worden.
     """
     fehlt = failures.render(
-        failures.classify_config_error(
-            _validation_error(), "C:\\ot\\bridge.env", env_exists=False
-        )
+        failures.classify_config_error(_validation_error(), "C:\\ot\\bridge.env", env_exists=False)
     )
     kaputt = failures.render(
         failures.classify_config_error(
@@ -314,9 +307,7 @@ def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path
     for block, fall in ((fehlt, "env_missing"), (kaputt, "env_invalid")):
         unten = block.lower()
         for form in aufforderungen:
-            assert form not in unten, (
-                f"{fall} fordert zum Herunterladen auf ({form!r}):\n{block}"
-            )
+            assert form not in unten, f"{fall} fordert zum Herunterladen auf ({form!r}):\n{block}"
         assert "settings?tab=broker" not in unten, (
             f"{fall} verweist auf die Download-Flaeche:\n{block}"
         )

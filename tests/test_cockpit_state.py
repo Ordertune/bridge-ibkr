@@ -5,6 +5,7 @@ Schleife ist es nicht.** Ein Fehler in der Anzeige darf nie einen Heartbeat
 kosten — und der Heartbeat ist das Einzige, woran die Plattform erkennt, dass
 diese Bridge lebt.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -15,9 +16,7 @@ from ordertune_bridge_ibkr.write_access import WriteAccess
 
 
 def _snap(positions=None, cash=100.0, equity=200.0, currency="USD"):
-    return SimpleNamespace(
-        cash=cash, equity=equity, currency=currency, positions=positions
-    )
+    return SimpleNamespace(cash=cash, equity=equity, currency=currency, positions=positions)
 
 
 # ── Der Block ────────────────────────────────────────────────────────────────

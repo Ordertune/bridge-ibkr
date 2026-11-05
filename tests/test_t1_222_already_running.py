@@ -11,6 +11,7 @@ Prozesskennung. Gelesen hat sie nur nie jemand.
 
 Ohne Netzwerk, ohne zweiten Vorgang.
 """
+
 from __future__ import annotations
 
 import json
@@ -135,9 +136,7 @@ def test_two_client_ids_do_not_see_each_other(tmp_path, monkeypatch) -> None:
 
 
 def test_the_message_names_the_window_and_no_suspect() -> None:
-    text = failures.render(
-        failures.bridge_laeuft_bereits("http://127.0.0.1:52359/?t=abc")
-    )
+    text = failures.render(failures.bridge_laeuft_bereits("http://127.0.0.1:52359/?t=abc"))
     assert "already running" in text
     assert "127.0.0.1:52359" in text
 
@@ -214,19 +213,15 @@ def test_the_message_does_not_promise_controls_that_do_not_exist() -> None:
     """
     seite = (WURZEL / "src/ordertune_bridge_ibkr/cockpit/page.py").read_text("utf-8")
     hat_knopf = any(
-        wort in seite
-        for wort in ('id="stop"', 'id="quit"', "/shutdown", '"stopBridge"')
+        wort in seite for wort in ('id="stop"', 'id="quit"', "/shutdown", '"stopBridge"')
     )
     text = failures.render(failures.bridge_laeuft_bereits("http://127.0.0.1:1/?t=x"))
 
     if hat_knopf:
         assert "Task Manager" not in text, (
-            "Das Cockpit hat einen Knopf — die Meldung muss ihn nennen statt "
-            "den Task-Manager."
+            "Das Cockpit hat einen Knopf — die Meldung muss ihn nennen statt den Task-Manager."
         )
-        assert "Stop the Bridge" in text, (
-            "Und sie muss sagen, wo er steht."
-        )
+        assert "Stop the Bridge" in text, "Und sie muss sagen, wo er steht."
     else:
         assert "Task Manager" in text, (
             "Ohne Knopf im Cockpit ist der Task-Manager der einzige wahre Weg."

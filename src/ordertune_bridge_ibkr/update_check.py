@@ -4,6 +4,7 @@ Silent-fail-Design: wenn GitHub-API nicht erreichbar ist, wird der Bridge-
 Client nicht blockiert. Nur ein WARNING-Log, wenn eine neuere Version
 verfügbar ist.
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,9 +13,7 @@ import httpx
 
 from . import __version__
 
-GITHUB_LATEST_URL = (
-    "https://api.github.com/repos/ordertune/bridge-ibkr/releases/latest"
-)
+GITHUB_LATEST_URL = "https://api.github.com/repos/ordertune/bridge-ibkr/releases/latest"
 RELEASE_PAGE = "https://github.com/ordertune/bridge-ibkr/releases/latest"
 
 log = logging.getLogger(__name__)

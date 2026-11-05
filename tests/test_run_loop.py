@@ -26,6 +26,7 @@ kommt an" wuerde TWS brauchen und den Fehler trotzdem nicht dauerhaft
 fernhalten — er entstuende beim naechsten Aufruf wieder, den jemand in einen
 Thread auslagert.
 """
+
 from __future__ import annotations
 
 import threading
@@ -150,9 +151,7 @@ def test_a_slow_job_does_not_refire_immediately() -> None:
     "market_open, interval",
     [(True, PENDING_INTERVAL_MARKET_S), (False, PENDING_INTERVAL_OFF_S)],
 )
-def test_pending_follows_the_market_hours_interval(
-    market_open: bool, interval: float
-) -> None:
+def test_pending_follows_the_market_hours_interval(market_open: bool, interval: float) -> None:
     """Waehrend der Handelszeit wird haeufiger abgefragt, sonst seltener.
 
     Gemessen wird ueber ein simuliertes Zeitfenster: die Uhr laeuft mit jedem

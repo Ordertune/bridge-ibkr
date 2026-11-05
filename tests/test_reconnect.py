@@ -27,6 +27,7 @@ kaputtmachen kann:
 * Nach jeder Wiederverbindung laufen Sitzungszeitpunkt und Auftragszuordnung
   neu. Beides haengt an einer Sitzung, nicht an einem Vorgang.
 """
+
 from __future__ import annotations
 
 from typing import Any

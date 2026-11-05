@@ -13,6 +13,7 @@ nicht erreichbar. Ausgerechnet der Fall, fuer den T1-249 gebaut wurde.
 
 **Ein Nichtwissen zu melden ist nicht dasselbe wie nichts zu melden.**
 """
+
 from __future__ import annotations
 
 import pytest
@@ -43,7 +44,9 @@ def test_ohne_exportverzeichnis_wird_trotzdem_gemeldet() -> None:
     main._archiv_fuellungen(None, _Store(), "DUN950877")
 
     m = main.export_messung()
-    assert m is not None, "ohne Meldung ist der Zustand von einer alten Bridge nicht zu unterscheiden"
+    assert m is not None, (
+        "ohne Meldung ist der Zustand von einer alten Bridge nicht zu unterscheiden"
+    )
     assert m["exportDirConfigured"] is False
     assert m["accountKnown"] is True
     assert m["filesRead"] == 0

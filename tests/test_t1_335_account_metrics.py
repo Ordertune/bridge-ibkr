@@ -5,6 +5,7 @@ und das Tagesergebnis aus `reqPnL`. Geprueft wird, dass nur Werte in der
 Kontowaehrung mitreisen, dass `nan` wegfaellt statt 0 zu werden, und dass bei
 mehreren Konten nichts gemeldet wird.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

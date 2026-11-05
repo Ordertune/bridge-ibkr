@@ -4,6 +4,7 @@ Der Bridge-Client liest ausschließlich aus einer `bridge.env`-Datei
 im Working-Directory oder aus Env-Vars. Missing/invalid Values führen
 zu Exit 1 mit klarer Error-Message beim Startup.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

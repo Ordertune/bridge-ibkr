@@ -29,6 +29,7 @@ den Support. Die Laenge genuegt zur Diagnose.
 
 Nutzertexte sind englisch, wie alle Nutzertexte des Clients.
 """
+
 from __future__ import annotations
 
 import json
@@ -273,7 +274,7 @@ def bridge_laeuft_bereits(url: str) -> Failure:
             # sucht die Beschriftung, die er sieht. Die Zusicherung in
             # T1-222 haelt genau das fest — sie ist rot geworden, als hier
             # „the Stop button" stand.
-            "To stop it: open its window and press \"Stop the Bridge\".",
+            'To stop it: open its window and press "Stop the Bridge".',
             "",
             "Closing the browser window does not stop the Bridge. The window is",
             "a view of it, not the program itself.",
@@ -356,10 +357,7 @@ def classify_connect_error(
     if configured_answers:
         return Failure(
             code="tws_api_refused",
-            headline=(
-                f"Something answers on {host}:{port}, but the API connection "
-                "was refused."
-            ),
+            headline=(f"Something answers on {host}:{port}, but the API connection was refused."),
             detail=(
                 # Ein Zeitueberlauf von ib_insync hat keinen Text. Statt einer
                 # leeren Zeile steht dann wenigstens die Art des Fehlers da.
@@ -700,16 +698,16 @@ def render(failure: Failure, log_path: str | None = None) -> str:
 # aber die Stabilitaet des Fingerabdrucks ist eine eigene, offene Frage
 # (T1-176, „Nicht in diesem Spec"), und ein Riegel, der bei einer wandernden
 # MAC-Adresse die Bridge anhaelt, waere derselbe Fehler wie der IP-Pin.
-TERMINAL_AUTH_CODES = frozenset({
-    "connection_revoked",
-    "invalid_token",
-    "missing_token",
-})
+TERMINAL_AUTH_CODES = frozenset(
+    {
+        "connection_revoked",
+        "invalid_token",
+        "missing_token",
+    }
+)
 
 
-def revocation_failure(
-    exc: Exception, api_base: str | None = None
-) -> Failure | None:
+def revocation_failure(exc: Exception, api_base: str | None = None) -> Failure | None:
     """Wurde diese Bridge ausgesperrt — oder war nur das Netz weg?
 
     Der Unterschied ist der ganze Punkt. Bis hierher fing `_handle_heartbeat`
@@ -745,17 +743,17 @@ def revocation_failure(
 # Fingerabdruck. Das ist genau der vorgesehene Ausweg bei einem
 # Maschinenwechsel — er stand bisher nur als Satz im Fehlerblock und verlangte
 # einen Weg ueber die Website.
-RENEWABLE_AUTH_CODES = frozenset({
-    "connection_revoked",
-    "invalid_token",
-    "missing_token",
-    "fingerprint_already_set",
-})
+RENEWABLE_AUTH_CODES = frozenset(
+    {
+        "connection_revoked",
+        "invalid_token",
+        "missing_token",
+        "fingerprint_already_set",
+    }
+)
 
 
-def renewable_failure(
-    exc: Exception, api_base: str | None = None
-) -> Failure | None:
+def renewable_failure(exc: Exception, api_base: str | None = None) -> Failure | None:
     """Laesst sich das durch eine neue Kopplung beheben?
 
     ## Der Fehler, aus dem das entstanden ist

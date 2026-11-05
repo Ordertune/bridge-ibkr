@@ -10,6 +10,7 @@ Eine Angabe, ein Ort. Die Alternative waere eine zweite Kopie im Assistenten
 gewesen, und was daraus wird, steht in der Notiz zu gemeinsamen Bausteinen:
 sie driften, und man merkt es an der Stelle, an der die falsche gelesen wird.
 """
+
 from __future__ import annotations
 
 from typing import Any

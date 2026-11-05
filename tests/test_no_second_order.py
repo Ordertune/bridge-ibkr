@@ -14,6 +14,7 @@ Die Zusicherungen hier pruefen beide Haelften der Reparatur:
   C) Derselbe Dispatch geht kein zweites Mal hinaus, auch nicht nach einem
      Neustart der Bridge.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -267,38 +268,24 @@ def test_eine_unbekannte_ablehnung_wird_als_ablehnung_erkannt() -> None:
 
 
 def test_eine_warnung_bleibt_auch_am_toten_auftrag_keine_ablehnung() -> None:
-    assert (
-        m.rejection_reason(_trade("Cancelled", [_Entry(2109, "Outside RTH")]))
-        is None
-    )
-    assert (
-        m.rejection_reason(_trade("Cancelled", [_Entry(10349, "Gueltigkeitsdauer")]))
-        is None
-    )
+    assert m.rejection_reason(_trade("Cancelled", [_Entry(2109, "Outside RTH")])) is None
+    assert m.rejection_reason(_trade("Cancelled", [_Entry(10349, "Gueltigkeitsdauer")])) is None
 
 
 def test_ein_lebender_auftrag_ist_nie_eine_ablehnung() -> None:
     """Der Verlauf des Vorfalls vom 2026-08-13, in einer Zusicherung."""
-    assert (
-        m.rejection_reason(_trade("Submitted", [_Entry(10349, "Gueltigkeitsdauer")]))
-        is None
-    )
+    assert m.rejection_reason(_trade("Submitted", [_Entry(10349, "Gueltigkeitsdauer")])) is None
 
 
 def test_ein_gefuellter_auftrag_ist_nie_eine_ablehnung() -> None:
     assert (
-        m.rejection_reason(
-            _trade("Cancelled", [_Entry(399, "Order eingeschraenkt")], filled=1.0)
-        )
+        m.rejection_reason(_trade("Cancelled", [_Entry(399, "Order eingeschraenkt")], filled=1.0))
         is None
     )
 
 
 def test_eine_echte_stornierung_bleibt_eine_stornierung() -> None:
-    assert (
-        m.rejection_reason(_trade("Cancelled", [_Entry(202, "Order Canceled")]))
-        is None
-    )
+    assert m.rejection_reason(_trade("Cancelled", [_Entry(202, "Order Canceled")])) is None
 
 
 @pytest.mark.parametrize("code", [201, 203, 321, 10318])

@@ -28,6 +28,7 @@ ohne TWS pruefbar sein. Ein falsch positiver Befund macht eine lebende Order
 endgueltig und damit wieder freigebbar, und aus einem Anzeigefehler wuerde ein
 zweiter Echtauftrag.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -324,8 +325,7 @@ def _from_open(
             reason_code=None,
             error_message=None,
             fill_qty=menge,
-            fill_price=_avg_fill_price(trade)
-            or (fill.price if fill is not None else None),
+            fill_price=_avg_fill_price(trade) or (fill.price if fill is not None else None),
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),
@@ -458,8 +458,7 @@ def _from_completed(
             # Auch hier faellt jedes einzelne Feld auf den Ausfuehrungsbericht
             # zurueck. Eine Menge ohne Kurs ist eine unbewertete Position; sie
             # zu vermeiden kostet nichts, wenn die Zahl ohnehin vorliegt.
-            fill_price=_avg_fill_price(trade)
-            or (fill.price if fill is not None else None),
+            fill_price=_avg_fill_price(trade) or (fill.price if fill is not None else None),
             commission_usd=_commission(trade)
             if _commission(trade) is not None
             else (fill.commission if fill is not None else None),

@@ -2,6 +2,7 @@
 CI uses `pip install -e .` before pytest, but local dev/QA benefits from
 this shim so `pytest tests/` works without a manual install step.
 """
+
 import sys
 from pathlib import Path
 

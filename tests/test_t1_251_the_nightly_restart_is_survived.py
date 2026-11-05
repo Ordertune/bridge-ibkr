@@ -30,6 +30,7 @@ Projekt.
      Owner musste vor jedem Fassungswechsel in den Taskmanager. Das war keine
      zweite Ursache, sondern dieselbe.
 """
+
 from __future__ import annotations
 
 import os
@@ -269,13 +270,9 @@ def test_main_gibt_eine_zahl_zurueck_statt_zu_werfen(monkeypatch: Any) -> None:
     niemand, also klickt ihn niemand weg, also bleibt der Vorgang stehen — und
     ein stehender Vorgang belegt seine Datei.
     """
-    monkeypatch.setattr(
-        main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt"))
-    )
+    monkeypatch.setattr(main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt")))
     gezeigt: list[str] = []
-    monkeypatch.setattr(
-        main.windows_ui, "message_box", lambda text, *a, **k: gezeigt.append(text)
-    )
+    monkeypatch.setattr(main.windows_ui, "message_box", lambda text, *a, **k: gezeigt.append(text))
 
     assert main.main() == 1
     assert gezeigt, "Ohne Fenster erfaehrt der Nutzer am Bildschirm gar nichts."
@@ -283,9 +280,7 @@ def test_main_gibt_eine_zahl_zurueck_statt_zu_werfen(monkeypatch: Any) -> None:
     assert "safe to start it again" in gezeigt[0]
 
 
-def test_der_absturz_wird_mit_vorgangsnummer_protokolliert(
-    monkeypatch: Any, caplog: Any
-) -> None:
+def test_der_absturz_wird_mit_vorgangsnummer_protokolliert(monkeypatch: Any, caplog: Any) -> None:
     """Die Zeile muss WIRKLICH geschrieben werden, nicht nur dastehen.
 
     `_unerwartetes_ende` faengt Fehler beim Protokollieren ab — richtig so, ein
@@ -296,9 +291,7 @@ def test_der_absturz_wird_mit_vorgangsnummer_protokolliert(
 
     Deshalb wird hier der INHALT gemessen, nicht der Rueckgabewert.
     """
-    monkeypatch.setattr(
-        main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt"))
-    )
+    monkeypatch.setattr(main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt")))
     monkeypatch.setattr(main.windows_ui, "message_box", lambda *a, **k: True)
 
     with caplog.at_level("CRITICAL"):
@@ -311,9 +304,7 @@ def test_der_absturz_wird_mit_vorgangsnummer_protokolliert(
 
 def test_ein_fehler_beim_anzeigen_verdeckt_den_ausgang_nicht(monkeypatch: Any) -> None:
     """Ein Fehler beim Anzeigen eines Fehlers darf nicht der letzte sein."""
-    monkeypatch.setattr(
-        main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt"))
-    )
+    monkeypatch.setattr(main, "_main", lambda: (_ for _ in ()).throw(RuntimeError("geplatzt")))
 
     def _kaputt(*_a: Any, **_k: Any) -> bool:
         raise OSError("kein Fenstersystem")
@@ -324,9 +315,7 @@ def test_ein_fehler_beim_anzeigen_verdeckt_den_ausgang_nicht(monkeypatch: Any) -
 
 
 def test_strg_c_beendet_main_weiterhin(monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        main, "_main", lambda: (_ for _ in ()).throw(KeyboardInterrupt())
-    )
+    monkeypatch.setattr(main, "_main", lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     with pytest.raises(KeyboardInterrupt):
         main.main()

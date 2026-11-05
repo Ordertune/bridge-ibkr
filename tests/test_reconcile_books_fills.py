@@ -16,6 +16,7 @@ Modell-Ausstieg fasst sie nie an.
 
 Die Annahme war falsch: der abgeschlossene Auftrag TRAEGT die Zahlen.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -38,9 +39,7 @@ VORHER = VERBUNDEN - timedelta(hours=3)
 
 
 def _dispatch(kennung: str = "disp-intc") -> UnresolvedDispatch:
-    return UnresolvedDispatch(
-        dispatch_id=kennung, symbol="INTC", submitted_at=VORHER
-    )
+    return UnresolvedDispatch(dispatch_id=kennung, symbol="INTC", submitted_at=VORHER)
 
 
 def _trade(
@@ -52,8 +51,7 @@ def _trade(
     log: list[Any] | None = None,
 ) -> Any:
     fills = [
-        SimpleNamespace(commissionReport=SimpleNamespace(commission=c))
-        for c in (commissions or [])
+        SimpleNamespace(commissionReport=SimpleNamespace(commission=c)) for c in (commissions or [])
     ]
     return SimpleNamespace(
         orderStatus=SimpleNamespace(status=status, filled=filled, avgFillPrice=avg),
@@ -206,6 +204,7 @@ def test_ein_gerade_abgesendeter_auftrag_wird_nicht_fuer_verschollen_erklaert() 
 # Sie stehen im Ausfuehrungsbericht, und der wird in jedem Herzschlag
 # abgeholt — `external_executions` wirft die eigenen nur weg.
 
+
 def _fill(
     ref: str | None,
     *,
@@ -222,16 +221,20 @@ def _fill(
             execId=commission_exec_id if commission_exec_id is not None else exec_id,
         )
     return SimpleNamespace(
-        execution=SimpleNamespace(
-            orderRef=ref, execId=exec_id, shares=shares, price=price
-        ),
+        execution=SimpleNamespace(orderRef=ref, execId=exec_id, shares=shares, price=price),
         commissionReport=report,
     )
 
 
 def test_der_vermerk_wird_zum_dispatch() -> None:
-    assert dispatch_id_from_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03") == "e99a18c4-28cb-48d5-8260-853678922e03"
-    assert dispatch_id_from_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ") == "e99a18c4-28cb-48d5-8260-853678922e03"
+    assert (
+        dispatch_id_from_ref("ot-e99a18c4-28cb-48d5-8260-853678922e03")
+        == "e99a18c4-28cb-48d5-8260-853678922e03"
+    )
+    assert (
+        dispatch_id_from_ref("  ot-e99a18c4-28cb-48d5-8260-853678922e03  ")
+        == "e99a18c4-28cb-48d5-8260-853678922e03"
+    )
     assert dispatch_id_from_ref("abc123") is None, "fremde Ausfuehrung"
     assert dispatch_id_from_ref("") is None
     assert dispatch_id_from_ref(None) is None
@@ -246,8 +249,20 @@ def test_fremde_ausfuehrungen_bleiben_draussen() -> None:
 def test_teilausfuehrungen_werden_zusammengefasst() -> None:
     ergebnis = fills_by_dispatch(
         [
-            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=1.0, price=100.0, commission=0.5),
-            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="b", shares=3.0, price=104.0, commission=0.7),
+            _fill(
+                "ot-9948c645-c094-4477-84f4-c7acdbeb2bb6",
+                exec_id="a",
+                shares=1.0,
+                price=100.0,
+                commission=0.5,
+            ),
+            _fill(
+                "ot-9948c645-c094-4477-84f4-c7acdbeb2bb6",
+                exec_id="b",
+                shares=3.0,
+                price=104.0,
+                commission=0.7,
+            ),
         ]
     )
     f = ergebnis["9948c645-c094-4477-84f4-c7acdbeb2bb6"]
@@ -264,7 +279,10 @@ def test_dieselbe_ausfuehrung_zaehlt_einmal() -> None:
     Buchungsdetail wuerde ein zu grosser Bestand und ein zu grosser Ausstieg.
     """
     ergebnis = fills_by_dispatch(
-        [_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0), _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0)]
+        [
+            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0),
+            _fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", exec_id="a", shares=2.0),
+        ]
     )
     assert ergebnis["9948c645-c094-4477-84f4-c7acdbeb2bb6"].qty == 2.0
 
@@ -279,11 +297,16 @@ def test_ohne_echten_gebuehrenbericht_wird_keine_gebuehr_gebucht() -> None:
 
 def test_unbrauchbare_mengen_fallen_heraus() -> None:
     for menge in (0.0, -1.0, None, "abc"):
-        assert fills_by_dispatch([_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=menge)]) == {}
+        assert (
+            fills_by_dispatch([_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=menge)])
+            == {}
+        )
 
 
 def test_ohne_kurs_bleibt_die_menge_erhalten() -> None:
-    f = fills_by_dispatch([_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=2.0, price=0.0)])["9948c645-c094-4477-84f4-c7acdbeb2bb6"]
+    f = fills_by_dispatch(
+        [_fill("ot-9948c645-c094-4477-84f4-c7acdbeb2bb6", shares=2.0, price=0.0)]
+    )["9948c645-c094-4477-84f4-c7acdbeb2bb6"]
     assert f.qty == 2.0
     assert f.price is None
 
@@ -398,7 +421,14 @@ def test_ohne_ausfuehrung_bleibt_es_bei_der_ehrlichen_antwort() -> None:
 
 @pytest.mark.parametrize(
     "ref",
-    ["ot-90015098-3cd2-4fb0-8696-3f7d28e17f72", "ot-6eca593e-9792-451f-8601-0e2f8bfb92d7", "manuell", "", None, "ot-"],
+    [
+        "ot-90015098-3cd2-4fb0-8696-3f7d28e17f72",
+        "ot-6eca593e-9792-451f-8601-0e2f8bfb92d7",
+        "manuell",
+        "",
+        None,
+        "ot-",
+    ],
 )
 def test_die_beiden_haelften_der_orderref_regel_stimmen_ueberein(ref) -> None:
     """`is_ours` und `dispatch_id_from_ref` beantworten dieselbe Frage.

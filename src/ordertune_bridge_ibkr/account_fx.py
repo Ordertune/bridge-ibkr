@@ -57,6 +57,7 @@ Laesst sich der Kurs nicht zweifelsfrei bilden, gibt es **keinen**. Kein Kurs
 heisst auf der Plattform: blockieren, so wie heute. Ein geratener Kurs waere
 Genauigkeit, die niemand sieht.
 """
+
 from __future__ import annotations
 
 import math
@@ -183,9 +184,7 @@ def richtung_ist_segment_zu_basis(werte: Sequence[Kontowert]) -> bool | None:
     return None
 
 
-def loese_kurs_auf(
-    werte: Sequence[Kontowert], basiswaehrung: str | None
-) -> FxErgebnis:
+def loese_kurs_auf(werte: Sequence[Kontowert], basiswaehrung: str | None) -> FxErgebnis:
     """Der gedrehte Kurs zur Plattformwaehrung, oder warum es keinen gibt.
 
     `basiswaehrung` ist das Ergebnis von `resolve_account_currency` — die
@@ -208,9 +207,7 @@ def loese_kurs_auf(
     # Ersatz dafuer.
     eigener = kurse.get(basis)
     if eigener is None:
-        return FxErgebnis(
-            None, f"No ExchangeRate line for the account currency {basis}."
-        )
+        return FxErgebnis(None, f"No ExchangeRate line for the account currency {basis}.")
     if abs(eigener - 1.0) > BASIS_KURS_TOLERANZ:
         return FxErgebnis(
             None,
@@ -225,9 +222,7 @@ def loese_kurs_auf(
 
     kurs = kurse.get(PLATTFORM_WAEHRUNG)
     if kurs is None or kurs <= 0.0:
-        return FxErgebnis(
-            None, f"No usable {PLATTFORM_WAEHRUNG} rate in the response."
-        )
+        return FxErgebnis(None, f"No usable {PLATTFORM_WAEHRUNG} rate in the response.")
 
     segment_zu_basis = richtung_ist_segment_zu_basis(werte)
     if segment_zu_basis is None:

@@ -21,6 +21,7 @@ Ohne `yaml`: PyYAML steht weder in `requirements.txt` noch in den
 Laufzeit-Abhaengigkeiten, und ein `importorskip` waere hier genau der stille
 Rueckfall, den dieser Vorgang abschafft.
 """
+
 from __future__ import annotations
 
 import re

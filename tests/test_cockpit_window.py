@@ -7,6 +7,7 @@ ein Fenster aufgehen zu lassen.
 Der tragende Satz: **keine Stufe darf den Handel aufhalten.** Schlaegt alles
 fehl, steht die Adresse in der Konsole und der Kern laeuft weiter.
 """
+
 from __future__ import annotations
 
 from ordertune_bridge_ibkr.cockpit import window as w

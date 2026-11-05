@@ -33,6 +33,7 @@ lauscht. Die Formulierungen in `failures.py` halten diese Grenze ein.
 Sie laeuft ausschliesslich im Fehlerfall. Im Normalbetrieb wird kein einziger
 zusaetzlicher Socket geoeffnet.
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,9 +87,7 @@ def scan(host: str, timeout: float = PROBE_TIMEOUT_S) -> tuple[tuple[int, str], 
     aussieht, als sie ist.
     """
     found = tuple(
-        (port, label)
-        for port, label in SCANNED_PORTS
-        if port_answers(host, port, timeout)
+        (port, label) for port, label in SCANNED_PORTS if port_answers(host, port, timeout)
     )
     log.debug("port probe on %s: %s", host, found or "nothing answered")
     return found

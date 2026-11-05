@@ -28,6 +28,7 @@ kann daneben liegen. Zwei Tage Ueberlappung kosten ein paar hundert Kilobyte
 erneutes Lesen und retten eine Datei, die spaeter auftaucht, als ihr Name
 behauptet.
 """
+
 from __future__ import annotations
 
 import json
@@ -157,9 +158,7 @@ class TradeReportStore:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps({"letzterTag": self._letzter_tag}), encoding="utf-8"
-            )
+            tmp.write_text(json.dumps({"letzterTag": self._letzter_tag}), encoding="utf-8")
             tmp.replace(self._path)
             try:
                 self._path.chmod(0o600)

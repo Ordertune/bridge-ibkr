@@ -8,6 +8,7 @@ Zwei Dinge bleiben ausdruecklich stehen, und beide haben hier ihre Zusicherung:
 die alte Schreibweise in `bridge.env` und der Vertragsname `gatewayStatus` auf
 dem Draht.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

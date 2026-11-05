@@ -18,6 +18,7 @@ Die Tests hier decken beide Haelften ab: dass die Datei da ist **und** dass
 ihr Fehlen kuenftig laut waere. Die zweite Haelfte ist die wichtigere — eine
 Datei kann wieder verschwinden, eine stille Bedingung bringt sie nicht zurueck.
 """
+
 from __future__ import annotations
 
 import base64
@@ -45,10 +46,10 @@ def ico_eintraege(raw: bytes) -> list[tuple[int, bytes]]:
     out = []
     for i in range(count):
         e = 6 + i * 16
-        breite = raw[e] or 256          # 0 bedeutet 256
-        laenge = int.from_bytes(raw[e + 8:e + 12], "little")
-        offset = int.from_bytes(raw[e + 12:e + 16], "little")
-        out.append((breite, raw[offset:offset + laenge]))
+        breite = raw[e] or 256  # 0 bedeutet 256
+        laenge = int.from_bytes(raw[e + 8 : e + 12], "little")
+        offset = int.from_bytes(raw[e + 12 : e + 16], "little")
+        out.append((breite, raw[offset : offset + laenge]))
     return out
 
 
@@ -65,8 +66,7 @@ def test_alle_windows_groessen_sind_drin() -> None:
     groessen = {n for n, _ in ico_eintraege(ICON.read_bytes())}
 
     assert groessen == ERWARTETE_GROESSEN, (
-        f"Groessen im ICO: {sorted(groessen)}, erwartet "
-        f"{sorted(ERWARTETE_GROESSEN)}"
+        f"Groessen im ICO: {sorted(groessen)}, erwartet {sorted(ERWARTETE_GROESSEN)}"
     )
 
 
@@ -99,12 +99,11 @@ def test_es_ist_die_marke_und_kein_platzhalter() -> None:
     pixel = rahmen[32][40:]
 
     # BGRA -> (R, G, B)
-    farben = {tuple(pixel[i:i + 3][::-1]) for i in range(0, len(pixel), 4)}
+    farben = {tuple(pixel[i : i + 3][::-1]) for i in range(0, len(pixel), 4)}
 
     assert INK in farben, "die schwarze Kachel fehlt"
     assert any(
-        abs(r - CHARTREUSE[0]) < 12 and abs(g - CHARTREUSE[1]) < 12
-        and abs(b - CHARTREUSE[2]) < 12
+        abs(r - CHARTREUSE[0]) < 12 and abs(g - CHARTREUSE[1]) < 12 and abs(b - CHARTREUSE[2]) < 12
         for r, g, b in farben
     ), "kein Chartreuse (#C1FF3E) im Symbol gefunden — Marke stimmt nicht"
 
@@ -126,8 +125,7 @@ def test_ein_fehlendes_symbol_ist_ein_baufehler() -> None:
         "build.py muss bei fehlendem Symbol abbrechen, nicht weiterbauen"
     )
     assert "verify_icon" in quelle, (
-        "`--icon` mitzugeben ist kein Beleg — die gebaute EXE muss gelesen "
-        "werden"
+        "`--icon` mitzugeben ist kein Beleg — die gebaute EXE muss gelesen werden"
     )
 
 
