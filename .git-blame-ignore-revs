@@ -1,0 +1,6 @@
+# Rein mechanische Commits, die `git blame` ueberspringen soll.
+# GitHub liest die Datei von selbst; lokal einmalig:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: ruff format auf den ganzen Bestand
+05071a139806ab7b5d55da84863b916187903d04

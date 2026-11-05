@@ -212,8 +212,12 @@ Aufträgen, die nicht von der Bridge stammen? Jede Zeile ist als `OURS` oder
 python -m venv .venv
 source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
-pytest
+ruff check . && ruff format --check . && pytest
 ```
+
+Die CI prueft dieselben drei Schritte. `ruff format .` und `ruff check --fix .`
+beheben das meiste von selbst. Fuer `git blame` ohne den Formatierungs-Commit:
+`git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 
 ## Build
 
