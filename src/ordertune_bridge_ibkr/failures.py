@@ -39,7 +39,7 @@ from typing import Any
 
 # Fuer den Fall, dass keine Konfiguration geladen werden konnte und die
 # Basis-URL damit unbekannt ist.
-DEFAULT_API_BASE = "https://t1.ordertune.com"
+DEFAULT_API_BASE = "https://interactive.ordertune.com"
 
 RELEASES_URL = "https://github.com/Ordertune/bridge-ibkr/releases/latest"
 

@@ -193,7 +193,7 @@ def test_nothing_answering_means_tws_is_not_running() -> None:
 
 
 def _http_error(status: int, body: str) -> httpx.HTTPStatusError:
-    request = httpx.Request("POST", "https://t1.ordertune.com/api/bridge/v1/handshake")
+    request = httpx.Request("POST", "https://interactive.ordertune.com/api/bridge/v1/handshake")
     response = httpx.Response(status, text=body, request=request)
     return httpx.HTTPStatusError("boom", request=request, response=response)
 
@@ -280,7 +280,7 @@ def test_the_settings_link_follows_a_custom_server() -> None:
     assert failures.settings_url("https://staging.example.com/") == (
         "https://staging.example.com/settings?tab=broker"
     )
-    assert failures.settings_url() == "https://t1.ordertune.com/settings?tab=broker"
+    assert failures.settings_url() == "https://interactive.ordertune.com/settings?tab=broker"
 
 
 def test_no_startup_failure_tells_the_customer_to_download_a_bridge_env(tmp_path) -> None:

@@ -27,8 +27,8 @@ class BridgeConfig(BaseSettings):
 
     # ── Ordertune-Server (from Setup-Wizard-Download) ──────────────────
     ordertune_api_base: HttpUrl = Field(
-        default="https://t1.ordertune.com",  # type: ignore[arg-type]
-        description="Base-URL of the Ordertune server (typically https://t1.ordertune.com).",
+        default="https://interactive.ordertune.com",  # type: ignore[arg-type]
+        description="Base-URL of the Ordertune server (typically https://interactive.ordertune.com).",
     )
     ordertune_bridge_token: str = Field(
         min_length=32,

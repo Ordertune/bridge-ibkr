@@ -93,7 +93,7 @@ def _basis(env_path: Path) -> str:
         werte = env_file.parse(env_path.read_text(encoding="utf-8"))
     except OSError:
         werte = {}
-    return werte.get("ORDERTUNE_API_BASE") or "https://t1.ordertune.com"
+    return werte.get("ORDERTUNE_API_BASE") or "https://interactive.ordertune.com"
 
 
 def _bestaetigt_ersetzen() -> bool:
