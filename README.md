@@ -1,6 +1,6 @@
 # ordertune-bridge-ibkr
 
-Bridge-Client für Interactive Brokers, auf Windows **und** Linux. Holt vom User freigegebene Signale aus `t1.ordertune.com`, führt Orders im privaten IBKR-Depot aus, meldet Depot-State und Order-Results zurück.
+Bridge-Client für Interactive Brokers, auf Windows **und** Linux. Holt vom User freigegebene Signale aus `interactive.ordertune.com` (früher t1.ordertune.com), führt Orders im privaten IBKR-Depot aus, meldet Depot-State und Order-Results zurück.
 
 **Der Bridge-Client läuft auf einem privaten Virtual Private Server des Nutzers.** Ordertune führt keine Orders im Namen des Nutzers aus. Der Nutzer muss jede Order (oder jede Strategy für maximal 24 Stunden) über die Ordertune-Weboberfläche explizit freigeben, bevor die Bridge sie abholen und in IBKR platzieren darf.
 
@@ -87,7 +87,7 @@ Ausgangscode 0 heisst „das Archiv taugt als Quelle". Details in
 Der Setup-Wizard in Ordertune generiert die Datei automatisch. Manuell editierbar für Fortgeschrittene:
 
 ```
-ORDERTUNE_API_BASE=https://t1.ordertune.com
+ORDERTUNE_API_BASE=https://interactive.ordertune.com
 ORDERTUNE_BRIDGE_TOKEN=ot_bridge_<hex>
 ORDERTUNE_BRIDGE_CONNECTION_ID=<uuid>
 

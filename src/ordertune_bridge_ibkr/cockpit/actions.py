@@ -77,7 +77,7 @@ class SetupActions:
         connection = werte.get("ORDERTUNE_BRIDGE_CONNECTION_ID", "")
         if not token or not connection:
             return {"ok": False, "message": "bridge.env carries no credentials yet."}
-        base = werte.get("ORDERTUNE_API_BASE") or self._api_base or "https://t1.ordertune.com"
+        base = werte.get("ORDERTUNE_API_BASE") or self._api_base or "https://interactive.ordertune.com"
         return setup_mod.check_handshake(base, token, connection)
 
     # ── T1-178: die Kopplung ─────────────────────────────────────────────
@@ -155,7 +155,7 @@ class SetupActions:
         return (
             werte.get("ORDERTUNE_API_BASE")
             or self._api_base
-            or "https://t1.ordertune.com"
+            or "https://interactive.ordertune.com"
         )
 
     # ── Schreiben ────────────────────────────────────────────────────────

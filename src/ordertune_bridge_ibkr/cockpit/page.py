@@ -383,7 +383,7 @@ summary:hover { color: var(--fg-1); }
           <p class="code">- - - - -</p>
           <p class="pairttl"><span id="pairttl">10:00</span> left</p>
           <p class="pairwhere">Open <a id="pairurl" href="#" target="_blank"
-             rel="noopener">t1.ordertune.com/settings?tab=broker</a></p>
+             rel="noopener">interactive.ordertune.com/settings?tab=broker</a></p>
           <div class="pairmachine">
             <p class="pairmachine-lead">Ordertune asks you to confirm this
             machine. It must show exactly this:</p>
@@ -399,7 +399,7 @@ summary:hover { color: var(--fg-1); }
           <p class="muted">The older way, and it still works -- useful when this machine
           has no browser, or when you run the Bridge unattended.</p>
           <textarea id="envbox" rows="7" spellcheck="false"
-            placeholder="ORDERTUNE_API_BASE=https://t1.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
+            placeholder="ORDERTUNE_API_BASE=https://interactive.ordertune.com&#10;ORDERTUNE_BRIDGE_TOKEN=...&#10;ORDERTUNE_BRIDGE_CONNECTION_ID=..."></textarea>
           <p><button class="action" id="s1">Save bridge.env</button>
              <span class="note" id="s1msg"></span></p>
         </details>
@@ -1054,7 +1054,7 @@ q("p1").addEventListener("click", () => {
     q("paircode").querySelector(".code").textContent = r.code || "";
     q("pairhost").textContent = r.hostname || "-";
     q("pairfp").textContent = r.fingerprint_prefix || "-";
-    const ziel = (r.api_base || "https://t1.ordertune.com")
+    const ziel = (r.api_base || "https://interactive.ordertune.com")
       + "/settings?tab=broker";
     const link = q("pairurl");
     link.href = ziel;
