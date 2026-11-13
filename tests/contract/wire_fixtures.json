@@ -235,6 +235,23 @@
       }
     }
   },
+  "heartbeatWithWriteAccess": {
+    "_comment": "T1-405 — der Auftragszugriff reist im Herzschlag. Die Bridge misst ihn bei jedem Verbinden mit TWS (Read-Only-API, T1-101 B-2) und zeigte ihn bis 0.35.1 nur im lokalen Fenster; dort stand nach jedem naechtlichen TWS-Neustart 'Order access unknown', waehrend die Plattform 'Setup complete' sagte. Der Koerper ist `.strict()`: ohne das Feld im Schema kostete es den ganzen Herzschlag. Fehlt das Feld, heisst das 'diese Bridge sagt es nicht', nicht 'schreibgeschuetzt'.",
+    "method": "PUT",
+    "path": "/api/bridge/v1/heartbeat",
+    "body": {
+      "bridgeVersion": "0.35.1",
+      "gatewayStatus": "ok",
+      "accountSnapshot": {
+        "cash": 24150.5,
+        "equity": 98230.75,
+        "currency": "USD",
+        "positions": [],
+        "accountId": "DUN950877"
+      },
+      "writeAccess": "read_only_confirmed"
+    }
+  },
   "heartbeatWithOpenOrders": {
     "method": "PUT",
     "path": "/api/bridge/v1/heartbeat",
