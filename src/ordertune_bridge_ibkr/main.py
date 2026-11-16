@@ -65,6 +65,13 @@ from .pair_console import pair_requested, run_pairing
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
+from .masking import mask_account
+from .trading_account import (
+    ACCOUNT_MISMATCH,
+    ZIEL_ABWEISEN,
+    ZIEL_WARTEN,
+    pruefe_zielkonto,
+)
 from .order_reconcile import (
     als_utc,
     fills_by_dispatch,
@@ -417,6 +424,23 @@ def _handle_pending(
             continue
 
         intent = order.order_intent
+        # ── T1-414: Zielkonto ─────────────────────────────────────────
+        #
+        # Vor dem Sizing-Abgleich: wurde die Menge fuer ein anderes Konto
+        # gerechnet, ist das der Grund, nicht eine Mengenabweichung.
+        handelskonto = ibkr.trading_account()
+        urteil, text = pruefe_zielkonto(intent.get("targetAccountId"), handelskonto)
+        if urteil == ZIEL_WARTEN:
+            log.warning("Dispatch %s: %s", order.dispatch_id, text)
+            continue
+        if urteil == ZIEL_ABWEISEN:
+            log.warning("Dispatch %s: %s", order.dispatch_id, text)
+            # Die angehaengten Beine gingen nie hinaus; ohne eigene Meldung
+            # blieben sie auf `submitting` und ihr Lot ohne Ausstieg (T1-136).
+            for dispatch_id in [order.dispatch_id, *(k["dispatchId"] for k in _attached_exits(intent))]:
+                _report_rejected(api, dispatch_id, f"{ACCOUNT_MISMATCH}: {text}")
+            continue
+
         # ── Sizing-Recompute-Check ────────────────────────────────────
         sizing_conf = intent.get("bridgeSizingConfig")
         if sizing_conf and live_equity > 0:
@@ -480,6 +504,11 @@ def _handle_pending(
         try:
             contract = make_contract(intent["symbol"])
             ib_order = translate_intent(intent)
+            # T1-414: bei mehreren Konten verlangt IBKR das Konto; ohne Angabe
+            # ging die Order ins TWS-Standardkonto. Gesetzt nur, wenn ein
+            # Handelskonto feststeht — sonst wie bisher (T1-306).
+            if handelskonto:
+                ib_order.account = handelskonto
             # T1-109 — mit sprechendem Etikett, wenn die Plattform eines mitgibt.
             # Ohne Etikett entsteht exakt das Format von vorher.
             ib_order.orderRef = build_order_ref(
@@ -497,6 +526,8 @@ def _handle_pending(
                 ko.orderRef = build_order_ref(
                     kind["dispatchId"], kind.get("orderRefLabel")
                 )
+                if handelskonto:
+                    ko.account = handelskonto
                 order_details.remember(
                     kind["dispatchId"],
                     {"intent": "exit", "strategyName": intent.get("strategyName")},
@@ -929,7 +960,8 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
         )
 
         bodies = external_execution_bodies(
-            fills, order_types, _REPORTED_EXTERNAL
+            fills, order_types, _REPORTED_EXTERNAL,
+            nur_konto=ibkr.trading_account(),
         )
     except Exception as exc:
         log.warning("Could not collect external executions: %s", exc)
@@ -1641,7 +1673,7 @@ def _handle_heartbeat(
                 "liveness beat without positions. Ordertune will not book any "
                 "position as sold while this lasts."
             )
-        api.heartbeat(
+        antwort = api.heartbeat(
             cash=snap.cash,
             equity=snap.equity,
             currency=snap.currency,
@@ -1684,6 +1716,11 @@ def _handle_heartbeat(
             # T1-405: der gemessene Auftragszugriff. Bis 0.35.1 nur lokal.
             write_access=ibkr.write_access().state,
         )
+        # T1-414: das Handelskonto gilt ab dem naechsten Lesen und fuer jeden
+        # folgenden Auftrag. Sagt die Plattform nichts (aeltere Fassung),
+        # bleibt alles, wie es war.
+        if antwort.konto_gemeldet:
+            ibkr.set_trading_account(antwort.konto)
         return snap, None
     except Exception as exc:
         log.warning("heartbeat push failed: %s", exc)
@@ -2739,25 +2776,6 @@ def run_setup_cockpit(
     finally:
         server.stop()
         runfile.remove(0)
-
-
-def mask_account(account: str | None) -> str | None:
-    """T1-103 O — die Kontokennung, so weit gekuerzt, dass sie noch unterscheidet.
-
-    Der Zweck ist, ein Live- von einem Papierkonto zu unterscheiden, nicht die
-    Nummer auszuweisen. IBKR-Papierkonten beginnen mit `D`, Livekonten mit `U`
-    — der erste Buchstabe und die letzten beiden Stellen reichen dafuer, und
-    mehr gehoert nicht in eine Anzeige, die ueber HTTP ausgeliefert wird.
-
-    Die Zusage aus T1-97 lautet, dass die vollstaendige Nummer den Prozess nur
-    maskiert verlaesst. Das Cockpit ist ein Prozessausgang.
-    """
-    if not account:
-        return None
-    kennung = str(account).strip()
-    if len(kennung) <= 3:
-        return kennung
-    return f"{kennung[0]}***{kennung[-2:]}"
 
 
 def report_heartbeat(

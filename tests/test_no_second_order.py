@@ -35,6 +35,10 @@ class _FakeIbkr:
     def get_live_equity(self) -> float:
         return 0.0
 
+    def trading_account(self) -> str | None:
+        # T1-414: ein Login mit einem Konto ohne Vorgabe der Plattform.
+        return None
+
     def place_order(self, contract: Any, order: Any) -> Any:
         if self.fail_place:
             raise RuntimeError("no route to broker")
