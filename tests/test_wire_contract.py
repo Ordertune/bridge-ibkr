@@ -295,6 +295,43 @@ def test_heartbeat_carries_the_export_status_as_contracted() -> None:
     assert rec.body["exportStatus"]["exportDir"] == "C:\\IBExport"
 
 
+def test_heartbeat_carries_the_write_access_as_contracted() -> None:
+    """T1-405 — der Auftragszugriff reist im Herzschlag.
+
+    Bis 0.35.1 stand er nur im lokalen Fenster, und die Plattform sagte
+    „Setup complete", auch wenn TWS mit Read-Only-API jeden Auftrag abgewiesen
+    haette. Der Koerper ist drueben `.strict()`: ohne Fixture kostete ein
+    Tippfehler im Feldnamen den ganzen Herzschlag.
+    """
+    expected = FIXTURES["heartbeatWithWriteAccess"]["body"]
+    snap = expected["accountSnapshot"]
+
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=snap["cash"],
+        equity=snap["equity"],
+        currency=snap["currency"],
+        positions=[],
+        gateway_status="connected",
+        account=snap["accountId"],
+        write_access=expected["writeAccess"],
+    )
+
+    assert rec.method == FIXTURES["heartbeatWithWriteAccess"]["method"]
+    assert rec.body == expected
+
+
+def test_heartbeat_omits_the_write_access_when_not_given() -> None:
+    """`None` laesst das Feld weg — die Plattform liest dann „sagt nichts"."""
+    rec = _Recorder()
+    api = _client(rec)
+    api.heartbeat(
+        cash=1.0, equity=2.0, currency="USD", positions=[], gateway_status="connected"
+    )
+    assert "writeAccess" not in rec.body
+
+
 def test_heartbeat_sends_an_empty_list_for_an_empty_account() -> None:
     """Die Gegenprobe: leer bleibt sagbar.
 
