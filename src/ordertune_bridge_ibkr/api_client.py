@@ -42,6 +42,7 @@ import httpx
 
 from . import __version__
 from .instance_id import instanzkennung
+from .trading_account import HeartbeatAntwort, antwort_aus_json
 
 log = logging.getLogger(__name__)
 
@@ -302,7 +303,7 @@ class OrdertuneApiClient:
         fx_rate_usd: float | None = None,
         managed_accounts: list[str] | None = None,
         account_metrics: dict[str, float] | None = None,
-    ) -> None:
+    ) -> HeartbeatAntwort:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
         `cpuLoad` ist optional und wird standardmässig NICHT gesendet. Es ist
@@ -420,11 +421,17 @@ class OrdertuneApiClient:
             body["openOrders"] = auftraege
             body["openOrdersTruncated"] = gekuerzt
 
-        _request_with_retry(
+        r = _request_with_retry(
             "PUT", self._client,
             f"{self._base}/api/bridge/v1/heartbeat",
             json=body,
         )
+        # T1-414: die Antwort traegt das Handelskonto. Eine unlesbare Antwort
+        # heisst „nichts gesagt", nicht „kein Konto".
+        try:
+            return antwort_aus_json(r.json())
+        except ValueError:
+            return antwort_aus_json(None)
 
     def get_pending(self) -> BridgePendingResponse:
         r = _request_with_retry(

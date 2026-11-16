@@ -81,6 +81,7 @@ def external_execution_bodies(
     fills: list[Any],
     order_types: dict[str, str],
     already_reported: set[str],
+    nur_konto: str | None = None,
 ) -> list[dict[str, Any]]:
     """Waehlt die fremden Ausfuehrungen aus und formt die Meldekoerper.
 
@@ -148,6 +149,10 @@ def external_execution_bodies(
                 "Without it the platform cannot tell which depot it belongs to.",
                 exec_id,
             )
+            continue
+        # T1-414 AC-19p: nur Ausfuehrungen des Handelskontos. Die anderen
+        # Konten des Logins sieht Ordertune nicht.
+        if nur_konto is not None and acct != nur_konto:
             continue
 
         body: dict[str, Any] = {

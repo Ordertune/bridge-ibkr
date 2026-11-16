@@ -14,6 +14,7 @@ from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 
 from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
 from .order_vocabulary import record_cancel_reason
+from .trading_account import maskiere, waehle_handelskonto
 from .write_access import (
     CONFIRMED as READ_ONLY_CONFIRMED,
     SUSPECTED as READ_ONLY_SUSPECTED,
@@ -244,6 +245,9 @@ class IbkrClient:
         self._port = port
         self._client_id = client_id
         self._ib = IB()
+        # T1-414: das von der Plattform festgelegte Handelskonto. `None`
+        # heisst „keine Vorgabe"; dann gilt die alte Regel (genau ein Konto).
+        self._vorgabe_konto: str | None = None
         # T1-152: keine Abfrage an TWS darf mehr unbegrenzt warten. Begruendung
         # samt Vorfall an der Konstanten.
         self._ib.RequestTimeout = REQUEST_TIMEOUT_S
@@ -541,6 +545,14 @@ class IbkrClient:
         # `_confirm_account_subscription`.
         if not acct_values and self._resubscribe_account_values():
             acct_values = self._ib.accountValues()
+        # T1-414: nur die Werte des Handelskontos. Bis hierher lief die
+        # Schleife unten ueber ALLE Konten des Logins, und der Depotwert war der
+        # des zuletzt gelesenen (Fall 2026-11-16: 1 Mio. statt rund 50.000).
+        # Ohne Handelskonto bleibt es wie bisher; die Plattform sperrt dann
+        # Einstiege, weil sie kein Konto gemeldet bekommt.
+        account = self._trading_account()
+        if account is not None:
+            acct_values = [v for v in acct_values if getattr(v, "account", "") == account]
         currency = resolve_account_currency(acct_values)
 
         cash = 0.0
@@ -563,7 +575,6 @@ class IbkrClient:
         self._log_fx(currency, fx)
 
         positions = self._positions()
-        account = self._trading_account()
 
         return AccountSnapshot(
             cash=cash,
@@ -827,6 +838,15 @@ class IbkrClient:
         # gelesen hat, war der Befund.
         return konten or None
 
+    def set_trading_account(self, konto: str | None) -> None:
+        """T1-414 — die Vorgabe der Plattform aus der Heartbeat-Antwort."""
+        if konto != self._vorgabe_konto:
+            log.info(
+                "Trading account from Ordertune: %s",
+                maskiere(konto) if konto else "none",
+            )
+        self._vorgabe_konto = konto
+
     def _trading_account(self) -> str | None:
         """Das eine Konto, auf dem gehandelt wird — oder `None` bei mehreren.
 
@@ -841,7 +861,8 @@ class IbkrClient:
             accounts = [a for a in self._ib.managedAccounts() if a]
         except Exception:  # pragma: no cover - defensiv
             return None
-        return accounts[0] if len(accounts) == 1 else None
+        # T1-414: die Vorgabe der Plattform, wenn sie im Login steht.
+        return waehle_handelskonto(accounts, self._vorgabe_konto)
 
     def _log_account_currency(
         self,

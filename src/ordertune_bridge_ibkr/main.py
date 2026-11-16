@@ -65,6 +65,7 @@ from .pair_console import pair_requested, run_pairing
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
+from .trading_account import ACCOUNT_MISMATCH, pruefe_zielkonto
 from .order_reconcile import (
     als_utc,
     fills_by_dispatch,
@@ -454,6 +455,26 @@ def _handle_pending(
                     log.error("result_order failed for %s: %s", order.dispatch_id, exc)
                 continue
 
+        # ── T1-414: Zielkonto ─────────────────────────────────────────
+        #
+        # Die Menge wurde gegen das Kapital des Zielkontos gerechnet. Ist das
+        # nicht (mehr) unser Handelskonto, geht nichts hinaus.
+        handelskonto = ibkr.trading_account()
+        abweisung = pruefe_zielkonto(intent.get("targetAccountId"), handelskonto)
+        if abweisung is not None:
+            log.warning("Dispatch %s: %s", order.dispatch_id, abweisung)
+            try:
+                api.result_order(
+                    order.dispatch_id,
+                    status="rejected",
+                    reason_code="other",
+                    error_message=f"{ACCOUNT_MISMATCH}: {abweisung}",
+                    broker_confirmed_end=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - Meldung darf den Abruf nicht beenden
+                log.error("result_order failed for %s: %s", order.dispatch_id, exc)
+            continue
+
         # ── Submit via IBKR ───────────────────────────────────────────
         #
         # T1-103 H — zwei Schritte, zwei Fehlerbehandlungen.
@@ -480,6 +501,11 @@ def _handle_pending(
         try:
             contract = make_contract(intent["symbol"])
             ib_order = translate_intent(intent)
+            # T1-414: bei mehreren Konten verlangt IBKR das Konto; ohne Angabe
+            # ging die Order ins TWS-Standardkonto. Gesetzt nur, wenn ein
+            # Handelskonto feststeht — sonst wie bisher (T1-306).
+            if handelskonto:
+                ib_order.account = handelskonto
             # T1-109 — mit sprechendem Etikett, wenn die Plattform eines mitgibt.
             # Ohne Etikett entsteht exakt das Format von vorher.
             ib_order.orderRef = build_order_ref(
@@ -495,6 +521,8 @@ def _handle_pending(
                 ko.orderRef = build_order_ref(
                     kind["dispatchId"], kind.get("orderRefLabel")
                 )
+                if handelskonto:
+                    ko.account = handelskonto
                 kind_orders.append(ko)
             if kind_orders:
                 # IBKRs Bracket-Muster: der Parent geht ungesendet hinaus, das
@@ -923,7 +951,8 @@ def _handle_external_executions(api: OrdertuneApiClient, ibkr: IbkrClient) -> No
         )
 
         bodies = external_execution_bodies(
-            fills, order_types, _REPORTED_EXTERNAL
+            fills, order_types, _REPORTED_EXTERNAL,
+            nur_konto=ibkr.trading_account(),
         )
     except Exception as exc:
         log.warning("Could not collect external executions: %s", exc)
@@ -1561,7 +1590,7 @@ def _handle_heartbeat(
                 "liveness beat without positions. Ordertune will not book any "
                 "position as sold while this lasts."
             )
-        api.heartbeat(
+        antwort = api.heartbeat(
             cash=snap.cash,
             equity=snap.equity,
             currency=snap.currency,
@@ -1602,6 +1631,11 @@ def _handle_heartbeat(
             # Liste ist eine Aussage und geht raus.
             managed_accounts=ibkr.managed_accounts(),
         )
+        # T1-414: das Handelskonto gilt ab dem naechsten Lesen und fuer jeden
+        # folgenden Auftrag. Sagt die Plattform nichts (aeltere Fassung),
+        # bleibt alles, wie es war.
+        if antwort.konto_gemeldet:
+            ibkr.set_trading_account(antwort.konto)
         return snap, None
     except Exception as exc:
         log.warning("heartbeat push failed: %s", exc)
