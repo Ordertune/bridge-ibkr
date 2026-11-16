@@ -1548,6 +1548,13 @@ def _handle_heartbeat(
     if not ibkr.is_connected():
         log.warning("heartbeat: IBKR disconnected — skipping snapshot push")
         return None, None
+    # T1-405: steht der Zugriff nicht auf `writable`, wird er in Abstaenden neu
+    # gemessen. Bis 0.35.1 geschah das nur beim Verbinden; eine Vermutung aus
+    # einem langsamen Start blieb dann bis zum naechsten Neustart stehen.
+    try:
+        ibkr.recheck_write_access_if_due()
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("write access recheck failed: %s", exc)
     try:
         snap = ibkr.account_snapshot()
         # T1-99: der Heartbeat geht auch ohne Depotauskunft raus — er ist
@@ -1601,6 +1608,8 @@ def _handle_heartbeat(
             # und die Plattform liest „diese Fassung sagt es nicht". Eine leere
             # Liste ist eine Aussage und geht raus.
             managed_accounts=ibkr.managed_accounts(),
+            # T1-405: der gemessene Auftragszugriff. Bis 0.35.1 nur lokal.
+            write_access=ibkr.write_access().state,
         )
         return snap, None
     except Exception as exc:
@@ -2679,6 +2688,7 @@ def report_heartbeat(
     snap: Any | None,
     error: Exception | None = None,
     api_base: str | None = None,
+    write_access: Any | None = None,
 ) -> None:
     """Traegt das Ergebnis eines Herzschlags in den Zustandsblock."""
     if cockpit is None:
@@ -2691,6 +2701,14 @@ def report_heartbeat(
             # Ohne Verbindung ist die Ablage nicht leer, sondern ohne Aussage.
             "orders": orders_for_cockpit() if tws_connected else None,
         }
+        # T1-405: der Zugriff bei jedem Takt, nicht nur beim Start. So heilt
+        # die Anzeige auch, wenn eine Sitzung ohne `report_reconnect` neu
+        # beginnt, und eine Nachmessung erscheint binnen einer Minute.
+        if write_access is not None and tws_connected:
+            changes.update(
+                write_access=write_access.state,
+                write_access_detail=write_access.detail,
+            )
         # B-4: dieselbe Zuordnung wie beim Start, damit Konsole und Flaeche
         # ueber dieselbe Stoerung dasselbe sagen (E-6).
         if error is not None:
@@ -2736,7 +2754,11 @@ def report_poll(cockpit: Any | None) -> None:
         log.debug("Cockpit state update failed: %s", exc)
 
 
-def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> None:
+def report_reconnect(
+    cockpit: Any | None,
+    session_connected_at: datetime,
+    write_access: Any | None = None,
+) -> None:
     """T1-152d — nach einer Wiederverbindung beginnt eine neue Sitzung.
 
     Ohne das stuende im Zustandsblock weiterhin der Zeitpunkt der ersten
@@ -2747,10 +2769,23 @@ def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> Non
     if cockpit is None:
         return
     try:
-        cockpit.store.update(
-            session_connected_at=session_connected_at.isoformat(),
-            tws_connected=True,
-        )
+        changes: dict[str, Any] = {
+            "session_connected_at": session_connected_at.isoformat(),
+            "tws_connected": True,
+        }
+        # T1-405 — der Befund der NEUEN Sitzung.
+        #
+        # `report_disconnect` setzt den Zugriff auf „unknown", und `connect()`
+        # misst ihn beim Neuverbinden neu. Bis 0.35.1 schrieb diese Funktion
+        # das Ergebnis nicht zurueck: nach jedem naechtlichen TWS-Neustart
+        # stand „Order access unknown" im Fenster, bis jemand die Bridge neu
+        # startete. Auf mehreren Kunden-VPS so gesehen (2026-11-13).
+        if write_access is not None:
+            changes.update(
+                write_access=write_access.state,
+                write_access_detail=write_access.detail,
+            )
+        cockpit.store.update(**changes)
     except Exception as exc:  # pragma: no cover - defensiv
         log.debug("Cockpit state update failed: %s", exc)
 
@@ -3437,6 +3472,7 @@ def _main() -> int:
                 snap,
                 beat_error,
                 str(config.ordertune_api_base),
+                write_access=ibkr.write_access(),
             )
 
         def _poll() -> None:
@@ -3459,7 +3495,7 @@ def _main() -> int:
             # Export verloren haben — die Einstellung haengt am Profil, nicht an
             # der Bridge. Also bei jeder neuen Sitzung erneut nachsehen.
             _pruefe_export(config.tws_export_dir, cockpit)
-            report_reconnect(cockpit, session_connected_at)
+            report_reconnect(cockpit, session_connected_at, ibkr.write_access())
 
         # T1-152d: der Rueckruf fuer Auftragszustaende wird hier bewusst NICHT
         # erneut angehaengt. Er haengt am `IB`-Objekt, nicht an der Verbindung,

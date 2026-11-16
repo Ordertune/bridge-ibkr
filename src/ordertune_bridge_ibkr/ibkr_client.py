@@ -15,6 +15,7 @@ from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
 from .order_vocabulary import record_cancel_reason
 from .write_access import (
+    WRITABLE,
     CONFIRMED as READ_ONLY_CONFIRMED,
     SUSPECTED as READ_ONLY_SUSPECTED,
     VALIDATION_ERROR_CODE,
@@ -29,6 +30,11 @@ log = logging.getLogger(__name__)
 # kommt sie nie. Drei Sekunden sind reichlich Reserve und halten den Start
 # kurz, wenn es schiefgeht — bei ib_insync selbst sind es vier.
 WRITE_ACCESS_TIMEOUT_S = 3.0
+
+# T1-405: wie oft ein Zugriff, der nicht `writable` ist, neu gemessen wird.
+# Jede Messung kann unter Read-Only-API die Schleife bis zu
+# `WRITE_ACCESS_TIMEOUT_S` anhalten; alle zehn Minuten sind das 0,5 Promille.
+WRITE_ACCESS_RECHECK_INTERVAL_S = 600.0
 
 # TWS-Fehler 326: „Unable to connect as the client id is already in use".
 #
@@ -264,6 +270,8 @@ class IbkrClient:
         # `None`. Je Versuch geleert, wie die 321er.
         self._client_id_refused: str | None = None
         self._write_access = WriteAccess()
+        # T1-405: wann der Zugriff zuletzt gemessen wurde (`time.monotonic`).
+        self._write_access_checked_at: float | None = None
         # T1-152d: haengt der Fehler-Rueckruf schon? Seit es eine
         # Wiederverbindung gibt, laeuft `connect()` mehr als einmal.
         self._error_hook_attached = False
@@ -379,6 +387,7 @@ class IbkrClient:
             validation_errors=list(self._validation_errors),
             open_orders_answered=beantwortet,
         )
+        self._write_access_checked_at = time.monotonic()
 
         if self._write_access.state == READ_ONLY_CONFIRMED:
             log.error(
@@ -397,6 +406,45 @@ class IbkrClient:
 
     def write_access(self) -> WriteAccess:
         return self._write_access
+
+    def recheck_write_access_if_due(
+        self, *, now: float | None = None
+    ) -> bool:
+        """T1-405 — misst den Zugriff neu, wenn er nicht `writable` ist.
+
+        Bis 0.35.1 wurde er nur in `connect()` gemessen. Eine Vermutung aus
+        einem langsamen TWS-Start (`read_only_suspected`) blieb damit bis zum
+        naechsten Neustart stehen, und wer Read-Only-API in TWS abschaltete,
+        sah es erst nach einem Neustart der Bridge.
+
+        `writable` wird nicht nachgemessen: der Schalter wirkt erst nach einem
+        TWS-Neustart, und danach misst `connect()` ohnehin.
+
+        Die 321er dieser Sitzung bleiben bewusst stehen: TWS schickt sie beim
+        Verbinden, nicht je Anfrage. Antwortet der Auftragskanal jetzt, gilt
+        ohnehin `writable`; antwortet er nicht, waere ein geleerter Befund ein
+        Rueckschritt von „bestaetigt" auf „vermutet".
+
+        Gibt zurueck, ob gemessen wurde.
+        """
+        if self._write_access.state == WRITABLE:
+            return False
+        jetzt = time.monotonic() if now is None else now
+        if (
+            self._write_access_checked_at is not None
+            and jetzt - self._write_access_checked_at
+            < WRITE_ACCESS_RECHECK_INTERVAL_S
+        ):
+            return False
+        vorher = self._write_access.state
+        self._confirm_write_access()
+        if self._write_access.state != vorher:
+            log.info(
+                "Order access re-checked: %s -> %s",
+                vorher,
+                self._write_access.state,
+            )
+        return True
 
     def _confirm_positions_subscription(self) -> None:
         """T1-99 — die Positionsabfrage ausdruecklich abwarten.
