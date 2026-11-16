@@ -232,10 +232,53 @@ td.state.done { color: var(--success); }
 td.state.gone { color: var(--danger); }
 td.reason { white-space: normal; color: var(--danger); font-size: 13px;
             max-width: 34rem; }
-/* T1-416: Zusatzzeilen einer Auftragszeile — leise, kein Fehlerrot. */
-.sub { color: var(--fg-3); font-size: 13px; white-space: normal; }
-div.why { color: var(--danger); font-size: 13px; white-space: normal;
-          max-width: 34rem; }
+/* ── T1-416: Auftraege wie im Order Management ─────────────────────
+   Eine Liste je Gruppe in einem Rahmen, eine Zeile je Auftrag:
+   Symbol mit Strategie darunter, Richtung, Typ, Preis, Menge, Zeit, Status.
+   Bedingungen und IBKRs Wortlaut stehen in einer zweiten Zeile darunter.
+   Unter 760 px rutscht die Zeile in zwei Spalten, statt seitlich zu scrollen. */
+.og { margin-bottom: 22px; }
+.og:last-child { margin-bottom: 0; }
+.og-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px;
+           font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+           color: var(--fg-3); font-weight: 500; }
+.og-list { list-style: none; margin: 0; padding: 0; background: var(--surface);
+           border: 1px solid var(--border); border-radius: var(--r-sm); }
+.or { display: grid; align-items: center; gap: 6px 16px; padding: 12px 14px;
+      grid-template-columns: minmax(10rem,1.6fr) auto minmax(8rem,1.2fr)
+                             minmax(5.5rem,.8fr) minmax(7rem,.9fr) auto;
+      grid-template-areas: "who side what qty when st" "more more more more more more";
+      border-bottom: 1px solid var(--border); font-size: 13px; }
+.or .who { grid-area: who; } .or .side { grid-area: side; }
+.or .what { grid-area: what; } .or .qty { grid-area: qty; }
+.or .when { grid-area: when; } .or .st-cell { grid-area: st; justify-self: end; }
+.or:last-child { border-bottom: 0; }
+.or .sym { font-weight: 600; color: var(--fg-1); font-size: 14px; }
+.or .strat { display: block; color: var(--fg-3); font-size: 12px; margin-top: 2px;
+             overflow-wrap: anywhere; }
+.or .what { font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.or .qty { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg-1); }
+.or .qty small { display: block; color: var(--fg-3); font-size: 11.5px; }
+.or .when { color: var(--fg-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.or .more { grid-area: more; display: flex; flex-wrap: wrap; gap: 6px;
+            align-items: baseline; }
+.pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+        border-radius: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+        text-transform: uppercase; white-space: nowrap; border: 1px solid transparent; }
+.pill.buy { border-color: var(--success); color: var(--success); }
+.pill.sell { background: var(--surface-3); color: var(--fg-1); }
+.pill.st { background: var(--surface-2); color: var(--fg-2); text-transform: none;
+           letter-spacing: 0; font-size: 12px; font-weight: 500; }
+.pill.st.done { border-color: var(--success); color: var(--success); background: none; }
+.pill.st.gone { border-color: var(--danger); color: var(--danger); background: none; }
+.cond { font-size: 11.5px; color: var(--fg-2); border: 1px solid var(--border);
+        border-radius: var(--r-pill); padding: 1px 8px; white-space: nowrap; }
+.why { flex-basis: 100%; color: var(--danger); font-size: 12.5px; overflow-wrap: anywhere; }
+.og-note { margin: 8px 0 0; font-size: 12px; color: var(--fg-3); }
+@media (max-width: 760px) {
+  .or { grid-template-columns: auto 1fr auto;
+        grid-template-areas: "who who st" "side what qty" "when when when" "more more more"; }
+}
 
 /* ── Knoepfe: genau EINER in Lime je Ansicht ───────────────────────── */
 button.action { font: inherit; font-size: 14px; font-weight: 600;
@@ -468,7 +511,7 @@ summary:hover { color: var(--fg-1); }
     </section>
     <section>
       <h2>Orders</h2>
-      <div id="orders" class="scroll muted">no order data yet</div>
+      <div id="orders" class="muted">No order data yet.</div>
     </section>
     <section>
       <h2>Account</h2>
@@ -698,32 +741,59 @@ function verdict(s) {
 
 function renderOrders(s) {
   const box = q("orders");
-  if (s.orders === null || s.orders === undefined) {
-    box.className = "scroll muted"; box.textContent = "No order data yet."; return;
+  // T1-99: keine Auskunft ist etwas anderes als eine leere Liste.
+  if (!Array.isArray(s.orders)) {
+    box.className = "muted"; box.textContent = "No order data yet."; return;
   }
   if (s.orders.length === 0) {
-    box.className = "scroll"; box.textContent = "No orders of ours at IBKR right now."; return;
+    box.className = "muted"; box.textContent = "No orders from Ordertune at IBKR today."; return;
   }
-  // T1-416: je Auftrag Strategie, Zweck, Typ, Preis, Bedingungen, Fuellung
-  // und Zeitpunkt. Die Angaben setzt die Bridge zusammen (order_details.py);
-  // hier wird nur angeordnet.
-  box.className = "scroll";
-  box.innerHTML = "<table><tr><th>Strategy</th><th>Order</th><th>Price</th>"
-    + "<th>Conditions</th><th>Status</th><th>Filled</th></tr>"
-    + s.orders.map(o =>
-      "<tr><td>" + esc(o.strategy ?? "-")
-      + (o.purpose ? "<div class='sub'>" + esc(o.purpose) + "</div>" : "")
-      + "</td><td>" + esc(o.symbol) + " " + esc(o.action) + " " + esc(o.qty ?? "-")
-      + "<div class='sub'>" + esc(o.orderType ?? "") + "</div></td><td>"
-      + esc(o.price ?? "-") + "</td><td class='sub'>"
-      + (o.conditions || []).map(esc).join("<br>")
-      + "</td><td class='state "
-      + (o.status === "Filled" ? "done" : o.status === "Rejected" ? "gone" : "")
-      + "'>" + esc(o.status)
-      + (o.reason ? "<div class='why'>" + esc(o.reason) + "</div>" : "")
-      + "</td><td>" + esc(o.filled ?? "-")
-      + (o.placedAt ? "<div class='sub'>sent " + esc(fmtTime(o.placedAt)) + "</div>" : "")
-      + "</td></tr>").join("") + "</table>";
+  // T1-416: wie das Order Management - erst, was bei IBKR liegt, dann, was
+  // heute erledigt wurde. Je Gruppe das Neueste oben.
+  const neu = (a, b) => String(b.placedAt || "").localeCompare(String(a.placedAt || ""));
+  const offen = s.orders.filter(o => o.open === true).sort(neu);
+  const fertig = s.orders.filter(o => o.open !== true).sort(neu);
+  box.className = "";
+  box.innerHTML = orderGroup("Pending at IBKR", offen) + orderGroup("Done today", fertig);
+}
+
+// Mehr Zeilen machen die Seite nicht klarer; die Bridge haelt ohnehin nur
+// den laufenden Tag vor.
+const ORDER_ROWS_MAX = 60;
+
+function orderGroup(titel, zeilen) {
+  if (zeilen.length === 0) return "";
+  const sichtbar = zeilen.slice(0, ORDER_ROWS_MAX);
+  const rest = zeilen.length - sichtbar.length;
+  return "<div class='og'><p class='og-head'>" + esc(titel) + " <span>"
+    + zeilen.length + "</span></p><ul class='og-list'>"
+    + sichtbar.map(orderRow).join("") + "</ul>"
+    + (rest > 0 ? "<p class='og-note'>" + rest + " older not shown.</p>" : "")
+    + "</div>";
+}
+
+function orderRow(o) {
+  const seite = String(o.action || "").toUpperCase();
+  const ton = o.status === "Filled" ? " done" : o.status === "Rejected" ? " gone" : "";
+  const strat = [o.strategy, o.purpose].filter(Boolean).map(esc).join(" &middot; ");
+  // Typ und Preis in einer Angabe: "Limit 709.80", "Stop 331.20", "Market on close".
+  const preis = o.price && o.price !== "At market" ? o.price : (o.orderType || "Market");
+  const bedingungen = Array.isArray(o.conditions) ? o.conditions : [];
+  const mehr = bedingungen.map(c => "<span class='cond'>" + esc(c) + "</span>").join("")
+    + (o.reason ? "<span class='why'>IBKR: " + esc(o.reason) + "</span>" : "");
+  return "<li class='or'>"
+    + "<div class='who'><span class='sym'>" + esc(o.symbol || "?") + "</span>"
+    + "<span class='strat'>" + (strat || "Strategy unknown") + "</span></div>"
+    + "<div class='side'><span class='pill " + (seite === "BUY" ? "buy" : "sell") + "'>"
+    + esc(seite || "?") + "</span></div>"
+    + "<div class='what'>" + esc(preis) + "</div>"
+    + "<div class='qty'>" + esc(o.qty ?? "-") + " sh"
+    + (o.filled ? "<small>filled " + esc(o.filled) + "</small>" : "") + "</div>"
+    + "<div class='when'>" + (o.placedAt ? "sent " + esc(fmtTime(o.placedAt)) : "") + "</div>"
+    + "<div class='st-cell'><span class='pill st" + ton + "'>" + esc(o.status || "Unknown")
+    + "</span></div>"
+    + (mehr ? "<div class='more'>" + mehr + "</div>" : "")
+    + "</li>";
 }
 
 function renderPositions(s) {

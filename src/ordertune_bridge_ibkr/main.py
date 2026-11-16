@@ -2595,15 +2595,17 @@ def orders_for_cockpit() -> list[dict[str, Any]]:
         contract = getattr(trade, "contract", None)
         roh = _status_of_trade(trade)
         grund = rejection_reason(trade)
+        zustand = "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
         zeilen.append(
             {
                 "dispatchId": dispatch_id,
+                # T1-416: offen bei IBKR oder heute erledigt — die Seite trennt
+                # beides wie das Order Management („Pending at your broker").
+                "open": zustand not in TERMINAL_STATES,
                 "symbol": getattr(contract, "symbol", None) or "?",
                 "action": getattr(order, "action", None) or "?",
                 "qty": getattr(order, "totalQuantity", None),
-                "status": order_vocabulary.label(
-                    "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
-                ),
+                "status": order_vocabulary.label(zustand),
                 "reason": grund,
                 # T1-416: wozu der Auftrag gehoert, zu welchem Preis und unter
                 # welcher Bedingung er steht.
