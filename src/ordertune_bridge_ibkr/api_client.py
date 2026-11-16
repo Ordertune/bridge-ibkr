@@ -303,6 +303,7 @@ class OrdertuneApiClient:
         fx_rate_usd: float | None = None,
         managed_accounts: list[str] | None = None,
         account_metrics: dict[str, float] | None = None,
+        write_access: str | None = None,
     ) -> HeartbeatAntwort:
         """PUT /heartbeat → {bridgeVersion, gatewayStatus, accountSnapshot{...}}
 
@@ -401,6 +402,16 @@ class OrdertuneApiClient:
         # Fehlerklasse wie die Bereitschaftspruefung, die es schon einmal war.
         if export_status is not None:
             body["exportStatus"] = export_status
+        # T1-405 — darf diese Verbindung in TWS Auftraege stellen?
+        #
+        # Die Messung aus T1-101 B-2 stand bis 0.35.1 nur im lokalen Fenster.
+        # Die Plattform sagte daneben „Setup complete", auch wenn TWS mit
+        # Read-Only-API jeden Auftrag abgewiesen haette. `None` laesst das Feld
+        # weg. Setzt eine Plattform ab T1-405 voraus: der Koerper ist dort
+        # `.strict()`, eine aeltere antwortet mit 422. Deshalb geht die
+        # Plattform zuerst live.
+        if write_access is not None:
+            body["writeAccess"] = write_access
         if cpu_load is not None:
             body["cpuLoad"] = float(cpu_load)
         # T1-114 — der Rueckbericht: was IBKR gerade an EIGENEN Auftraegen

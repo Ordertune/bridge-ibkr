@@ -43,14 +43,14 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from . import __version__, console, failures, order_vocabulary, port_probe
 from .api_client import OrdertuneApiClient
-from . import paths, trade_reports
+from . import order_details, paths, trade_reports
 from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
 from .fingerprint import compute_fingerprint
@@ -514,6 +514,8 @@ def _handle_pending(
             ib_order.orderRef = build_order_ref(
                 order.dispatch_id, intent.get("orderRefLabel")
             )
+            # T1-416: Strategiename und Zweck fuer die Auftragsliste im Cockpit.
+            order_details.remember(order.dispatch_id, intent)
 
             kind_orders: list[Order] = []
             for kind in kinder:
@@ -526,6 +528,10 @@ def _handle_pending(
                 )
                 if handelskonto:
                     ko.account = handelskonto
+                order_details.remember(
+                    kind["dispatchId"],
+                    {"intent": "exit", "strategyName": intent.get("strategyName")},
+                )
                 kind_orders.append(ko)
             if kind_orders:
                 # IBKRs Bracket-Muster: der Parent geht ungesendet hinaus, das
@@ -1056,18 +1062,63 @@ def _pruefe_zeitzone(live: list[Any], archiv: list[Any]) -> float | None:
     return groesster
 
 
-def _pruefe_export(export_dir: str | None, cockpit: Any | None = None) -> Any:
+#: T1-416 — so lange darf die TWS nach einer Fuellung brauchen, bis sie im
+#: Export steht. Eingestellt ist ein Intervall von einer Minute; die Reserve
+#: verhindert, dass jede frische Fuellung kurz als „Export aus" erscheint.
+EXPORT_NACHLAUF = timedelta(minutes=15)
+
+
+def fuellungstage_aus(
+    fills: Iterable[Any], *, jetzt: datetime | None = None
+) -> list[str]:
+    """T1-416 — die Ortstage (YYYYMMDD) der Ausfuehrungen, die TWS gerade kennt.
+
+    Ortszeit wie bei `trade_reports._tag_der_datei`: der Tag einer Datei ist
+    der Tag, an dem der Rechner sie geschrieben hat. Ausfuehrungen ohne Zeit
+    zaehlen nicht, ebenso wenig solche, die juenger sind als `EXPORT_NACHLAUF`.
+    """
+    grenze = (jetzt or datetime.now(timezone.utc)) - EXPORT_NACHLAUF
+    tage: set[str] = set()
+    for fill in fills:
+        zeit = getattr(fill, "time", None)
+        if isinstance(zeit, datetime) and zeit.tzinfo is not None and zeit <= grenze:
+            tage.add(zeit.astimezone().strftime("%Y%m%d"))
+    return sorted(tage)
+
+
+#: T1-416 — der zuletzt protokollierte Befund, damit die Pruefung im Herzschlag
+#: laufen kann, ohne jede Minute dieselbe Zeile zu schreiben.
+_LETZTER_EXPORT_BEFUND: str | None = None
+
+
+def _pruefe_export(
+    export_dir: str | None, cockpit: Any | None = None, ibkr: Any | None = None
+) -> Any:
     """T1-207 — taugt das Archiv der TWS als Quelle, und sagt es laut.
 
-    Laeuft beim Start und bei jedem Wiederverbinden. Der Befund geht ins
-    Protokoll UND in den Zustandsblock: ein Kunde, der die Bridge als Fenster
-    offen hat, soll nicht erst im Protokoll suchen muessen.
+    Laeuft beim Start, bei jedem Wiederverbinden und (T1-416) in jedem
+    Herzschlag. Der Befund geht ins Protokoll UND in den Zustandsblock: ein
+    Kunde, der die Bridge als Fenster offen hat, soll nicht erst im Protokoll
+    suchen muessen. Protokolliert wird nur, wenn sich der Befund aendert.
+
+    T1-416: mit `ibkr` zaehlt, ob seit der neuesten Datei etwas gefuellt hat.
+    Ohne Handel schreibt die TWS keine Datei, und eine ruhige Woche ist kein
+    abgeschalteter Export.
     """
-    bereit = trade_reports.pruefe(export_dir or "")
-    if bereit.ok:
-        log.info("%s", bereit.text)
-    else:
-        log.warning("%s", bereit.text)
+    global _LETZTER_EXPORT_BEFUND
+    fuellungstage: list[str] | None = None
+    if ibkr is not None:
+        try:
+            fuellungstage = fuellungstage_aus(ibkr.fills())
+        except Exception as exc:  # pragma: no cover - dann die Altersregel
+            log.debug("Could not read fills for the export check: %s", exc)
+    bereit = trade_reports.pruefe(export_dir or "", fuellungstage=fuellungstage)
+    if bereit.text != _LETZTER_EXPORT_BEFUND:
+        _LETZTER_EXPORT_BEFUND = bereit.text
+        if bereit.ok:
+            log.info("%s", bereit.text)
+        else:
+            log.warning("%s", bereit.text)
     if cockpit is not None:
         try:
             cockpit.store.update(
@@ -1292,6 +1343,27 @@ def miss_den_export(
     return _archiv_fuellungen(export_dir, report_store, konto)
 
 
+def mit_eigenem_protokoll(completed_by_ref: dict[str, Any]) -> dict[str, Any]:
+    """T1-416 — ein abgeschlossener Auftrag mit dem Protokoll dieser Sitzung.
+
+    `reqCompletedOrders` liefert Auftraege ohne Protokoll; eine Ablehnung (201)
+    ist daran nicht zu erkennen, und der Abgleich meldete sie als Storno ohne
+    Grund (Welzel, 2026-11-12, „Die Boerse ist geschlossen"). Hat diese Sitzung
+    den Auftrag selbst gestellt, traegt ihr eigener Gegenstand das Protokoll —
+    dann gilt er. Ersetzt wird nur, was IBKR bereits als abgeschlossen fuehrt,
+    und nur, wenn das eigene Protokoll eine Ablehnung belegt. Sonst koennte ein
+    veralteter eigener Zustand (etwa `Submitted`) eine Fuellung verdecken.
+    """
+    with _DISPATCH_MAP_LOCK:
+        eigene = dict(_TRADES_BY_DISPATCH)
+    ergebnis = dict(completed_by_ref)
+    for dispatch_id in completed_by_ref:
+        lebend = eigene.get(dispatch_id)
+        if lebend is not None and rejection_reason(lebend) is not None:
+            ergebnis[dispatch_id] = lebend
+    return ergebnis
+
+
 def _handle_order_reconcile(
     api: OrdertuneApiClient,
     ibkr: IbkrClient,
@@ -1360,6 +1432,7 @@ def _handle_order_reconcile(
             # ungeklaert gemeldet statt als abgelehnt. Das ist die schwaechere,
             # aber nie die falsche Aussage.
             log.warning("Could not query completed orders: %s", exc)
+    completed_by_ref = mit_eigenem_protokoll(completed_by_ref)
 
     # T1-105: die Ausfuehrungsberichte des Tages. Sie tragen die Zahlen, die
     # der abgeschlossene Auftrag nicht traegt — gemessen am 2026-08-19 an drei
@@ -1580,6 +1653,13 @@ def _handle_heartbeat(
     if not ibkr.is_connected():
         log.warning("heartbeat: IBKR disconnected — skipping snapshot push")
         return None, None
+    # T1-405: steht der Zugriff nicht auf `writable`, wird er in Abstaenden neu
+    # gemessen. Bis 0.35.1 geschah das nur beim Verbinden; eine Vermutung aus
+    # einem langsamen Start blieb dann bis zum naechsten Neustart stehen.
+    try:
+        ibkr.recheck_write_access_if_due()
+    except Exception as exc:  # pragma: no cover - defensiv
+        log.debug("write access recheck failed: %s", exc)
     try:
         snap = ibkr.account_snapshot()
         # T1-99: der Heartbeat geht auch ohne Depotauskunft raus — er ist
@@ -1633,6 +1713,8 @@ def _handle_heartbeat(
             # und die Plattform liest „diese Fassung sagt es nicht". Eine leere
             # Liste ist eine Aussage und geht raus.
             managed_accounts=ibkr.managed_accounts(),
+            # T1-405: der gemessene Auftragszugriff. Bis 0.35.1 nur lokal.
+            write_access=ibkr.write_access().state,
         )
         # T1-414: das Handelskonto gilt ab dem naechsten Lesen und fuer jeden
         # folgenden Auftrag. Sagt die Plattform nichts (aeltere Fassung),
@@ -2559,16 +2641,21 @@ def orders_for_cockpit() -> list[dict[str, Any]]:
         contract = getattr(trade, "contract", None)
         roh = _status_of_trade(trade)
         grund = rejection_reason(trade)
+        zustand = "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
         zeilen.append(
             {
                 "dispatchId": dispatch_id,
+                # T1-416: offen bei IBKR oder heute erledigt — die Seite trennt
+                # beides wie das Order Management („Pending at your broker").
+                "open": zustand not in TERMINAL_STATES,
                 "symbol": getattr(contract, "symbol", None) or "?",
                 "action": getattr(order, "action", None) or "?",
                 "qty": getattr(order, "totalQuantity", None),
-                "status": order_vocabulary.label(
-                    "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
-                ),
+                "status": order_vocabulary.label(zustand),
                 "reason": grund,
+                # T1-416: wozu der Auftrag gehoert, zu welchem Preis und unter
+                # welcher Bedingung er steht.
+                **order_details.describe(dispatch_id, trade),
             }
         )
     zeilen.sort(key=lambda z: (str(z["symbol"]), str(z["dispatchId"])))
@@ -2697,6 +2784,7 @@ def report_heartbeat(
     snap: Any | None,
     error: Exception | None = None,
     api_base: str | None = None,
+    write_access: Any | None = None,
 ) -> None:
     """Traegt das Ergebnis eines Herzschlags in den Zustandsblock."""
     if cockpit is None:
@@ -2709,6 +2797,14 @@ def report_heartbeat(
             # Ohne Verbindung ist die Ablage nicht leer, sondern ohne Aussage.
             "orders": orders_for_cockpit() if tws_connected else None,
         }
+        # T1-405: der Zugriff bei jedem Takt, nicht nur beim Start. So heilt
+        # die Anzeige auch, wenn eine Sitzung ohne `report_reconnect` neu
+        # beginnt, und eine Nachmessung erscheint binnen einer Minute.
+        if write_access is not None and tws_connected:
+            changes.update(
+                write_access=write_access.state,
+                write_access_detail=write_access.detail,
+            )
         # B-4: dieselbe Zuordnung wie beim Start, damit Konsole und Flaeche
         # ueber dieselbe Stoerung dasselbe sagen (E-6).
         if error is not None:
@@ -2754,7 +2850,11 @@ def report_poll(cockpit: Any | None) -> None:
         log.debug("Cockpit state update failed: %s", exc)
 
 
-def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> None:
+def report_reconnect(
+    cockpit: Any | None,
+    session_connected_at: datetime,
+    write_access: Any | None = None,
+) -> None:
     """T1-152d — nach einer Wiederverbindung beginnt eine neue Sitzung.
 
     Ohne das stuende im Zustandsblock weiterhin der Zeitpunkt der ersten
@@ -2765,10 +2865,23 @@ def report_reconnect(cockpit: Any | None, session_connected_at: datetime) -> Non
     if cockpit is None:
         return
     try:
-        cockpit.store.update(
-            session_connected_at=session_connected_at.isoformat(),
-            tws_connected=True,
-        )
+        changes: dict[str, Any] = {
+            "session_connected_at": session_connected_at.isoformat(),
+            "tws_connected": True,
+        }
+        # T1-405 — der Befund der NEUEN Sitzung.
+        #
+        # `report_disconnect` setzt den Zugriff auf „unknown", und `connect()`
+        # misst ihn beim Neuverbinden neu. Bis 0.35.1 schrieb diese Funktion
+        # das Ergebnis nicht zurueck: nach jedem naechtlichen TWS-Neustart
+        # stand „Order access unknown" im Fenster, bis jemand die Bridge neu
+        # startete. Auf mehreren Kunden-VPS so gesehen (2026-11-13).
+        if write_access is not None:
+            changes.update(
+                write_access=write_access.state,
+                write_access_detail=write_access.detail,
+            )
+        cockpit.store.update(**changes)
     except Exception as exc:  # pragma: no cover - defensiv
         log.debug("Cockpit state update failed: %s", exc)
 
@@ -3385,7 +3498,7 @@ def _main() -> int:
     # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
     # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und
     # der Kunde saehe die Warnung nur im Protokoll.
-    _pruefe_export(config.tws_export_dir, cockpit)
+    _pruefe_export(config.tws_export_dir, cockpit, ibkr)
 
     # T1-177 D: wenn der Zugang entzogen wurde, haelt sich die Bridge selbst
     # an — und der Grund ueberlebt die Schleife, damit er danach im gerahmten
@@ -3436,6 +3549,9 @@ def _main() -> int:
                     stop.set()
                     return
             _handle_external_executions(api, ibkr)
+            # T1-416: der Export-Befund haengt an den Fuellungen des Tages und
+            # wird deshalb mit jedem Takt neu gestellt, nicht nur beim Start.
+            _pruefe_export(config.tws_export_dir, cockpit, ibkr)
             # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
             # Fremdsicht — er ist die langsamste der drei Aufgaben und die
             # einzige, deren Ausbleiben nichts kaputt macht.
@@ -3455,6 +3571,7 @@ def _main() -> int:
                 snap,
                 beat_error,
                 str(config.ordertune_api_base),
+                write_access=ibkr.write_access(),
             )
 
         def _poll() -> None:
@@ -3476,8 +3593,8 @@ def _main() -> int:
             # T1-207: eine TWS, die zwischendurch neu gestartet wurde, kann den
             # Export verloren haben — die Einstellung haengt am Profil, nicht an
             # der Bridge. Also bei jeder neuen Sitzung erneut nachsehen.
-            _pruefe_export(config.tws_export_dir, cockpit)
-            report_reconnect(cockpit, session_connected_at)
+            _pruefe_export(config.tws_export_dir, cockpit, ibkr)
+            report_reconnect(cockpit, session_connected_at, ibkr.write_access())
 
         # T1-152d: der Rueckruf fuer Auftragszustaende wird hier bewusst NICHT
         # erneut angehaengt. Er haengt am `IB`-Objekt, nicht an der Verbindung,

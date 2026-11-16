@@ -62,6 +62,7 @@ import logging
 import math
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -515,7 +516,12 @@ def lies_archiv(
 # ── Taugt das Verzeichnis ueberhaupt? ────────────────────────────────────────
 
 
-def pruefe(verzeichnis: Path | str, *, heute: str | None = None) -> Bereitschaft:
+def pruefe(
+    verzeichnis: Path | str,
+    *,
+    heute: str | None = None,
+    fuellungstage: Iterable[str] | None = None,
+) -> Bereitschaft:
     """Die Bereitschaftspruefung fuer Protokoll und Cockpit.
 
     Sie benennt, WAS fehlt. „Export not found" waere die Sorte Warnung, nach
@@ -594,6 +600,34 @@ def pruefe(verzeichnis: Path | str, *, heute: str | None = None) -> Bereitschaft
 
     juengster = max(_tag_der_datei(p) for p in eintraege)
     heute = heute or datetime.now().strftime("%Y%m%d")  # noqa: DTZ005 - Ortstag
+    # T1-416 — eine ruhige Woche ist kein abgeschalteter Export.
+    #
+    # Owner-Befund 2026-11-16: einige Tage nicht gehandelt, Export an, letzte
+    # Datei korrekt vom 10.11. Hier stand trotzdem „stale", weil nur das Alter
+    # zaehlte. Die TWS schreibt aber nur, wenn etwas gefuellt wurde — derselbe
+    # Gedanke wie beim leeren Ordner oben (T1-206).
+    #
+    # `fuellungstage` sind die Tage der Ausfuehrungen, die die Bridge aus der
+    # laufenden TWS-Sitzung kennt. Liegt keiner nach der neuesten Datei, gibt
+    # es nichts, was die TWS haette schreiben muessen. `None` heisst „nicht
+    # bekannt" (`--check-reports` laeuft ohne TWS): dann bleibt die Altersregel.
+    if fuellungstage is not None:
+        spaeter = sorted(t for t in fuellungstage if t > juengster)
+        if spaeter:
+            return Bereitschaft(
+                "stale",
+                f"TWS trade reports: something filled on {spaeter[-1]}, but the "
+                f"newest file in {basis} is from {juengster}. The periodic "
+                f"export is off or writes to another folder. Fills that happen "
+                f"while the Bridge is off cannot be recovered from an archive "
+                f"that is not being written.",
+            )
+        return Bereitschaft(
+            "ok",
+            f"TWS trade reports: reading {basis}. The newest file is from "
+            f"{juengster}; nothing has filled since then, so TWS had nothing "
+            f"new to write.",
+        )
     if juengster < _tage_zurueck(heute, 4):
         return Bereitschaft(
             "stale",
