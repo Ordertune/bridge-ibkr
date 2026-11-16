@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .masking import mask_account
+
 #: Grund, mit dem ein Auftrag abgewiesen wird, dessen Zielkonto nicht das
 #: aktuelle Handelskonto ist (AC-19i). Die Plattform kennt ihn als `other`.
 ACCOUNT_MISMATCH = "account_mismatch"
@@ -52,32 +54,34 @@ def waehle_handelskonto(konten: list[str], vorgabe: str | None) -> str | None:
     return konten[0] if len(konten) == 1 else None
 
 
-def pruefe_zielkonto(ziel: str | None, konto: str | None) -> str | None:
-    """`None`, wenn der Auftrag hinaus darf, sonst der Ablehnungstext.
+#: Ergebnis von `pruefe_zielkonto`: der Auftrag bleibt liegen (Konto noch
+#: unbekannt, z. B. direkt nach dem Start vor dem ersten Herzschlag).
+ZIEL_WARTEN = "warten"
+#: Ergebnis von `pruefe_zielkonto`: der Auftrag wurde fuer ein anderes Konto
+#: gerechnet und wird abgewiesen.
+ZIEL_ABWEISEN = "abweisen"
 
-    Ein Auftrag ohne Zielkonto stammt von einer Plattform vor T1-414 und laeuft
-    wie bisher. Traegt er eins, muss es das aktuelle Handelskonto sein: sonst
-    wurde seine Menge gegen das Kapital eines anderen Kontos gerechnet.
+
+def pruefe_zielkonto(ziel: str | None, konto: str | None) -> tuple[str | None, str]:
+    """`(None, "")`, wenn der Auftrag hinaus darf; sonst Urteil und Text.
+
+    - Ohne Zielkonto stammt der Auftrag von einer Plattform vor T1-414 und
+      laeuft wie bisher.
+    - Ist das Handelskonto (noch) unbekannt, bleibt er liegen: nach einem
+      Neustart kennt die Bridge ihr Konto erst mit dem ersten Herzschlag, und
+      eine endgueltige Ablehnung wuerde eine gueltige Freigabe vernichten.
+      Laeuft er dabei ab, verfaellt er wie jeder andere.
+    - Steht ein anderes Konto fest, wurde seine Menge gegen fremdes Kapital
+      gerechnet: abweisen.
     """
-    if ziel is None:
-        return None
+    if ziel is None or ziel == konto:
+        return None, ""
     if konto is None:
-        return (
-            f"Order was sized for account {maskiere(ziel)}, but this bridge has "
-            "no trading account. Not sent."
+        return ZIEL_WARTEN, (
+            f"Order was sized for account {mask_account(ziel)}; the trading "
+            "account of this bridge is not known yet. Holding it."
         )
-    if ziel != konto:
-        return (
-            f"Order was sized for account {maskiere(ziel)}, but the bridge now "
-            f"trades in {maskiere(konto)}. Not sent."
-        )
-    return None
-
-
-def maskiere(konto: str) -> str:
-    """Praefix, Auslassung, letzte vier Zeichen — wie die Plattform."""
-    i = 0
-    while i < len(konto) and konto[i].isalpha():
-        i += 1
-    praefix, rest = konto[:i], konto[i:]
-    return f"{praefix}…{rest[-4:]}" if len(rest) > 4 else f"{praefix}…"
+    return ZIEL_ABWEISEN, (
+        f"Order was sized for account {mask_account(ziel)}, but the bridge now "
+        f"trades in {mask_account(konto)}. Not sent."
+    )

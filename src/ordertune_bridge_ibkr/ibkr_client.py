@@ -14,7 +14,8 @@ from ib_insync import IB, AccountValue, Contract, Order, PortfolioItem
 
 from .account_fx import PLATTFORM_WAEHRUNG, FxErgebnis, loese_kurs_auf
 from .order_vocabulary import record_cancel_reason
-from .trading_account import maskiere, waehle_handelskonto
+from .masking import mask_account
+from .trading_account import waehle_handelskonto
 from .write_access import (
     CONFIRMED as READ_ONLY_CONFIRMED,
     SUSPECTED as READ_ONLY_SUSPECTED,
@@ -248,6 +249,7 @@ class IbkrClient:
         # T1-414: das von der Plattform festgelegte Handelskonto. `None`
         # heisst „keine Vorgabe"; dann gilt die alte Regel (genau ein Konto).
         self._vorgabe_konto: str | None = None
+        self._vorgabe_gewarnt: str | None = None
         # T1-152: keine Abfrage an TWS darf mehr unbegrenzt warten. Begruendung
         # samt Vorfall an der Konstanten.
         self._ib.RequestTimeout = REQUEST_TIMEOUT_S
@@ -526,6 +528,32 @@ class IbkrClient:
     def is_connected(self) -> bool:
         return self._ib.isConnected()
 
+    def _account_values(self, account: str | None) -> list[AccountValue]:
+        """T1-414 — die Kontowerte, nur des Handelskontos.
+
+        Bis hierher lasen `account_snapshot` und `get_live_equity` ueber ALLE
+        Konten des Logins, und der Depotwert war der des zuletzt gelesenen
+        (Fall 2026-11-16: 1 Mio. statt rund 50.000). Ohne Handelskonto bleibt
+        es wie bisher; die Plattform sperrt dann Einstiege, weil sie kein Konto
+        gemeldet bekommt.
+
+        Leeres Ergebnis bei stehender Verbindung: neu anfragen statt bis zur
+        naechsten Wiederverbindung `null` zu melden (siehe
+        `_confirm_account_subscription`). Geprueft wird NACH dem Filter, sonst
+        verdeckten die Werte anderer Konten ein leeres Handelskonto.
+        """
+
+        def lesen() -> list[AccountValue]:
+            werte: list[AccountValue] = self._ib.accountValues()
+            if account is None:
+                return werte
+            return [v for v in werte if getattr(v, "account", "") == account]
+
+        werte = lesen()
+        if not werte and self._resubscribe_account_values():
+            werte = lesen()
+        return werte
+
     def account_snapshot(self) -> AccountSnapshot:
         """Read cash, equity, currency and positions from IBKR.
 
@@ -539,20 +567,8 @@ class IbkrClient:
         Segment und Depotwert aus einem anderen zu mischen ergaebe ein Paar,
         das zueinander nicht passt, und niemand saehe es an den Zahlen.
         """
-        acct_values: list[AccountValue] = self._ib.accountValues()
-        # Leeres Konto-Abo bei stehender Verbindung: neu anfragen statt bis zur
-        # naechsten Wiederverbindung `null` zu melden. Siehe
-        # `_confirm_account_subscription`.
-        if not acct_values and self._resubscribe_account_values():
-            acct_values = self._ib.accountValues()
-        # T1-414: nur die Werte des Handelskontos. Bis hierher lief die
-        # Schleife unten ueber ALLE Konten des Logins, und der Depotwert war der
-        # des zuletzt gelesenen (Fall 2026-11-16: 1 Mio. statt rund 50.000).
-        # Ohne Handelskonto bleibt es wie bisher; die Plattform sperrt dann
-        # Einstiege, weil sie kein Konto gemeldet bekommt.
         account = self._trading_account()
-        if account is not None:
-            acct_values = [v for v in acct_values if getattr(v, "account", "") == account]
+        acct_values = self._account_values(account)
         currency = resolve_account_currency(acct_values)
 
         cash = 0.0
@@ -628,6 +644,13 @@ class IbkrClient:
         Werte; IBKR meldet bis dahin `nan`, und `_opt` laesst das weg.
         """
         if self._pnl_account != account:
+            # T1-414: das Handelskonto kann im laufenden Betrieb wechseln. Das
+            # alte Abo wuerde sonst bis zum Sitzungsende weiterlaufen.
+            if self._pnl_account is not None:
+                try:
+                    self._ib.cancelPnL(self._pnl_account)
+                except Exception as exc:  # noqa: BLE001 - Aufraeumen darf nicht kippen
+                    log.debug("cancelPnL failed: %s", exc)
             try:
                 self._ib.reqPnL(account)
                 self._pnl_account = account
@@ -843,7 +866,7 @@ class IbkrClient:
         if konto != self._vorgabe_konto:
             log.info(
                 "Trading account from Ordertune: %s",
-                maskiere(konto) if konto else "none",
+                mask_account(konto) if konto else "none",
             )
         self._vorgabe_konto = konto
 
@@ -862,6 +885,15 @@ class IbkrClient:
         except Exception:  # pragma: no cover - defensiv
             return None
         # T1-414: die Vorgabe der Plattform, wenn sie im Login steht.
+        fehlt = bool(self._vorgabe_konto) and self._vorgabe_konto not in accounts
+        if fehlt and self._vorgabe_gewarnt != self._vorgabe_konto:
+            log.warning(
+                "Ordertune trades in account %s, but this IBKR login does "
+                "not include it. Log in to that account in TWS, or choose "
+                "another one in Ordertune under Settings › Broker.",
+                mask_account(self._vorgabe_konto),
+            )
+            self._vorgabe_gewarnt = self._vorgabe_konto
         return waehle_handelskonto(accounts, self._vorgabe_konto)
 
     def _log_account_currency(
@@ -951,7 +983,7 @@ class IbkrClient:
         laesst die Plattform ohnehin nichts durch, und die alte Begruendung
         gilt unveraendert.
         """
-        acct_values: list[AccountValue] = self._ib.accountValues()
+        acct_values = self._account_values(self._trading_account())
         waehrung = resolve_account_currency(acct_values)
         if waehrung is None:
             return 0.0

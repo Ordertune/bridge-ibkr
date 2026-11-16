@@ -65,7 +65,13 @@ from .pair_console import pair_requested, run_pairing
 from .probe import probe_requested, run_probe
 from .submitted_store import SubmittedStore
 from .trade_report_store import TradeReportStore
-from .trading_account import ACCOUNT_MISMATCH, pruefe_zielkonto
+from .masking import mask_account
+from .trading_account import (
+    ACCOUNT_MISMATCH,
+    ZIEL_ABWEISEN,
+    ZIEL_WARTEN,
+    pruefe_zielkonto,
+)
 from .order_reconcile import (
     als_utc,
     fills_by_dispatch,
@@ -418,6 +424,23 @@ def _handle_pending(
             continue
 
         intent = order.order_intent
+        # ── T1-414: Zielkonto ─────────────────────────────────────────
+        #
+        # Vor dem Sizing-Abgleich: wurde die Menge fuer ein anderes Konto
+        # gerechnet, ist das der Grund, nicht eine Mengenabweichung.
+        handelskonto = ibkr.trading_account()
+        urteil, text = pruefe_zielkonto(intent.get("targetAccountId"), handelskonto)
+        if urteil == ZIEL_WARTEN:
+            log.warning("Dispatch %s: %s", order.dispatch_id, text)
+            continue
+        if urteil == ZIEL_ABWEISEN:
+            log.warning("Dispatch %s: %s", order.dispatch_id, text)
+            # Die angehaengten Beine gingen nie hinaus; ohne eigene Meldung
+            # blieben sie auf `submitting` und ihr Lot ohne Ausstieg (T1-136).
+            for dispatch_id in [order.dispatch_id, *(k["dispatchId"] for k in _attached_exits(intent))]:
+                _report_rejected(api, dispatch_id, f"{ACCOUNT_MISMATCH}: {text}")
+            continue
+
         # ── Sizing-Recompute-Check ────────────────────────────────────
         sizing_conf = intent.get("bridgeSizingConfig")
         if sizing_conf and live_equity > 0:
@@ -454,26 +477,6 @@ def _handle_pending(
                 except Exception as exc:
                     log.error("result_order failed for %s: %s", order.dispatch_id, exc)
                 continue
-
-        # ── T1-414: Zielkonto ─────────────────────────────────────────
-        #
-        # Die Menge wurde gegen das Kapital des Zielkontos gerechnet. Ist das
-        # nicht (mehr) unser Handelskonto, geht nichts hinaus.
-        handelskonto = ibkr.trading_account()
-        abweisung = pruefe_zielkonto(intent.get("targetAccountId"), handelskonto)
-        if abweisung is not None:
-            log.warning("Dispatch %s: %s", order.dispatch_id, abweisung)
-            try:
-                api.result_order(
-                    order.dispatch_id,
-                    status="rejected",
-                    reason_code="other",
-                    error_message=f"{ACCOUNT_MISMATCH}: {abweisung}",
-                    broker_confirmed_end=True,
-                )
-            except Exception as exc:  # noqa: BLE001 - Meldung darf den Abruf nicht beenden
-                log.error("result_order failed for %s: %s", order.dispatch_id, exc)
-            continue
 
         # ── Submit via IBKR ───────────────────────────────────────────
         #
@@ -2686,25 +2689,6 @@ def run_setup_cockpit(
     finally:
         server.stop()
         runfile.remove(0)
-
-
-def mask_account(account: str | None) -> str | None:
-    """T1-103 O — die Kontokennung, so weit gekuerzt, dass sie noch unterscheidet.
-
-    Der Zweck ist, ein Live- von einem Papierkonto zu unterscheiden, nicht die
-    Nummer auszuweisen. IBKR-Papierkonten beginnen mit `D`, Livekonten mit `U`
-    — der erste Buchstabe und die letzten beiden Stellen reichen dafuer, und
-    mehr gehoert nicht in eine Anzeige, die ueber HTTP ausgeliefert wird.
-
-    Die Zusage aus T1-97 lautet, dass die vollstaendige Nummer den Prozess nur
-    maskiert verlaesst. Das Cockpit ist ein Prozessausgang.
-    """
-    if not account:
-        return None
-    kennung = str(account).strip()
-    if len(kennung) <= 3:
-        return kennung
-    return f"{kennung[0]}***{kennung[-2:]}"
 
 
 def report_heartbeat(

@@ -15,14 +15,18 @@ TWS-Standardkonto (rund 50.000 EUR). Diese Zusicherungen halten fest:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ordertune_bridge_ibkr import main as m
 from ordertune_bridge_ibkr.external_executions import external_execution_bodies
 from ordertune_bridge_ibkr.ibkr_client import IbkrClient
+from ordertune_bridge_ibkr.submitted_store import SubmittedStore
 from ordertune_bridge_ibkr.trading_account import (
+    ZIEL_ABWEISEN,
+    ZIEL_WARTEN,
     antwort_aus_json,
-    maskiere,
     pruefe_zielkonto,
     waehle_handelskonto,
 )
@@ -60,16 +64,15 @@ def test_heartbeat_antwort_unterscheidet_schweigen_und_null() -> None:
 
 
 def test_zielkonto() -> None:
-    assert pruefe_zielkonto(None, None) is None  # Plattform vor T1-414
-    assert pruefe_zielkonto("DUR349111", "DUR349111") is None
-    assert pruefe_zielkonto("DUR349111", "U7712482") is not None
-    assert pruefe_zielkonto("DUR349111", None) is not None
+    assert pruefe_zielkonto(None, None)[0] is None  # Plattform vor T1-414
+    assert pruefe_zielkonto("DUR349111", "DUR349111")[0] is None
+    assert pruefe_zielkonto("DUR349111", "U7712482")[0] == ZIEL_ABWEISEN
+    assert pruefe_zielkonto("DUR349111", None)[0] == ZIEL_WARTEN
 
 
 def test_ablehnungstext_maskiert() -> None:
-    text = pruefe_zielkonto("DUR349111", "U7712482") or ""
+    _, text = pruefe_zielkonto("DUR349111", "U7712482")
     assert "DUR349111" not in text and "U7712482" not in text
-    assert maskiere("DUR349111") == "DUR…9111"
 
 
 # ── IbkrClient liest nur das Handelskonto ────────────────────────────────────
@@ -107,6 +110,7 @@ def _client(fake: _FakeIB) -> IbkrClient:
     c = IbkrClient.__new__(IbkrClient)
     c._ib = fake  # type: ignore[assignment]
     c._vorgabe_konto = None
+    c._vorgabe_gewarnt = None
     return c
 
 
@@ -173,3 +177,121 @@ def test_fremde_ausfuehrungen_nur_des_handelskontos() -> None:
     nur = external_execution_bodies(fills, {}, set(), nur_konto="DUR349111")
     assert len(alle) == 2, "ohne Handelskonto wie bisher alle Konten"
     assert [b["brokerAccountId"] for b in nur] == ["DUR349111"]
+
+
+# ── Sendeweg ─────────────────────────────────────────────────────────────────
+
+
+class _Ibkr:
+    def __init__(self, konto: str | None) -> None:
+        self.konto = konto
+        self.platziert: list[Any] = []
+
+    def trading_account(self) -> str | None:
+        return self.konto
+
+    def get_live_equity(self) -> float:
+        return 0.0
+
+    def place_order(self, contract: Any, order: Any) -> Any:
+        self.platziert.append(order)
+        return SimpleNamespace(
+            order=SimpleNamespace(orderId=4711 + len(self.platziert)),
+            orderStatus=SimpleNamespace(status="PreSubmitted", filled=0),
+            log=[],
+        )
+
+
+def _api(intent: dict[str, Any]):
+    results: list[dict[str, Any]] = []
+
+    class Api:
+        def get_pending(self):
+            return SimpleNamespace(
+                server_time="",
+                pending=[
+                    SimpleNamespace(
+                        dispatch_id="disp-1",
+                        order_intent=intent,
+                        expires_at=None,
+                        cancel_requested=False,
+                    )
+                ],
+                cancelling=[],
+            )
+
+        def ack_order(self, dispatch_id, *, broker_order_id, submitted_at):
+            pass
+
+        def result_order(self, dispatch_id, **kwargs):
+            results.append({"dispatchId": dispatch_id, **kwargs})
+
+    return Api(), results
+
+
+_INTENT = {
+    "symbol": "NBIS",
+    "side": "buy",
+    "qty": 1,
+    "orderType": "day_limit",
+    "lmtPrice": 98.5,
+}
+
+
+def test_order_traegt_das_handelskonto(tmp_path: Any) -> None:
+    api, results = _api({**_INTENT, "targetAccountId": "DUR349111"})
+    ibkr = _Ibkr("DUR349111")
+    m._handle_pending(api, ibkr, {}, SubmittedStore(tmp_path))
+    assert len(ibkr.platziert) == 1
+    assert ibkr.platziert[0].account == "DUR349111"
+    assert results == []
+
+
+def test_order_fuer_anderes_konto_wird_abgewiesen_samt_kindern(tmp_path: Any) -> None:
+    intent = {
+        **_INTENT,
+        "targetAccountId": "DUR349111",
+        "attachedExits": [
+            {
+                "dispatchId": "kind-1",
+                "side": "sell",
+                "orderType": "stop",
+                "qty": 1,
+                "lmtPrice": 90.0,
+            },
+        ],
+    }
+    api, results = _api(intent)
+    ibkr = _Ibkr("U7712482")
+    m._handle_pending(api, ibkr, {}, SubmittedStore(tmp_path))
+    assert ibkr.platziert == []
+    assert {r["dispatchId"] for r in results} == {"disp-1", "kind-1"}
+    assert all(r["status"] == "rejected" for r in results)
+    assert all("account_mismatch" in r["error_message"] for r in results)
+
+
+def test_unbekanntes_handelskonto_haelt_den_auftrag(tmp_path: Any) -> None:
+    api, results = _api({**_INTENT, "targetAccountId": "DUR349111"})
+    ibkr = _Ibkr(None)
+    m._handle_pending(api, ibkr, {}, SubmittedStore(tmp_path))
+    assert ibkr.platziert == []
+    assert results == [], "keine endgueltige Ablehnung, nur liegen lassen"
+
+
+def test_alte_plattform_ohne_zielkonto_wie_bisher(tmp_path: Any) -> None:
+    api, _results = _api(dict(_INTENT))
+    ibkr = _Ibkr(None)
+    m._handle_pending(api, ibkr, {}, SubmittedStore(tmp_path))
+    assert len(ibkr.platziert) == 1
+    assert ibkr.platziert[0].account == "", "ohne Handelskonto kein order.account (T1-306)"
+
+
+def test_heartbeat_antwort_setzt_das_handelskonto() -> None:
+    gesetzt: list[str | None] = []
+    ibkr = SimpleNamespace(set_trading_account=gesetzt.append)
+    for antwort in (antwort_aus_json({}), antwort_aus_json({"tradingAccountId": "DUR349111"})):
+        if antwort.konto_gemeldet:
+            ibkr.set_trading_account(antwort.konto)
+    assert gesetzt == ["DUR349111"]
+    src = Path(m.__file__).read_text(encoding="utf-8")
+    assert "if antwort.konto_gemeldet:\n            ibkr.set_trading_account(antwort.konto)" in src
