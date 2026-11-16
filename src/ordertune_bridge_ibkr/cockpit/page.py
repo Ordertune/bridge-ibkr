@@ -232,6 +232,10 @@ td.state.done { color: var(--success); }
 td.state.gone { color: var(--danger); }
 td.reason { white-space: normal; color: var(--danger); font-size: 13px;
             max-width: 34rem; }
+/* T1-416: Zusatzzeilen einer Auftragszeile — leise, kein Fehlerrot. */
+.sub { color: var(--fg-3); font-size: 13px; white-space: normal; }
+div.why { color: var(--danger); font-size: 13px; white-space: normal;
+          max-width: 34rem; }
 
 /* ── Knoepfe: genau EINER in Lime je Ansicht ───────────────────────── */
 button.action { font: inherit; font-size: 14px; font-weight: 600;
@@ -607,6 +611,12 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, c =>
     ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 }
+// T1-416: Zeitpunkt eines Auftrags in der Ortszeit dieses Rechners.
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("en-GB",
+    {day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit"});
+}
 
 // Der Heartbeat geht alle 60 s raus. Bleibt er 90 s aus, stimmt etwas nicht --
 // und diese Angabe ist dann die wichtigste auf der Seite. Dieselbe Frist, aus
@@ -694,14 +704,26 @@ function renderOrders(s) {
   if (s.orders.length === 0) {
     box.className = "scroll"; box.textContent = "No orders of ours at IBKR right now."; return;
   }
+  // T1-416: je Auftrag Strategie, Zweck, Typ, Preis, Bedingungen, Fuellung
+  // und Zeitpunkt. Die Angaben setzt die Bridge zusammen (order_details.py);
+  // hier wird nur angeordnet.
   box.className = "scroll";
-  box.innerHTML = "<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Status</th>"
-    + "<th>Reason</th></tr>" + s.orders.map(o =>
-      "<tr><td>" + esc(o.symbol) + "</td><td>" + esc(o.action) + "</td><td>"
-      + esc(o.qty ?? "-") + "</td><td class='state "
+  box.innerHTML = "<table><tr><th>Strategy</th><th>Order</th><th>Price</th>"
+    + "<th>Conditions</th><th>Status</th><th>Filled</th></tr>"
+    + s.orders.map(o =>
+      "<tr><td>" + esc(o.strategy ?? "-")
+      + (o.purpose ? "<div class='sub'>" + esc(o.purpose) + "</div>" : "")
+      + "</td><td>" + esc(o.symbol) + " " + esc(o.action) + " " + esc(o.qty ?? "-")
+      + "<div class='sub'>" + esc(o.orderType ?? "") + "</div></td><td>"
+      + esc(o.price ?? "-") + "</td><td class='sub'>"
+      + (o.conditions || []).map(esc).join("<br>")
+      + "</td><td class='state "
       + (o.status === "Filled" ? "done" : o.status === "Rejected" ? "gone" : "")
-      + "'>" + esc(o.status) + "</td><td class='reason'>"
-      + esc(o.reason ?? "") + "</td></tr>").join("") + "</table>";
+      + "'>" + esc(o.status)
+      + (o.reason ? "<div class='why'>" + esc(o.reason) + "</div>" : "")
+      + "</td><td>" + esc(o.filled ?? "-")
+      + (o.placedAt ? "<div class='sub'>sent " + esc(fmtTime(o.placedAt)) + "</div>" : "")
+      + "</td></tr>").join("") + "</table>";
 }
 
 function renderPositions(s) {

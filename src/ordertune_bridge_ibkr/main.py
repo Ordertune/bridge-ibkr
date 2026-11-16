@@ -43,14 +43,14 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from . import __version__, console, failures, order_vocabulary, port_probe
 from .api_client import OrdertuneApiClient
-from . import paths, trade_reports
+from . import order_details, paths, trade_reports
 from .capabilities import IBKR_CAPABILITIES
 from .config import load_config
 from .fingerprint import compute_fingerprint
@@ -485,6 +485,8 @@ def _handle_pending(
             ib_order.orderRef = build_order_ref(
                 order.dispatch_id, intent.get("orderRefLabel")
             )
+            # T1-416: Strategiename und Zweck fuer die Auftragsliste im Cockpit.
+            order_details.remember(order.dispatch_id, intent)
 
             kind_orders: list[Order] = []
             for kind in kinder:
@@ -494,6 +496,10 @@ def _handle_pending(
                 ko = translate_intent({**kind, "symbol": intent["symbol"]})
                 ko.orderRef = build_order_ref(
                     kind["dispatchId"], kind.get("orderRefLabel")
+                )
+                order_details.remember(
+                    kind["dispatchId"],
+                    {"intent": "exit", "strategyName": intent.get("strategyName")},
                 )
                 kind_orders.append(ko)
             if kind_orders:
@@ -1024,18 +1030,63 @@ def _pruefe_zeitzone(live: list[Any], archiv: list[Any]) -> float | None:
     return groesster
 
 
-def _pruefe_export(export_dir: str | None, cockpit: Any | None = None) -> Any:
+#: T1-416 — so lange darf die TWS nach einer Fuellung brauchen, bis sie im
+#: Export steht. Eingestellt ist ein Intervall von einer Minute; die Reserve
+#: verhindert, dass jede frische Fuellung kurz als „Export aus" erscheint.
+EXPORT_NACHLAUF = timedelta(minutes=15)
+
+
+def fuellungstage_aus(
+    fills: Iterable[Any], *, jetzt: datetime | None = None
+) -> list[str]:
+    """T1-416 — die Ortstage (YYYYMMDD) der Ausfuehrungen, die TWS gerade kennt.
+
+    Ortszeit wie bei `trade_reports._tag_der_datei`: der Tag einer Datei ist
+    der Tag, an dem der Rechner sie geschrieben hat. Ausfuehrungen ohne Zeit
+    zaehlen nicht, ebenso wenig solche, die juenger sind als `EXPORT_NACHLAUF`.
+    """
+    grenze = (jetzt or datetime.now(timezone.utc)) - EXPORT_NACHLAUF
+    tage: set[str] = set()
+    for fill in fills:
+        zeit = getattr(fill, "time", None)
+        if isinstance(zeit, datetime) and zeit.tzinfo is not None and zeit <= grenze:
+            tage.add(zeit.astimezone().strftime("%Y%m%d"))
+    return sorted(tage)
+
+
+#: T1-416 — der zuletzt protokollierte Befund, damit die Pruefung im Herzschlag
+#: laufen kann, ohne jede Minute dieselbe Zeile zu schreiben.
+_LETZTER_EXPORT_BEFUND: str | None = None
+
+
+def _pruefe_export(
+    export_dir: str | None, cockpit: Any | None = None, ibkr: Any | None = None
+) -> Any:
     """T1-207 — taugt das Archiv der TWS als Quelle, und sagt es laut.
 
-    Laeuft beim Start und bei jedem Wiederverbinden. Der Befund geht ins
-    Protokoll UND in den Zustandsblock: ein Kunde, der die Bridge als Fenster
-    offen hat, soll nicht erst im Protokoll suchen muessen.
+    Laeuft beim Start, bei jedem Wiederverbinden und (T1-416) in jedem
+    Herzschlag. Der Befund geht ins Protokoll UND in den Zustandsblock: ein
+    Kunde, der die Bridge als Fenster offen hat, soll nicht erst im Protokoll
+    suchen muessen. Protokolliert wird nur, wenn sich der Befund aendert.
+
+    T1-416: mit `ibkr` zaehlt, ob seit der neuesten Datei etwas gefuellt hat.
+    Ohne Handel schreibt die TWS keine Datei, und eine ruhige Woche ist kein
+    abgeschalteter Export.
     """
-    bereit = trade_reports.pruefe(export_dir or "")
-    if bereit.ok:
-        log.info("%s", bereit.text)
-    else:
-        log.warning("%s", bereit.text)
+    global _LETZTER_EXPORT_BEFUND
+    fuellungstage: list[str] | None = None
+    if ibkr is not None:
+        try:
+            fuellungstage = fuellungstage_aus(ibkr.fills())
+        except Exception as exc:  # pragma: no cover - dann die Altersregel
+            log.debug("Could not read fills for the export check: %s", exc)
+    bereit = trade_reports.pruefe(export_dir or "", fuellungstage=fuellungstage)
+    if bereit.text != _LETZTER_EXPORT_BEFUND:
+        _LETZTER_EXPORT_BEFUND = bereit.text
+        if bereit.ok:
+            log.info("%s", bereit.text)
+        else:
+            log.warning("%s", bereit.text)
     if cockpit is not None:
         try:
             cockpit.store.update(
@@ -1260,6 +1311,27 @@ def miss_den_export(
     return _archiv_fuellungen(export_dir, report_store, konto)
 
 
+def mit_eigenem_protokoll(completed_by_ref: dict[str, Any]) -> dict[str, Any]:
+    """T1-416 — ein abgeschlossener Auftrag mit dem Protokoll dieser Sitzung.
+
+    `reqCompletedOrders` liefert Auftraege ohne Protokoll; eine Ablehnung (201)
+    ist daran nicht zu erkennen, und der Abgleich meldete sie als Storno ohne
+    Grund (Welzel, 2026-11-12, „Die Boerse ist geschlossen"). Hat diese Sitzung
+    den Auftrag selbst gestellt, traegt ihr eigener Gegenstand das Protokoll —
+    dann gilt er. Ersetzt wird nur, was IBKR bereits als abgeschlossen fuehrt,
+    und nur, wenn das eigene Protokoll eine Ablehnung belegt. Sonst koennte ein
+    veralteter eigener Zustand (etwa `Submitted`) eine Fuellung verdecken.
+    """
+    with _DISPATCH_MAP_LOCK:
+        eigene = dict(_TRADES_BY_DISPATCH)
+    ergebnis = dict(completed_by_ref)
+    for dispatch_id in completed_by_ref:
+        lebend = eigene.get(dispatch_id)
+        if lebend is not None and rejection_reason(lebend) is not None:
+            ergebnis[dispatch_id] = lebend
+    return ergebnis
+
+
 def _handle_order_reconcile(
     api: OrdertuneApiClient,
     ibkr: IbkrClient,
@@ -1328,6 +1400,7 @@ def _handle_order_reconcile(
             # ungeklaert gemeldet statt als abgelehnt. Das ist die schwaechere,
             # aber nie die falsche Aussage.
             log.warning("Could not query completed orders: %s", exc)
+    completed_by_ref = mit_eigenem_protokoll(completed_by_ref)
 
     # T1-105: die Ausfuehrungsberichte des Tages. Sie tragen die Zahlen, die
     # der abgeschlossene Auftrag nicht traegt — gemessen am 2026-08-19 an drei
@@ -2532,6 +2605,9 @@ def orders_for_cockpit() -> list[dict[str, Any]]:
                     "rejected" if grund else _STATUS_MAP.get(roh or "", roh)
                 ),
                 "reason": grund,
+                # T1-416: wozu der Auftrag gehoert, zu welchem Preis und unter
+                # welcher Bedingung er steht.
+                **order_details.describe(dispatch_id, trade),
             }
         )
     zeilen.sort(key=lambda z: (str(z["symbol"]), str(z["dispatchId"])))
@@ -3367,7 +3443,7 @@ def _main() -> int:
     # T1-207: den Befund aus dem Start noch einmal in den Zustandsblock, jetzt
     # wo es einen gibt. Ohne das stuende die erste Sitzung auf „unknown", und
     # der Kunde saehe die Warnung nur im Protokoll.
-    _pruefe_export(config.tws_export_dir, cockpit)
+    _pruefe_export(config.tws_export_dir, cockpit, ibkr)
 
     # T1-177 D: wenn der Zugang entzogen wurde, haelt sich die Bridge selbst
     # an — und der Grund ueberlebt die Schleife, damit er danach im gerahmten
@@ -3418,6 +3494,9 @@ def _main() -> int:
                     stop.set()
                     return
             _handle_external_executions(api, ibkr)
+            # T1-416: der Export-Befund haengt an den Fuellungen des Tages und
+            # wird deshalb mit jedem Takt neu gestellt, nicht nur beim Start.
+            _pruefe_export(config.tws_export_dir, cockpit, ibkr)
             # T1-98: der Rueckweg. Laeuft NACH dem Lebenszeichen und nach der
             # Fremdsicht — er ist die langsamste der drei Aufgaben und die
             # einzige, deren Ausbleiben nichts kaputt macht.
@@ -3458,7 +3537,7 @@ def _main() -> int:
             # T1-207: eine TWS, die zwischendurch neu gestartet wurde, kann den
             # Export verloren haben — die Einstellung haengt am Profil, nicht an
             # der Bridge. Also bei jeder neuen Sitzung erneut nachsehen.
-            _pruefe_export(config.tws_export_dir, cockpit)
+            _pruefe_export(config.tws_export_dir, cockpit, ibkr)
             report_reconnect(cockpit, session_connected_at)
 
         # T1-152d: der Rueckruf fuer Auftragszustaende wird hier bewusst NICHT
