@@ -73,7 +73,9 @@ class FakeIB:
             return [p for p in self._positions if p.account == account]
         return self._positions
 
-    def portfolio(self) -> list[FakePortfolioItem]:
+    def portfolio(self, account: str = "") -> list[FakePortfolioItem]:
+        # Wie ib_insync: mit Konto nur dessen Zeilen. Die Fake-Zeilen tragen
+        # kein Konto und gelten fuer das eine Konto dieses Logins.
         if self.portfolio_raises:
             raise RuntimeError("account updates request timed out")
         return self._portfolio

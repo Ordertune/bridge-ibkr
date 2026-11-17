@@ -256,6 +256,8 @@ class IbkrClient:
         # heisst „keine Vorgabe"; dann gilt die alte Regel (genau ein Konto).
         self._vorgabe_konto: str | None = None
         self._vorgabe_gewarnt: str | None = None
+        # T1-421: fuer welches Konto `reqAccountUpdates` schon angefragt wurde.
+        self._portfolio_abo_konto: str | None = None
         # T1-152: keine Abfrage an TWS darf mehr unbegrenzt warten. Begruendung
         # samt Vorfall an der Konstanten.
         self._ib.RequestTimeout = REQUEST_TIMEOUT_S
@@ -335,6 +337,7 @@ class IbkrClient:
         self._validation_errors.clear()
         self._positions_known = False
         self._account_resubscribed_at = None
+        self._portfolio_abo_konto = None
         self._client_id_refused = None
         self._pnl_account = None
         try:
@@ -808,7 +811,7 @@ class IbkrClient:
         # Optionen und mehreren Boersen ist das Symbol nicht eindeutig.
         enrichment: dict[int, PortfolioItem] = {}
         try:
-            for item in self._ib.portfolio():
+            for item in self._portfolio_items(account):
                 enrichment[item.contract.conId] = item
         except Exception as exc:  # pragma: no cover - defensiv
             log.debug("portfolio() unavailable for enrichment: %s", exc)
@@ -849,6 +852,40 @@ class IbkrClient:
                 }
             )
         return rows
+
+    def _portfolio_items(self, account: str | None) -> list[PortfolioItem]:
+        """T1-421 — Portfolio-Zeilen nur des Handelskontos.
+
+        ib_insync abonniert `reqAccountUpdates` beim Verbinden nur, wenn der
+        Login genau ein Konto hat. Bei mehreren laeuft allein der Multi-Kanal,
+        und der liefert Kontowerte, aber keine Portfolio-Zeilen: Kurs und
+        Marktwert fehlten (Fall 2026-11-17, sechs Konten). Steht das
+        Handelskonto fest, wird es deshalb einmal je Sitzung und Konto selbst
+        abonniert. Ohne Konto bleibt es wie bisher.
+
+        Gelesen wird nur das Handelskonto: haelt ein anderes Konto dasselbe
+        Papier, gewaenne sonst dessen Zeile ueber die Kontraktkennung.
+        """
+        if account is None:
+            return list(self._ib.portfolio())
+        items = list(self._ib.portfolio(account))
+        if items or self._portfolio_abo_konto == account:
+            return items
+        self._portfolio_abo_konto = account
+        try:
+            self._ib.run(
+                self._ib.reqAccountUpdatesAsync(account),
+                timeout=ACCOUNT_VALUES_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 - Anreicherung darf die Positionen nicht kippen
+            log.warning(
+                "Asked TWS for prices and market values of account %s, but it "
+                "did not answer (%s: %s). Positions are reported without them.",
+                mask_account(account),
+                type(exc).__name__,
+                exc,
+            )
+        return list(self._ib.portfolio(account))
 
     def trading_account(self) -> str | None:
         """T1-119 — die Kennung des Depots, mit dem diese Sitzung verbunden ist.
